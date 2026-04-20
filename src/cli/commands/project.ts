@@ -8,6 +8,7 @@ import {
   getProject,
 } from "#/lib/workflow";
 import { shortId } from "#/lib/ids";
+import { normalizeWorkspacePath } from "#/lib/paths";
 import * as path from "path";
 
 export const initCommand = defineCommand({
@@ -39,8 +40,9 @@ export const initCommand = defineCommand({
   },
   run: async ({ args }) => {
     const db = await getDb();
-    const wsPath = path.resolve(args.path ?? process.cwd()).replace(/\\/g, "/");
-    const projectName = args.name ?? path.basename(wsPath);
+    const rawWsPath = path.resolve(args.path ?? process.cwd());
+    const wsPath = normalizeWorkspacePath(rawWsPath);
+    const projectName = args.name ?? path.basename(rawWsPath);
 
     // Check if workspace already exists at this exact path
     const existing = await resolveWorkspace(db, wsPath);

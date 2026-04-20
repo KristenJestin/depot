@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb } from "../helpers/db";
+import { resolveMigrationsFolder } from "../helpers/db";
 import type { Database } from "#/db/client";
 import {
   createProject,
@@ -35,6 +36,10 @@ beforeEach(async () => {
 // ── Projects ────────────────────────────────────────────────────────────────
 
 describe("projects", () => {
+  it("uses the standard Drizzle migrations folder", () => {
+    expect(resolveMigrationsFolder().replace(/\\/g, "/")).toMatch(/\/src\/db\/migrations$/);
+  });
+
   it("creates a project with default status active", async () => {
     const project = await createProject(db, { name: "my-app" });
     expect(project.name).toBe("my-app");
@@ -93,7 +98,24 @@ describe("workspaces", () => {
         projectId: project.id,
         path: "/home/user/my-app",
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/unique|constraint/i);
+  });
+
+  it("normalizes Windows workspace paths for matching", async () => {
+    if (process.platform !== "win32") {
+      return;
+    }
+
+    const project = await createProject(db, { name: "my-app" });
+    await addWorkspace(db, {
+      projectId: project.id,
+      path: "D:\\Users\\Example\\Depot",
+    });
+
+    const resolved = await resolveWorkspace(db, "d:/users/example/depot/src/index.ts");
+    expect(resolved).not.toBeNull();
+    expect(resolved!.projectId).toBe(project.id);
+    expect(resolved!.path).toBe("d:/users/example/depot");
   });
 
   it("resolves workspace from exact path", async () => {
@@ -194,7 +216,7 @@ describe("PRD lifecycle", () => {
       title: "Core Foundation",
     });
     await commitPrd(db, prd.id);
-    await expect(commitPrd(db, prd.id)).rejects.toThrow();
+    await expect(commitPrd(db, prd.id)).rejects.toThrow(/expected 'draft'/i);
   });
 
   it("activates a committed PRD", async () => {
@@ -216,7 +238,26 @@ describe("PRD lifecycle", () => {
       title: "Core Foundation",
     });
     // still draft
-    await expect(activatePrd(db, prd.id)).rejects.toThrow();
+    await expect(activatePrd(db, prd.id)).rejects.toThrow(/expected 'committed'/i);
+  });
+
+  it("rejects activating a second PRD in the same workspace", async () => {
+    const prd1 = await createPrd(db, {
+      projectId,
+      workspaceId,
+      title: "PRD A",
+    });
+    const prd2 = await createPrd(db, {
+      projectId,
+      workspaceId,
+      title: "PRD B",
+    });
+
+    await commitPrd(db, prd1.id);
+    await commitPrd(db, prd2.id);
+    await activatePrd(db, prd1.id);
+
+    await expect(activatePrd(db, prd2.id)).rejects.toThrow(/workspace already has active prd/i);
   });
 
   it("archives an in_progress PRD", async () => {
@@ -273,7 +314,7 @@ describe("PRD lifecycle", () => {
       workspaceId,
       title: "Core Foundation",
     });
-    await expect(amendPrd(db, prd.id, { title: "v2" })).rejects.toThrow();
+    await expect(amendPrd(db, prd.id, { title: "v2" })).rejects.toThrow(/expected 'committed' or 'in_progress'/i);
   });
 
   it("lists PRDs for a project", async () => {
@@ -399,7 +440,7 @@ describe("task lifecycle", () => {
         doneCriteria: "",
         effort: "s",
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/done_criteria/i);
   });
 
   it("starts a pending task", async () => {
@@ -424,7 +465,7 @@ describe("task lifecycle", () => {
       effort: "s",
     });
     await startTask(db, task.id);
-    await expect(startTask(db, task.id)).rejects.toThrow();
+    await expect(startTask(db, task.id)).rejects.toThrow(/expected 'pending'/i);
   });
 
   it("completes an in_progress task", async () => {
@@ -450,7 +491,7 @@ describe("task lifecycle", () => {
       effort: "s",
     });
     // still pending
-    await expect(completeTask(db, task.id)).rejects.toThrow();
+    await expect(completeTask(db, task.id)).rejects.toThrow(/expected 'in_progress'/i);
   });
 
   it("enforces dependency completion before task done", async () => {
@@ -522,7 +563,7 @@ describe("task lifecycle", () => {
       effort: "s",
     });
     await startTask(db, task.id);
-    await expect(blockTask(db, task.id, "")).rejects.toThrow();
+    await expect(blockTask(db, task.id, "")).rejects.toThrow(/block reason is required/i);
   });
 
   it("skips a pending task with a reason", async () => {
@@ -546,7 +587,7 @@ describe("task lifecycle", () => {
       doneCriteria: "Done",
       effort: "s",
     });
-    await expect(skipTask(db, task.id, "")).rejects.toThrow();
+    await expect(skipTask(db, task.id, "")).rejects.toThrow(/skip reason is required/i);
   });
 
   it("lists tasks for a PRD in position order", async () => {
@@ -636,6 +677,62 @@ describe("activity log", () => {
     }
     const last5 = await listActivity(db, { projectId, limit: 5 });
     expect(last5).toHaveLength(5);
+    expect(JSON.parse(last5[0]!.payload)).toEqual({ message: "Note 10" });
+    expect(JSON.parse(last5[4]!.payload)).toEqual({ message: "Note 14" });
+  });
+
+  it("rejects logging a PRD from another project", async () => {
+    const otherProject = await createProject(db, { name: "other-app" });
+    const otherWorkspace = await addWorkspace(db, {
+      projectId: otherProject.id,
+      path: "/home/user/other-app",
+    });
+    const otherPrd = await createPrd(db, {
+      projectId: otherProject.id,
+      workspaceId: otherWorkspace.id,
+      title: "Other PRD",
+    });
+
+    await expect(
+      logActivity(db, {
+        projectId,
+        workspaceId,
+        prdId: otherPrd.id,
+        eventType: "note",
+        payload: { message: "cross-project" },
+      }),
+    ).rejects.toThrow(/does not belong to project/i);
+  });
+
+  it("rejects logging a task that does not belong to the supplied PRD", async () => {
+    const prd1 = await createPrd(db, {
+      projectId,
+      workspaceId,
+      title: "PRD A",
+    });
+    const prd2 = await createPrd(db, {
+      projectId,
+      workspaceId,
+      title: "PRD B",
+    });
+    const task = await createTask(db, {
+      prdId: prd2.id,
+      title: "Task B",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+    });
+
+    await expect(
+      logActivity(db, {
+        projectId,
+        workspaceId,
+        prdId: prd1.id,
+        taskId: task.id,
+        eventType: "note",
+        payload: { message: "wrong prd" },
+      }),
+    ).rejects.toThrow(/does not belong to prd/i);
   });
 });
 

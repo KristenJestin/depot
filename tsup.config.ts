@@ -31,6 +31,8 @@ export default defineConfig([
     noExternal: ["citty", "drizzle-orm", "chalk", "ulid"],
     external: ["bun:sqlite"],
     minify: false,
+    // Keep Drizzle's generated SQL migrations available next to the bundled CLI.
+    publicDir: "src/db/migrations",
     esbuildPlugins: [stripTextWithPlugin],
     esbuildOptions(options) {
       options.loader = { ...options.loader, ".md": "text", ".sql": "text" };

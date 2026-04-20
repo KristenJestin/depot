@@ -1,6 +1,7 @@
 import { openDatabase, defaultDbPath, type Database } from "#/db/client";
 import { resolveWorkspace } from "#/lib/workflow";
 import { log } from "#/lib/logger";
+import { normalizeWorkspacePath } from "#/lib/paths";
 import * as path from "path";
 import fs from "fs/promises";
 
@@ -33,7 +34,7 @@ export async function getDb(): Promise<Database> {
  */
 export async function resolveCurrentWorkspace() {
   const db = await getDb();
-  const cwd = process.cwd().replace(/\\/g, "/");
+  const cwd = normalizeWorkspacePath(process.cwd());
   log.debug("Resolving workspace for", cwd);
 
   const ws = await resolveWorkspace(db, cwd);

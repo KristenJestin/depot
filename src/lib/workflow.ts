@@ -3,6 +3,7 @@ import { projects, workspaces, prds, tasks, activityLog } from "#/db/schema";
 import { generateId } from "#/lib/ids";
 import type { Database } from "#/db/client";
 import type { Effort } from "#/lib/validator";
+import { normalizeWorkspacePath } from "#/lib/paths";
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 
@@ -39,10 +40,11 @@ export async function addWorkspace(
 ) {
   const id = generateId();
   const now = new Date().toISOString();
+  const canonicalPath = normalizeWorkspacePath(input.path);
   await db.insert(workspaces).values({
     id,
     projectId: input.projectId,
-    path: input.path,
+    path: canonicalPath,
     label: input.label ?? null,
     createdAt: now,
     updatedAt: now,
@@ -57,6 +59,7 @@ export async function addWorkspace(
  */
 export async function resolveWorkspace(db: Database, currentPath: string) {
   const allWorkspaces = await db.query.workspaces.findMany();
+  const canonicalCurrentPath = normalizeWorkspacePath(currentPath);
 
   // Longest-prefix matching: find the workspace whose path is the longest
   // prefix of the current path.
@@ -64,11 +67,10 @@ export async function resolveWorkspace(db: Database, currentPath: string) {
   let bestLen = 0;
 
   for (const ws of allWorkspaces) {
-    const wsPath = ws.path;
+    const wsPath = normalizeWorkspacePath(ws.path);
     if (
-      currentPath === wsPath ||
-      currentPath.startsWith(wsPath + "/") ||
-      currentPath.startsWith(wsPath + "\\")
+      canonicalCurrentPath === wsPath ||
+      canonicalCurrentPath.startsWith(wsPath + "/")
     ) {
       if (wsPath.length > bestLen) {
         bestLen = wsPath.length;
@@ -83,7 +85,10 @@ export async function resolveWorkspace(db: Database, currentPath: string) {
 export async function updateWorkspacePath(db: Database, workspaceId: string, newPath: string) {
   await db
     .update(workspaces)
-    .set({ path: newPath, updatedAt: new Date().toISOString() })
+    .set({
+      path: normalizeWorkspacePath(newPath),
+      updatedAt: new Date().toISOString(),
+    })
     .where(eq(workspaces.id, workspaceId));
   return db.query.workspaces.findFirst({ where: { id: workspaceId } });
 }
@@ -185,6 +190,14 @@ export async function activatePrd(db: Database, id: string) {
   if (!prd) throw new Error(`PRD not found: ${id}`);
   if (prd.status !== "committed") {
     throw new Error(`Cannot activate PRD: status is '${prd.status}', expected 'committed'`);
+  }
+  const activePrd = await db.query.prds.findFirst({
+    where: { workspaceId: prd.workspaceId, status: "in_progress" },
+  });
+  if (activePrd && activePrd.id !== id) {
+    throw new Error(
+      `Cannot activate PRD: workspace already has active PRD '${activePrd.id}'`,
+    );
   }
   const now = new Date().toISOString();
   await db
@@ -434,6 +447,56 @@ export async function logActivity(
     payload: Record<string, unknown>;
   },
 ) {
+  const project = await getProject(db, input.projectId);
+  if (!project) {
+    throw new Error(`Project not found: ${input.projectId}`);
+  }
+
+  let workspace = null;
+  if (input.workspaceId) {
+    workspace = await db.query.workspaces.findFirst({ where: { id: input.workspaceId } });
+    if (!workspace) {
+      throw new Error(`Workspace not found: ${input.workspaceId}`);
+    }
+    if (workspace.projectId !== input.projectId) {
+      throw new Error(`Workspace '${input.workspaceId}' does not belong to project '${input.projectId}'`);
+    }
+  }
+
+  let prd = null;
+  if (input.prdId) {
+    prd = await getPrd(db, input.prdId);
+    if (!prd) {
+      throw new Error(`PRD not found: ${input.prdId}`);
+    }
+    if (prd.projectId !== input.projectId) {
+      throw new Error(`PRD '${input.prdId}' does not belong to project '${input.projectId}'`);
+    }
+    if (workspace && prd.workspaceId !== workspace.id) {
+      throw new Error(`PRD '${input.prdId}' does not belong to workspace '${workspace.id}'`);
+    }
+  }
+
+  if (input.taskId) {
+    const task = await getTask(db, input.taskId);
+    if (!task) {
+      throw new Error(`Task not found: ${input.taskId}`);
+    }
+    const taskPrd = prd && prd.id === task.prdId ? prd : await getPrd(db, task.prdId);
+    if (!taskPrd) {
+      throw new Error(`PRD not found for task '${input.taskId}'`);
+    }
+    if (taskPrd.projectId !== input.projectId) {
+      throw new Error(`Task '${input.taskId}' does not belong to project '${input.projectId}'`);
+    }
+    if (workspace && taskPrd.workspaceId !== workspace.id) {
+      throw new Error(`Task '${input.taskId}' does not belong to workspace '${workspace.id}'`);
+    }
+    if (prd && taskPrd.id !== prd.id) {
+      throw new Error(`Task '${input.taskId}' does not belong to PRD '${prd.id}'`);
+    }
+  }
+
   const now = new Date().toISOString();
   const result = await db
     .insert(activityLog)
@@ -453,8 +516,8 @@ export async function logActivity(
 export async function listActivity(db: Database, filter: { projectId: string; limit?: number }) {
   const rows = await db.query.activityLog.findMany({
     where: { projectId: filter.projectId },
-    orderBy: { id: "asc" },
+    orderBy: { id: "desc" },
     limit: filter.limit,
   });
-  return rows;
+  return rows.reverse();
 }

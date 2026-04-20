@@ -1,5 +1,5 @@
 import { ulid } from "ulid";
-import { openDatabase, type Database } from "#/db/client";
+import { openDatabase, resolveMigrationsFolder, type Database } from "#/db/client";
 import type { Database as BunDatabase } from "bun:sqlite";
 
 export { ulid };
@@ -11,3 +11,5 @@ export { ulid };
 export function createTestDb(): { db: Database; client: BunDatabase } {
   return openDatabase(":memory:");
 }
+
+export { resolveMigrationsFolder };

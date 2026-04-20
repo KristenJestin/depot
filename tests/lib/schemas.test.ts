@@ -15,8 +15,8 @@ describe("effortSchema", () => {
   });
 
   it("rejects invalid effort values", () => {
-    expect(() => effortSchema.parse("xxl")).toThrow();
-    expect(() => effortSchema.parse("")).toThrow();
+    expect(() => effortSchema.parse("xxl")).toThrow(/invalid option/i);
+    expect(() => effortSchema.parse("")).toThrow(/invalid option/i);
   });
 });
 
@@ -28,7 +28,7 @@ describe("eventTypeSchema", () => {
   });
 
   it("rejects invalid event types", () => {
-    expect(() => eventTypeSchema.parse("invalid_type")).toThrow();
+    expect(() => eventTypeSchema.parse("invalid_type")).toThrow(/invalid option/i);
   });
 });
 
@@ -38,7 +38,7 @@ describe("nonEmptyString", () => {
   });
 
   it("rejects empty strings", () => {
-    expect(() => nonEmptyString.parse("")).toThrow();
+    expect(() => nonEmptyString.parse("")).toThrow(/must not be empty/i);
   });
 });
 
@@ -49,7 +49,7 @@ describe("jsonString", () => {
   });
 
   it("rejects invalid JSON", () => {
-    expect(() => jsonString.parse("not json")).toThrow();
+    expect(() => jsonString.parse("not json")).toThrow(/invalid json/i);
   });
 });
 

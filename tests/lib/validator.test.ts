@@ -25,15 +25,15 @@ describe("validatePrdTransition", () => {
   });
 
   it("rejects draft -> in_progress", () => {
-    expect(() => validatePrdTransition("draft", "in_progress")).toThrow();
+    expect(() => validatePrdTransition("draft", "in_progress")).toThrow(/invalid prd transition/i);
   });
 
   it("rejects archived -> draft", () => {
-    expect(() => validatePrdTransition("archived", "draft")).toThrow();
+    expect(() => validatePrdTransition("archived", "draft")).toThrow(/invalid prd transition/i);
   });
 
   it("rejects committed -> draft", () => {
-    expect(() => validatePrdTransition("committed", "draft")).toThrow();
+    expect(() => validatePrdTransition("committed", "draft")).toThrow(/invalid prd transition/i);
   });
 });
 
@@ -63,19 +63,19 @@ describe("validateTaskTransition", () => {
   });
 
   it("rejects pending -> done", () => {
-    expect(() => validateTaskTransition("pending", "done")).toThrow();
+    expect(() => validateTaskTransition("pending", "done")).toThrow(/invalid task transition/i);
   });
 
   it("rejects done -> pending", () => {
-    expect(() => validateTaskTransition("done", "pending")).toThrow();
+    expect(() => validateTaskTransition("done", "pending")).toThrow(/invalid task transition/i);
   });
 
   it("rejects done -> in_progress", () => {
-    expect(() => validateTaskTransition("done", "in_progress")).toThrow();
+    expect(() => validateTaskTransition("done", "in_progress")).toThrow(/invalid task transition/i);
   });
 
   it("rejects skipped -> pending", () => {
-    expect(() => validateTaskTransition("skipped", "pending")).toThrow();
+    expect(() => validateTaskTransition("skipped", "pending")).toThrow(/invalid task transition/i);
   });
 });
 
@@ -87,9 +87,9 @@ describe("validateEffort", () => {
   });
 
   it("rejects invalid effort values", () => {
-    expect(() => validateEffort("medium")).toThrow();
-    expect(() => validateEffort("")).toThrow();
-    expect(() => validateEffort("xxl")).toThrow();
+    expect(() => validateEffort("medium")).toThrow(/invalid effort value/i);
+    expect(() => validateEffort("")).toThrow(/invalid effort value/i);
+    expect(() => validateEffort("xxl")).toThrow(/invalid effort value/i);
   });
 });
 
@@ -128,7 +128,7 @@ describe("validateEventType", () => {
   });
 
   it("rejects invalid event types", () => {
-    expect(() => validateEventType("random")).toThrow();
-    expect(() => validateEventType("")).toThrow();
+    expect(() => validateEventType("random")).toThrow(/invalid event type/i);
+    expect(() => validateEventType("")).toThrow(/invalid event type/i);
   });
 });

@@ -40,6 +40,14 @@ depo/
 - **Base de données** : SQLite (fichier local dans le repo ou répertoire projet)
 - **Interface** : CLI pur, communication stdio — pas de serveur web
 
+### Migrations
+
+- Le schema source de verite vit dans `src/db/schema.ts`.
+- Les migrations SQL sont generees avec `bun run db:generate` via `drizzle-kit`.
+- En developpement local, `bun run db:migrate` permet d'appliquer explicitement les migrations.
+- Au runtime, le CLI applique automatiquement les migrations non jouees via `drizzle-orm/bun-sqlite/migrator`.
+- Le build copie `src/db/migrations/` dans `dist/` pour que le binaire publie garde le meme comportement.
+
 ---
 
 ## 4. Schéma de base de données

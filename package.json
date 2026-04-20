@@ -1,7 +1,7 @@
 {
   "name": "@netsirk/depot",
   "version": "1.0.0",
-  "description": "xxxx",
+  "description": "AI agent task and PRD management CLI",
   "keywords": [
     "agent",
     "ai",
@@ -23,16 +23,19 @@
     "#/*": "./src/*"
   },
   "exports": {
-    ".": "./dist/index.js",
-    "./plugin": "./dist/plugin.mjs"
+    ".": "./dist/index.js"
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "build": "tsup",
+    "check": "bun run typecheck && bun run lint && bun run test",
     "prepublishOnly": "bun run build",
     "depot": "bun src/cli/index.ts --",
+    "db:check": "drizzle-kit check",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "dev": "tsup --watch",
     "fmt": "oxfmt .",

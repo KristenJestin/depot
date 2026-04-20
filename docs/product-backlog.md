@@ -48,7 +48,7 @@ Ce document liste ce qui reste a faire apres le premier PRD de fondation du coeu
 
 - Renforcer la gestion des erreurs autour de la base et des chemins invalides.
 - Ajouter davantage de smoke tests CLI sur les commandes critiques.
-- Definir la strategie de migrations et de compatibilite de schema.
+- Documenter la politique d'evolution de schema autour de `drizzle-kit generate/check` et des migrations runtime.
 
 ### Documentation
 

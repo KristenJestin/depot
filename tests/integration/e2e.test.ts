@@ -261,4 +261,52 @@ describe("end-to-end workflow", () => {
     expect(h2).toContain("New feature");
     expect(h2).not.toContain("Backend refactor");
   });
+
+  it("keeps recent activity ordered from oldest to newest within the latest window", async () => {
+    const project = await createProject(db, { name: "activity-project" });
+    const ws = await addWorkspace(db, {
+      projectId: project.id,
+      path: "/home/agent/activity-project",
+    });
+
+    for (let i = 0; i < 12; i++) {
+      await logActivity(db, {
+        projectId: project.id,
+        workspaceId: ws.id,
+        eventType: "note",
+        payload: { message: `Note ${i}` },
+      });
+    }
+
+    const handoff = await buildHandoff(db, ws.id);
+    expect(handoff).toContain("Note 2");
+    expect(handoff).toContain("Note 11");
+    expect(handoff).not.toMatch(/\bNote 1\b/);
+    expect(handoff.indexOf("Note 2")).toBeLessThan(handoff.indexOf("Note 11"));
+  });
+
+  it("rejects a second active PRD in the same workspace", async () => {
+    const project = await createProject(db, { name: "single-active-prd" });
+    const ws = await addWorkspace(db, {
+      projectId: project.id,
+      path: "/home/agent/single-active-prd",
+    });
+
+    const prd1 = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: ws.id,
+      title: "First PRD",
+    });
+    const prd2 = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: ws.id,
+      title: "Second PRD",
+    });
+
+    await commitPrd(db, prd1.id);
+    await commitPrd(db, prd2.id);
+    await activatePrd(db, prd1.id);
+
+    await expect(activatePrd(db, prd2.id)).rejects.toThrow(/workspace already has active prd/i);
+  });
 });
