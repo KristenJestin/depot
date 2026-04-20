@@ -15,12 +15,12 @@ Depo formalise et automatise cette orchestration. Il est conçu pour être utili
 
 ## 2. Utilisateurs
 
-| Rôle | Description |
-|---|---|
-| **Agent PRD** | Interviewe l'utilisateur, crée le PRD, génère les tâches |
-| **Agent Dev** | Exécute les tâches, met à jour les statuts, logue son activité |
-| **Agent Review** | Vérifie le code, la sécurité, le métier en fin de cycle |
-| **Humain** | Interagit uniquement lors de la phase PRD et de la review finale |
+| Rôle             | Description                                                      |
+| ---------------- | ---------------------------------------------------------------- |
+| **Agent PRD**    | Interviewe l'utilisateur, crée le PRD, génère les tâches         |
+| **Agent Dev**    | Exécute les tâches, met à jour les statuts, logue son activité   |
+| **Agent Review** | Vérifie le code, la sécurité, le métier en fin de cycle          |
+| **Humain**       | Interagit uniquement lors de la phase PRD et de la review finale |
 
 ---
 
@@ -35,6 +35,7 @@ depo/
 ```
 
 ### Stack
+
 - **Runtime** : Node.js (TypeScript) ou Python — à décider selon l'environnement agent cible
 - **Base de données** : SQLite (fichier local dans le repo ou répertoire projet)
 - **Interface** : CLI pur, communication stdio — pas de serveur web
@@ -44,6 +45,7 @@ depo/
 ## 4. Schéma de base de données
 
 ### `projects`
+
 ```sql
 id          TEXT PRIMARY KEY
 name        TEXT NOT NULL
@@ -53,6 +55,7 @@ created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 ```
 
 ### `prds`
+
 ```sql
 id          TEXT PRIMARY KEY
 project_id  TEXT REFERENCES projects(id)
@@ -65,6 +68,7 @@ committed_at DATETIME      -- NULL tant que non validé
 ```
 
 ### `tasks`
+
 ```sql
 id            TEXT PRIMARY KEY
 prd_id        TEXT REFERENCES prds(id)
@@ -81,6 +85,7 @@ completed_at  DATETIME
 ```
 
 ### `activity_log`
+
 ```sql
 id          INTEGER PRIMARY KEY AUTOINCREMENT
 project_id  TEXT REFERENCES projects(id)
@@ -96,6 +101,7 @@ created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 ## 5. Commandes CLI
 
 ### Projet
+
 ```
 depo project create <name>
 depo project list
@@ -103,6 +109,7 @@ depo project status [project_id]    → Vue complète pour briefing agent
 ```
 
 ### PRD
+
 ```
 depo prd create [project_id]        → Lance le playbook PRD interactif
 depo prd show <prd_id>
@@ -112,6 +119,7 @@ depo prd list [project_id]
 ```
 
 ### Tâche
+
 ```
 depo task list [prd_id]             → Liste avec statuts
 depo task start <task_id>           → Passe en in_progress, logue le démarrage
@@ -122,6 +130,7 @@ depo task show <task_id>
 ```
 
 ### Log & Handoff
+
 ```
 depo log <project_id> [--last N]    → Dernières N entrées de l'activity log
 depo log add <project_id> <event_type> [--task task_id] [--payload JSON]
@@ -129,6 +138,7 @@ depo handoff <project_id>           → Résumé complet prêt à coller dans no
 ```
 
 ### Playbooks
+
 ```
 depo playbook list                  → Liste les playbooks disponibles
 depo playbook prd                   → Retourne les instructions du mode PRD
@@ -145,6 +155,7 @@ Les playbooks sont des instructions markdown retournées par le CLI que l'agent 
 ### Playbook PRD
 
 **Phase 1 — Interview**
+
 ```
 Interview l'utilisateur de façon relentless sur chaque aspect du plan.
 - Parcours chaque branche de l'arbre de décision
@@ -156,6 +167,7 @@ Interview l'utilisateur de façon relentless sur chaque aspect du plan.
 **Phase 2 — Draft structuré**
 
 Chaque tâche générée doit obligatoirement contenir :
+
 - `title` : action concrète, verbe à l'infinitif
 - `description` : contexte et détail d'implémentation
 - `done_criteria` : liste de conditions testables — pas d'ambiguïté possible
@@ -163,6 +175,7 @@ Chaque tâche générée doit obligatoirement contenir :
 - `effort` : estimation xs/s/m/l/xl
 
 **Phase 3 — Challenge final (avocat du diable)**
+
 ```
 Avant de committer le PRD :
 1. Identifie les 3 principaux risques techniques ou métier
@@ -172,9 +185,11 @@ Présente-les à l'utilisateur. Itère jusqu'à résolution.
 ```
 
 **Phase 4 — Commit**
+
 ```
 depo prd commit <prd_id>
 ```
+
 Une fois committé, le PRD ne peut plus être modifié sans `depo prd amend`.
 
 ---
@@ -182,6 +197,7 @@ Une fois committé, le PRD ne peut plus être modifié sans `depo prd amend`.
 ### Playbook Dev
 
 Au démarrage de session :
+
 ```
 depo handoff <project_id>           → Lis le résumé de handoff complet
 depo task list <prd_id>             → Identifie la prochaine tâche pending sans blocage
@@ -189,11 +205,13 @@ depo task start <task_id>           → Démarre la tâche
 ```
 
 Pendant l'exécution :
+
 - Logger chaque étape significative avec `depo log add`
 - Ne marquer `done` qu'une fois **tous** les `done_criteria` satisfaits
 - En cas de blocage : `depo task block` avec raison explicite, ne pas continuer
 
 En fin de session :
+
 ```
 depo log add <project_id> handoff --payload '{"next": "...", "context": "..."}'
 ```
@@ -207,6 +225,7 @@ depo task list <prd_id> --status done    → Tâches à reviewer
 ```
 
 Checklist obligatoire par tâche :
+
 - [ ] Le `done_criteria` est-il réellement satisfait ?
 - [ ] Sécurité : surface d'attaque, inputs non validés, secrets exposés
 - [ ] Métier : la tâche répond-elle à l'intention du PRD ?
@@ -220,6 +239,7 @@ Checklist obligatoire par tâche :
 C'est la commande la plus critique du système. Elle génère un briefing complet pour permettre à un nouvel agent de reprendre sans perte de contexte.
 
 **Sortie type :**
+
 ```
 === DEPO HANDOFF — [project_name] ===
 Date : 2025-01-15 14:32
@@ -288,20 +308,23 @@ C'est un pointeur, pas les instructions. Les instructions vivent dans le CLI.
 ## 11. Phases de développement
 
 ### Phase 1 — Core
+
 - Schéma SQLite + migrations
 - Commandes `project`, `prd`, `task` basiques
 - `activity_log` + `log` command
 - `handoff` command
 
 ### Phase 2 — Playbooks
+
 - Commande `playbook` avec les 3 rôles
 - Contenu des 3 playbooks finalisé et testé
 
 ### Phase 3 — Polish
+
 - `depo status` global lisible
 - Gestion des erreurs robuste
 - Documentation d'installation
 
 ---
 
-*Document généré le 2025-01-15. Statut : Draft — non committé.*
+_Document généré le 2025-01-15. Statut : Draft — non committé._
