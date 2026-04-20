@@ -1,0 +1,64 @@
+{
+  "name": "@netsirk/depot",
+  "version": "1.0.0",
+  "description": "xxxx",
+  "keywords": [
+    "cli",
+    "agent",
+    "ai",
+    "task-management",
+    "sqlite",
+    "opencode"
+  ],
+  "license": "ISC",
+  "author": "netsirk",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "depot": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./plugin": "./dist/plugin.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "bun run build",
+    "depot": "bun src/cli/index.ts --",
+    "db:studio": "drizzle-kit studio",
+    "dev": "tsup --watch",
+    "fmt": "oxfmt .",
+    "fmt:check": "oxfmt --check .",
+    "lint": "oxlint src tests",
+    "lint:fix": "oxlint --fix src tests",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@commander-js/extra-typings": "^14.0.0",
+    "@libsql/client": "^0.17.2",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "drizzle-orm": "^1.0.0-beta.21",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "drizzle-kit": "^1.0.0-beta.21",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^1.60.0",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  }
+}
