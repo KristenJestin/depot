@@ -36,7 +36,11 @@ export async function buildHandoff(db: Database, workspaceId: string): Promise<s
     lines.push("");
 
     // Show recent activity if available
-    const activity = await listActivity(db, { projectId: project.id, limit: 10 });
+    const activity = await listActivity(db, {
+      projectId: project.id,
+      workspaceId,
+      limit: 10,
+    });
     if (activity.length > 0) {
       appendRecentActivity(lines, activity);
     }
@@ -102,7 +106,11 @@ export async function buildHandoff(db: Database, workspaceId: string): Promise<s
   }
 
   // ── Recent Activity ──────────────────────────────────────────────────────────
-  const activity = await listActivity(db, { projectId: project.id, limit: 10 });
+  const activity = await listActivity(db, {
+    projectId: project.id,
+    workspaceId,
+    limit: 10,
+  });
   if (activity.length > 0) {
     appendRecentActivity(lines, activity);
   }

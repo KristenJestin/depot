@@ -220,6 +220,35 @@ describe("handoff builder", () => {
     expect(output).toContain("(last 10 entries)");
   });
 
+  it("keeps recent activity scoped to the current workspace", async () => {
+    const project = await createProject(db, { name: "my-app" });
+    const ws1 = await addWorkspace(db, {
+      projectId: project.id,
+      path: "/home/user/my-app",
+    });
+    const ws2 = await addWorkspace(db, {
+      projectId: project.id,
+      path: "/home/user/my-app-worktree",
+    });
+
+    await logActivity(db, {
+      projectId: project.id,
+      workspaceId: ws1.id,
+      eventType: "note",
+      payload: { message: "Workspace 1 note" },
+    });
+    await logActivity(db, {
+      projectId: project.id,
+      workspaceId: ws2.id,
+      eventType: "note",
+      payload: { message: "Workspace 2 note" },
+    });
+
+    const output = await buildHandoff(db, ws1.id);
+    expect(output).toContain("Workspace 1 note");
+    expect(output).not.toContain("Workspace 2 note");
+  });
+
   it("shows Next Recommended Task when there is a pending task with satisfied deps", async () => {
     const project = await createProject(db, { name: "my-app" });
     const ws = await addWorkspace(db, {

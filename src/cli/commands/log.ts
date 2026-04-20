@@ -1,6 +1,6 @@
 import { defineCommand } from "citty";
 import { resolveCurrentWorkspace } from "#/cli/context";
-import { logActivity, listActivity } from "#/lib/workflow";
+import { logActivity, listActivity, findPrdByPrefix, findTaskByPrefix } from "#/lib/workflow";
 import { eventTypeSchema, jsonString, validateArgs } from "#/lib/schemas";
 import * as z from "zod";
 
@@ -44,11 +44,23 @@ const addCommand = defineCommand({
   run: async ({ args }) => {
     const { db, ws } = await resolveCurrentWorkspace();
     const payload = JSON.parse(args.payload ?? "{}") as Record<string, unknown>;
+    const prd = args.prd ? await findPrdByPrefix(db, args.prd) : null;
+    if (args.prd && !prd) {
+      console.error(`PRD not found: ${args.prd}`);
+      process.exit(1);
+    }
+
+    const task = args.task ? await findTaskByPrefix(db, args.task) : null;
+    if (args.task && !task) {
+      console.error(`Task not found: ${args.task}`);
+      process.exit(1);
+    }
+
     const entry = await logActivity(db, {
       projectId: ws.projectId,
       workspaceId: ws.id,
-      prdId: args.prd,
-      taskId: args.task,
+      prdId: prd?.id,
+      taskId: task?.id,
       eventType: args.eventType,
       payload,
     });

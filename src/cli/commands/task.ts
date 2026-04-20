@@ -9,6 +9,7 @@ import {
   skipTask,
   listPrds,
   findTaskByPrefix,
+  findPrdByPrefix,
 } from "#/lib/workflow";
 import { shortId } from "#/lib/ids";
 import { effortSchema, commaSeparatedIds, validateArgs } from "#/lib/schemas";
@@ -64,13 +65,32 @@ const addCommand = defineCommand({
     const validated = validateArgs(addTaskSchema, { effort: args.effort, depends: args.depends });
 
     const { db } = await resolveCurrentWorkspace();
+    const prd = await findPrdByPrefix(db, args.prd);
+    if (!prd) {
+      console.error(`PRD not found: ${args.prd}`);
+      process.exit(1);
+    }
+
+    const dependencyIds = validated.depends
+      ? await Promise.all(
+          validated.depends.map(async (taskId) => {
+            const dependency = await findTaskByPrefix(db, taskId);
+            if (!dependency) {
+              console.error(`Task not found: ${taskId}`);
+              process.exit(1);
+            }
+            return dependency.id;
+          }),
+        )
+      : undefined;
+
     const task = await createTask(db, {
-      prdId: args.prd,
+      prdId: prd.id,
       title: args.title,
       description: args.desc,
       doneCriteria: args.criteria,
       effort: validated.effort,
-      dependsOn: validated.depends,
+      dependsOn: dependencyIds,
     });
     console.log(
       `Created task '${task.title}' (${shortId(task.id)}) [pending] pos=${task.position}`,
@@ -100,6 +120,13 @@ const listCommand = defineCommand({
         process.exit(1);
       }
       targetPrdId = activePrd.id;
+    } else {
+      const prd = await findPrdByPrefix(db, targetPrdId);
+      if (!prd) {
+        console.error(`PRD not found: ${targetPrdId}`);
+        process.exit(1);
+      }
+      targetPrdId = prd.id;
     }
 
     const taskList = await listTasks(db, targetPrdId);

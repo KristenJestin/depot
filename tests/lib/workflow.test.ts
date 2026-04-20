@@ -681,6 +681,30 @@ describe("activity log", () => {
     expect(JSON.parse(last5[4]!.payload)).toEqual({ message: "Note 14" });
   });
 
+  it("filters activity by workspace within a project", async () => {
+    const otherWorkspace = await addWorkspace(db, {
+      projectId,
+      path: "/home/user/my-app-worktree",
+    });
+
+    await logActivity(db, {
+      projectId,
+      workspaceId,
+      eventType: "note",
+      payload: { message: "main workspace" },
+    });
+    await logActivity(db, {
+      projectId,
+      workspaceId: otherWorkspace.id,
+      eventType: "note",
+      payload: { message: "other workspace" },
+    });
+
+    const entries = await listActivity(db, { projectId, workspaceId });
+    expect(entries).toHaveLength(1);
+    expect(JSON.parse(entries[0]!.payload)).toEqual({ message: "main workspace" });
+  });
+
   it("rejects logging a PRD from another project", async () => {
     const otherProject = await createProject(db, { name: "other-app" });
     const otherWorkspace = await addWorkspace(db, {

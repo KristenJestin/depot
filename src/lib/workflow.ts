@@ -513,9 +513,16 @@ export async function logActivity(
   return result[0]!;
 }
 
-export async function listActivity(db: Database, filter: { projectId: string; limit?: number }) {
+export async function listActivity(
+  db: Database,
+  filter: { projectId: string; workspaceId?: string; limit?: number },
+) {
+  const where = filter.workspaceId
+    ? { projectId: filter.projectId, workspaceId: filter.workspaceId }
+    : { projectId: filter.projectId };
+
   const rows = await db.query.activityLog.findMany({
-    where: { projectId: filter.projectId },
+    where,
     orderBy: { id: "desc" },
     limit: filter.limit,
   });
