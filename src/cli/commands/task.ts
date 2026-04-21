@@ -11,7 +11,7 @@ import {
   findTaskByPrefix,
   findPrdByPrefix,
 } from "#/lib/workflow";
-import { shortId } from "#/lib/ids";
+import { shortId, uniqueIdPrefix } from "#/lib/ids";
 import { effortSchema, commaSeparatedIds, validateArgs } from "#/lib/schemas";
 import { log } from "#/lib/logger";
 import * as z from "zod";
@@ -134,11 +134,16 @@ const listCommand = defineCommand({
       console.log("No tasks found.");
       return;
     }
+    const taskIds = taskList.map((task) => task.id);
     for (const t of taskList) {
       const deps: string[] = JSON.parse(t.dependsOn);
-      const depStr = deps.length > 0 ? ` deps=[${deps.map(shortId).join(",")}]` : "";
+      const depStr =
+        deps.length > 0
+          ? ` deps=[${deps.map((depId) => uniqueIdPrefix(depId, taskIds)).join(",")}]`
+          : "";
+      const displayId = uniqueIdPrefix(t.id, taskIds);
       console.log(
-        `${shortId(t.id)}  #${t.position}  ${t.title}  [${t.status}]  ${t.effort}${depStr}`,
+        `${displayId}  #${t.position}  ${t.title}  [${t.status}]  ${t.effort}${depStr}`,
       );
     }
   },

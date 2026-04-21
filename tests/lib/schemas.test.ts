@@ -4,6 +4,7 @@ import {
   eventTypeSchema,
   nonEmptyString,
   jsonString,
+  parseJsonLike,
   commaSeparatedIds,
 } from "#/lib/schemas";
 
@@ -50,6 +51,29 @@ describe("jsonString", () => {
 
   it("rejects invalid JSON", () => {
     expect(() => jsonString.parse("not json")).toThrow(/invalid json/i);
+  });
+
+  it("accepts PowerShell-mangled object literals", () => {
+    const result = jsonString.parse(
+      "{message:hello world,count:1,ok:true,nested:{value:test value},items:[1,2,three four]}",
+    );
+    expect(result).toEqual({
+      message: "hello world",
+      count: 1,
+      ok: true,
+      nested: { value: "test value" },
+      items: [1, 2, "three four"],
+    });
+  });
+});
+
+describe("parseJsonLike", () => {
+  it("parses standard JSON unchanged", () => {
+    expect(parseJsonLike('{"key":"value"}')).toEqual({ key: "value" });
+  });
+
+  it("normalizes PowerShell-stripped quotes", () => {
+    expect(parseJsonLike("{message:hello world}")).toEqual({ message: "hello world" });
   });
 });
 

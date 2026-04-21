@@ -46,7 +46,7 @@ depo/
 - Les migrations SQL sont generees avec `bun run db:generate` via `drizzle-kit`.
 - En developpement local, `bun run db:migrate` permet d'appliquer explicitement les migrations.
 - Au runtime, le CLI applique automatiquement les migrations non jouees via `drizzle-orm/bun-sqlite/migrator`.
-- Le build copie `src/db/migrations/` dans `dist/` pour que le binaire publie garde le meme comportement.
+- Le build publie actuellement les dossiers de migration directement sous `dist/`. Le runtime accepte aussi `dist/migrations/` pour couvrir les layouts observes en source, bundle local et package installe.
 
 ---
 
