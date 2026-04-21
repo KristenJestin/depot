@@ -1,14 +1,17 @@
 import { defineValidatedCommand } from "#/cli/command";
 import { getDb } from "#/cli/runtime";
-import { outputSuccess, isJsonMode } from "#/cli/output";
+import { outputSuccess, outputError, isJsonMode } from "#/cli/output";
 import {
   createProject,
   addWorkspace,
   resolveWorkspace,
   listProjects,
   getProject,
+  updateProject,
 } from "#/lib/workflow";
+import { log } from "#/lib/logger";
 import { normalizeWorkspacePath } from "#/lib/paths";
+import { VALID_PROJECT_STATUSES } from "#/lib/validator";
 import * as path from "path";
 import * as z from "zod";
 
@@ -118,10 +121,124 @@ const listCommand = defineValidatedCommand({
   },
 });
 
+const showCommand = defineValidatedCommand({
+  schema: z.object({ projectId: z.string().min(1) }),
+  meta: { name: "show", description: "Show project details" },
+  args: {
+    projectId: {
+      type: "positional",
+      description: "Project ID",
+      required: true,
+    },
+  },
+  run: async ({ args }) => {
+    const db = await getDb();
+    const project = await getProject(db, args.projectId);
+    if (!project) {
+      outputError("not_found", `Project not found: ${args.projectId}`);
+    }
+    if (isJsonMode()) {
+      outputSuccess({ item: project });
+    } else {
+      log.fields([
+        ["ID", project.id],
+        ["Name", project.name],
+        ["Status", project.status],
+        ["Description", project.description],
+        ["Created", project.createdAt],
+        ["Updated", project.updatedAt],
+      ]);
+    }
+  },
+});
+
+const updateCommand = defineValidatedCommand({
+  schema: z.object({
+    projectId: z.string().min(1),
+    name: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+    status: z.enum(VALID_PROJECT_STATUSES).optional(),
+  }),
+  meta: { name: "update", description: "Update project name, description, or status" },
+  args: {
+    projectId: {
+      type: "positional",
+      description: "Project ID",
+      required: true,
+    },
+    name: {
+      type: "string",
+      alias: "n",
+      description: "New project name",
+    },
+    description: {
+      type: "string",
+      alias: "d",
+      description: "New project description",
+    },
+    status: {
+      type: "string",
+      alias: "s",
+      description: `New project status (${VALID_PROJECT_STATUSES.join(", ")})`,
+    },
+  },
+  run: async ({ args }) => {
+    const db = await getDb();
+    const project = await getProject(db, args.projectId);
+    if (!project) {
+      outputError("not_found", `Project not found: ${args.projectId}`);
+    }
+    if (!args.name && !args.description && !args.status) {
+      outputError("no_changes", "No changes provided. Use --name, --description, or --status.");
+    }
+    const updated = await updateProject(db, project.id, {
+      name: args.name,
+      description: args.description,
+      status: args.status,
+    });
+    if (isJsonMode()) {
+      outputSuccess({ item: updated });
+    } else {
+      console.log(`Updated project '${updated.name}' (${updated.id}) [${updated.status}]`);
+    }
+  },
+});
+
+const archiveCommand = defineValidatedCommand({
+  schema: z.object({ projectId: z.string().min(1) }),
+  meta: { name: "archive", description: "Archive a project (set status to done)" },
+  args: {
+    projectId: {
+      type: "positional",
+      description: "Project ID",
+      required: true,
+    },
+  },
+  run: async ({ args }) => {
+    const db = await getDb();
+    const project = await getProject(db, args.projectId);
+    if (!project) {
+      outputError("not_found", `Project not found: ${args.projectId}`);
+    }
+    if (project.status === "done") {
+      outputError("already_done", `Project '${project.name}' is already archived (done).`);
+    }
+    const updated = await updateProject(db, project.id, { status: "done" });
+    if (isJsonMode()) {
+      outputSuccess({ item: updated });
+    } else {
+      console.log(`Archived project '${updated.name}' (${updated.id}) [done]`);
+    }
+  },
+});
+
 export const projectCommand = defineValidatedCommand({
   schema: z.object({}),
   meta: { name: "project", description: "Project management" },
   subCommands: {
     list: listCommand,
+    show: showCommand,
+    update: updateCommand,
+    archive: archiveCommand,
   },
 });

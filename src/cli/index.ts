@@ -7,6 +7,7 @@ import { handoffCommand } from "#/cli/commands/handoff";
 import { contextCommand } from "#/cli/commands/context";
 import { installCommand } from "#/cli/commands/install";
 import { reviewCommand } from "#/cli/commands/review";
+import { workspaceCommand } from "#/cli/commands/workspace";
 import { defineValidatedCommand } from "#/cli/command";
 import { setDebug, setJsonMode } from "#/lib/logger";
 import * as z from "zod";
@@ -47,6 +48,7 @@ const main = defineValidatedCommand({
   subCommands: {
     init: initCommand,
     project: projectCommand,
+    workspace: workspaceCommand,
     prd: prdCommand,
     task: taskCommand,
     log: logCommand,

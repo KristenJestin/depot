@@ -5,8 +5,13 @@ import type { Database } from "#/db/client";
 import {
   createProject,
   listProjects,
+  updateProject,
   addWorkspace,
   resolveWorkspace,
+  listWorkspaces,
+  getWorkspace,
+  updateWorkspaceLabel,
+  removeWorkspace,
   createPrd,
   commitPrd,
   activatePrd,
@@ -64,6 +69,37 @@ describe("projects", () => {
     const list = await listProjects(db);
     expect(list).toHaveLength(2);
     expect(list.map((p) => p.name).sort()).toEqual(["alpha", "beta"]);
+  });
+
+  it("updates project name", async () => {
+    const project = await createProject(db, { name: "old-name" });
+    const updated = await updateProject(db, project.id, { name: "new-name" });
+    expect(updated.name).toBe("new-name");
+    expect(updated.status).toBe("active");
+  });
+
+  it("updates project status", async () => {
+    const project = await createProject(db, { name: "my-app" });
+    const updated = await updateProject(db, project.id, { status: "paused" });
+    expect(updated.status).toBe("paused");
+  });
+
+  it("updates project description", async () => {
+    const project = await createProject(db, { name: "my-app", description: "old" });
+    const updated = await updateProject(db, project.id, { description: "new desc" });
+    expect(updated.description).toBe("new desc");
+  });
+
+  it("throws when updating a non-existent project", async () => {
+    await expect(updateProject(db, "nonexistent", { name: "x" })).rejects.toThrow(
+      "Project not found",
+    );
+  });
+
+  it("archives a project by setting status to done", async () => {
+    const project = await createProject(db, { name: "finished" });
+    const updated = await updateProject(db, project.id, { status: "done" });
+    expect(updated.status).toBe("done");
   });
 });
 
@@ -159,6 +195,88 @@ describe("workspaces", () => {
   it("returns null when no workspace matches", async () => {
     const resolved = await resolveWorkspace(db, "/unregistered/path");
     expect(resolved).toBeNull();
+  });
+
+  it("lists all workspaces", async () => {
+    const p1 = await createProject(db, { name: "a" });
+    const p2 = await createProject(db, { name: "b" });
+    await addWorkspace(db, { projectId: p1.id, path: "/home/user/a" });
+    await addWorkspace(db, { projectId: p2.id, path: "/home/user/b" });
+    const list = await listWorkspaces(db);
+    expect(list).toHaveLength(2);
+  });
+
+  it("lists workspaces filtered by project", async () => {
+    const p1 = await createProject(db, { name: "a" });
+    const p2 = await createProject(db, { name: "b" });
+    await addWorkspace(db, { projectId: p1.id, path: "/home/user/a" });
+    await addWorkspace(db, { projectId: p2.id, path: "/home/user/b" });
+    const list = await listWorkspaces(db, { projectId: p1.id });
+    expect(list).toHaveLength(1);
+    expect(list[0]!.projectId).toBe(p1.id);
+  });
+
+  it("gets a workspace by id", async () => {
+    const project = await createProject(db, { name: "my-app" });
+    const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
+    const found = await getWorkspace(db, ws.id);
+    expect(found).not.toBeNull();
+    expect(found!.id).toBe(ws.id);
+  });
+
+  it("returns null for non-existent workspace", async () => {
+    const found = await getWorkspace(db, "nonexistent");
+    expect(found).toBeNull();
+  });
+
+  it("updates workspace label", async () => {
+    const project = await createProject(db, { name: "my-app" });
+    const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
+    const updated = await updateWorkspaceLabel(db, ws.id, "main");
+    expect(updated.label).toBe("main");
+  });
+
+  it("throws when updating label for non-existent workspace", async () => {
+    await expect(updateWorkspaceLabel(db, "nonexistent", "label")).rejects.toThrow(
+      "Workspace not found",
+    );
+  });
+
+  it("removes a workspace with no linked data", async () => {
+    const project = await createProject(db, { name: "my-app" });
+    const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
+    await removeWorkspace(db, ws.id);
+    const found = await getWorkspace(db, ws.id);
+    expect(found).toBeNull();
+  });
+
+  it("blocks workspace removal when PRDs exist", async () => {
+    const project = await createProject(db, { name: "my-app" });
+    const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
+    await createPrd(db, { projectId: project.id, workspaceId: ws.id, title: "PRD" });
+    await expect(removeWorkspace(db, ws.id)).rejects.toThrow(/linked PRD/);
+  });
+
+  it("force-removes a workspace and cascades linked PRDs and tasks", async () => {
+    const project = await createProject(db, { name: "my-app" });
+    const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
+    const prd = await createPrd(db, { projectId: project.id, workspaceId: ws.id, title: "PRD" });
+    await createTask(db, {
+      prdId: prd.id,
+      title: "Task",
+      description: "desc",
+      doneCriteria: "done",
+      effort: "s",
+    });
+    await removeWorkspace(db, ws.id, true);
+    const found = await getWorkspace(db, ws.id);
+    expect(found).toBeNull();
+    const remainingPrd = await getPrd(db, prd.id);
+    expect(remainingPrd).toBeNull();
+  });
+
+  it("throws when removing non-existent workspace", async () => {
+    await expect(removeWorkspace(db, "nonexistent")).rejects.toThrow("Workspace not found");
   });
 });
 

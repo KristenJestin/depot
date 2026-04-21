@@ -10,13 +10,17 @@ import {
   createTask,
   listTasks,
   listActivity,
+  getProject,
+  getWorkspace,
 } from "#/lib/workflow";
 import { setJsonMode } from "#/lib/logger";
 
 const resolveCurrentWorkspace = vi.fn<() => Promise<{ db: Database; ws: unknown }>>();
+const getDb = vi.fn<() => Promise<Database>>();
 
 vi.mock("#/cli/runtime", () => ({
   resolveCurrentWorkspace,
+  getDb,
 }));
 
 type RunnableSubCommand = {
@@ -73,6 +77,7 @@ describe("CLI commands", () => {
       db,
       ws: workspace,
     });
+    getDb.mockResolvedValue(db);
   });
 
   afterEach(() => {
@@ -584,6 +589,212 @@ describe("CLI commands", () => {
       const parsed = JSON.parse(output.trim());
       expect(parsed.kind).toBe("error");
       expect(parsed.error.code).toBe("unsupported");
+
+      exit.mockRestore();
+    });
+  });
+
+  describe("project commands", () => {
+    it("project show displays project details", async () => {
+      const { projectCommand } = await import("#/cli/commands/project");
+      const showCommand = await getSubCommand(projectCommand, "show");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await showCommand.run({ args: { projectId } });
+      output.mockRestore();
+
+      const project = await getProject(db, projectId);
+      expect(project).not.toBeNull();
+      expect(project!.id).toBe(projectId);
+    });
+
+    it("project show errors on unknown id", async () => {
+      const { projectCommand } = await import("#/cli/commands/project");
+      const showCommand = await getSubCommand(projectCommand, "show");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      await expect(
+        showCommand.run({ args: { projectId: "nonexistent" } }),
+      ).rejects.toThrow("process.exit:1");
+
+      exit.mockRestore();
+    });
+
+    it("project update changes the project name", async () => {
+      const { projectCommand } = await import("#/cli/commands/project");
+      const updateCommand = await getSubCommand(projectCommand, "update");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await updateCommand.run({ args: { projectId, name: "renamed-project" } });
+      output.mockRestore();
+
+      const project = await getProject(db, projectId);
+      expect(project!.name).toBe("renamed-project");
+    });
+
+    it("project update errors when no changes provided", async () => {
+      const { projectCommand } = await import("#/cli/commands/project");
+      const updateCommand = await getSubCommand(projectCommand, "update");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      await expect(
+        updateCommand.run({ args: { projectId } }),
+      ).rejects.toThrow("process.exit:1");
+
+      exit.mockRestore();
+    });
+
+    it("project archive sets status to done", async () => {
+      const { projectCommand } = await import("#/cli/commands/project");
+      const archiveCommand = await getSubCommand(projectCommand, "archive");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await archiveCommand.run({ args: { projectId } });
+      output.mockRestore();
+
+      const project = await getProject(db, projectId);
+      expect(project!.status).toBe("done");
+    });
+
+    it("project archive errors if already done", async () => {
+      const { projectCommand } = await import("#/cli/commands/project");
+      const archiveCommand = await getSubCommand(projectCommand, "archive");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await archiveCommand.run({ args: { projectId } });
+      output.mockRestore();
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      await expect(
+        archiveCommand.run({ args: { projectId } }),
+      ).rejects.toThrow("process.exit:1");
+
+      exit.mockRestore();
+    });
+  });
+
+  describe("workspace commands", () => {
+    it("workspace list shows all workspaces", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const listCommand = await getSubCommand(workspaceCommand, "list");
+
+      const lines: string[] = [];
+      const output = vi.spyOn(console, "log").mockImplementation((msg) => lines.push(msg));
+      await listCommand.run({ args: {} });
+      output.mockRestore();
+
+      expect(lines.length).toBeGreaterThan(0);
+      expect(lines[0]).toContain(workspaceId);
+    });
+
+    it("workspace show displays workspace details", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const showCommand = await getSubCommand(workspaceCommand, "show");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await showCommand.run({ args: { workspaceId } });
+      output.mockRestore();
+
+      const ws = await getWorkspace(db, workspaceId);
+      expect(ws).not.toBeNull();
+    });
+
+    it("workspace show errors on unknown id", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const showCommand = await getSubCommand(workspaceCommand, "show");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      await expect(
+        showCommand.run({ args: { workspaceId: "nonexistent" } }),
+      ).rejects.toThrow("process.exit:1");
+
+      exit.mockRestore();
+    });
+
+    it("workspace rename updates the label", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const renameCommand = await getSubCommand(workspaceCommand, "rename");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await renameCommand.run({ args: { workspaceId, label: "my-label" } });
+      output.mockRestore();
+
+      const ws = await getWorkspace(db, workspaceId);
+      expect(ws!.label).toBe("my-label");
+    });
+
+    it("workspace remove fails when PRDs are linked", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const removeCommand = await getSubCommand(workspaceCommand, "remove");
+
+      await createPrd(db, { projectId, workspaceId, title: "linked PRD" });
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      await expect(
+        removeCommand.run({ args: { workspaceId, force: false } }),
+      ).rejects.toThrow("process.exit:1");
+
+      exit.mockRestore();
+    });
+
+    it("workspace remove --force cascades linked data", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const removeCommand = await getSubCommand(workspaceCommand, "remove");
+
+      await createPrd(db, { projectId, workspaceId, title: "linked PRD" });
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await removeCommand.run({ args: { workspaceId, force: true } });
+      output.mockRestore();
+
+      const ws = await getWorkspace(db, workspaceId);
+      expect(ws).toBeNull();
+    });
+  });
+
+  describe("prd archive command", () => {
+    it("archives a committed PRD", async () => {
+      const { prdCommand } = await import("#/cli/commands/prd");
+      const archiveCommand = await getSubCommand(prdCommand, "archive");
+
+      const prd = await createPrd(db, { projectId, workspaceId, title: "To Archive" });
+      await commitPrd(db, prd.id);
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await archiveCommand.run({ args: { prdId: prd.id } });
+      output.mockRestore();
+
+      const { getPrd } = await import("#/lib/workflow");
+      const updated = await getPrd(db, prd.id);
+      expect(updated!.status).toBe("archived");
+    });
+
+    it("prd archive errors on non-existent PRD", async () => {
+      const { prdCommand } = await import("#/cli/commands/prd");
+      const archiveCommand = await getSubCommand(prdCommand, "archive");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      await expect(
+        archiveCommand.run({ args: { prdId: "nonexistent" } }),
+      ).rejects.toThrow("process.exit:1");
 
       exit.mockRestore();
     });

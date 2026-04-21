@@ -7,6 +7,7 @@ import {
   commitPrd,
   activatePrd,
   amendPrd,
+  archivePrd,
   getPrd,
 } from "#/lib/workflow";
 import { log } from "#/lib/logger";
@@ -225,6 +226,34 @@ const amendCommand = defineValidatedCommand({
   },
 });
 
+const archiveCommand = defineValidatedCommand({
+  schema: prdIdSchema,
+  meta: {
+    name: "archive",
+    description: "Archive a committed or active PRD",
+  },
+  args: {
+    prdId: {
+      type: "positional",
+      description: "PRD ID",
+      required: true,
+    },
+  },
+  run: async ({ args }) => {
+    const { db } = await resolveCurrentWorkspace();
+    const prd = await getPrd(db, args.prdId);
+    if (!prd) {
+      outputError("not_found", `PRD not found: ${args.prdId}`);
+    }
+    const archived = await archivePrd(db, prd.id);
+    if (isJsonMode()) {
+      outputSuccess({ item: archived });
+    } else {
+      console.log(`Archived PRD '${archived.title}' (${archived.id})`);
+    }
+  },
+});
+
 export const prdCommand = defineValidatedCommand({
   schema: z.object({}),
   meta: { name: "prd", description: "PRD management" },
@@ -235,5 +264,6 @@ export const prdCommand = defineValidatedCommand({
     commit: commitCommand,
     activate: activateCommand,
     amend: amendCommand,
+    archive: archiveCommand,
   },
 });

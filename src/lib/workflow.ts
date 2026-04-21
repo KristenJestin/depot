@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { projects, workspaces, prds, tasks, reviews, activityLog } from "#/db/schema";
 import { generateId } from "#/lib/ids";
 import type { Database } from "#/db/client";
-import type { Effort, ReviewMode, ReviewDecision } from "#/lib/validator";
+import type { Effort, ProjectStatus, ReviewMode, ReviewDecision } from "#/lib/validator";
 import { normalizeTaskDescriptionForStorage } from "#/lib/task-spec";
 import { normalizeWorkspacePath } from "#/lib/paths";
 
@@ -31,6 +31,26 @@ export async function listProjects(db: Database) {
 
 export async function getProject(db: Database, id: string) {
   return db.query.projects.findFirst({ where: { id } }) ?? null;
+}
+
+export async function updateProject(
+  db: Database,
+  id: string,
+  changes: { name?: string; description?: string; status?: ProjectStatus },
+) {
+  const project = await getProject(db, id);
+  if (!project) throw new Error(`Project not found: ${id}`);
+  const now = new Date().toISOString();
+  await db
+    .update(projects)
+    .set({
+      ...(changes.name !== undefined ? { name: changes.name } : {}),
+      ...(changes.description !== undefined ? { description: changes.description } : {}),
+      ...(changes.status !== undefined ? { status: changes.status } : {}),
+      updatedAt: now,
+    })
+    .where(eq(projects.id, id));
+  return (await getProject(db, id))!;
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
@@ -92,6 +112,64 @@ export async function updateWorkspacePath(db: Database, workspaceId: string, new
     })
     .where(eq(workspaces.id, workspaceId));
   return db.query.workspaces.findFirst({ where: { id: workspaceId } });
+}
+
+export async function listWorkspaces(db: Database, filter: { projectId?: string } = {}) {
+  if (filter.projectId) {
+    return db.query.workspaces.findMany({
+      where: { projectId: filter.projectId },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+  return db.query.workspaces.findMany({ orderBy: { createdAt: "asc" } });
+}
+
+export async function getWorkspace(db: Database, id: string) {
+  return (await db.query.workspaces.findFirst({ where: { id } })) ?? null;
+}
+
+export async function updateWorkspaceLabel(db: Database, id: string, label: string | null) {
+  const workspace = await getWorkspace(db, id);
+  if (!workspace) throw new Error(`Workspace not found: ${id}`);
+  await db
+    .update(workspaces)
+    .set({ label, updatedAt: new Date().toISOString() })
+    .where(eq(workspaces.id, id));
+  return (await getWorkspace(db, id))!;
+}
+
+export async function removeWorkspace(db: Database, id: string, force = false) {
+  const workspace = await getWorkspace(db, id);
+  if (!workspace) throw new Error(`Workspace not found: ${id}`);
+
+  const linkedPrds = await db.query.prds.findMany({ where: { workspaceId: id } });
+  if (linkedPrds.length > 0 && !force) {
+    throw new Error(
+      `Workspace has ${linkedPrds.length} linked PRD(s). Use --force to remove anyway.`,
+    );
+  }
+
+  if (force && linkedPrds.length > 0) {
+    for (const prd of linkedPrds) {
+      const prdTasks = await db.query.tasks.findMany({ where: { prdId: prd.id } });
+      for (const task of prdTasks) {
+        await db.delete(activityLog).where(eq(activityLog.taskId, task.id));
+      }
+      const prdReviews = await db.query.reviews.findMany({ where: { prdId: prd.id } });
+      for (const review of prdReviews) {
+        await db.delete(activityLog).where(eq(activityLog.reviewId, review.id));
+        await db.delete(reviews).where(eq(reviews.id, review.id));
+      }
+      await db.delete(activityLog).where(eq(activityLog.prdId, prd.id));
+      await db.delete(tasks).where(eq(tasks.prdId, prd.id));
+    }
+    for (const prd of linkedPrds) {
+      await db.delete(prds).where(eq(prds.id, prd.id));
+    }
+  }
+
+  await db.delete(activityLog).where(eq(activityLog.workspaceId, id));
+  await db.delete(workspaces).where(eq(workspaces.id, id));
 }
 
 // ── PRDs ──────────────────────────────────────────────────────────────────────
