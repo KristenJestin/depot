@@ -28,6 +28,7 @@ type PrdRecord = {
   context: string | null;
   scope: string | null;
   status: string;
+  workspaceId: string;
   createdAt: string;
   committedAt: string | null;
   activatedAt: string | null;
@@ -52,6 +53,15 @@ type ActivePrdResolution =
   | { kind: "none" }
   | { kind: "single"; prd: PrdRecord }
   | { kind: "conflict"; prds: PrdRecord[] };
+
+export type PrdTargetResolution =
+  | { kind: "found"; prd: PrdRecord }
+  | { kind: "ambiguous"; candidates: PrdRecord[] }
+  | { kind: "not_found" };
+
+export type PrdLaunchability =
+  | { launchable: true }
+  | { launchable: false; reason: string };
 
 const CONTEXT_SECTION_TITLES = {
   prd: {
@@ -140,12 +150,13 @@ export async function renderContextMode(
   db: Database,
   workspaceId: string,
   mode: ContextMode,
+  prdTarget?: string,
 ): Promise<string> {
   switch (mode) {
     case "prd":
       return renderPrdContext(db, workspaceId);
     case "dev":
-      return renderDevContext(db, workspaceId);
+      return renderDevContext(db, workspaceId, prdTarget);
     case "review":
       return renderReviewContext(db, workspaceId);
   }
@@ -235,10 +246,12 @@ async function renderPrdContext(db: Database, workspaceId: string): Promise<stri
   return lines.join("\n");
 }
 
-async function renderDevContext(db: Database, workspaceId: string): Promise<string> {
+async function renderDevContext(
+  db: Database,
+  workspaceId: string,
+  prdTarget?: string,
+): Promise<string> {
   const header = await loadWorkspaceHeader(db, workspaceId);
-  const prds = await listPrds(db, { workspaceId });
-  const activeResolution = resolveActivePrd(prds);
   const template = getContextTemplate("dev").trim();
   const lines: string[] = [];
 
@@ -250,6 +263,124 @@ async function renderDevContext(db: Database, workspaceId: string): Promise<stri
   lines.push(CONTEXT_SECTION_TITLES.dev.feedback);
   lines.push(...DEV_PLACEHOLDERS.feedback);
   lines.push("");
+
+  // ── Explicit PRD targeting ─────────────────────────────────────────────────
+  if (prdTarget !== undefined && prdTarget !== "") {
+    const resolution = await resolvePrdTarget(db, workspaceId, prdTarget);
+
+    if (resolution.kind === "not_found") {
+      throw new Error(
+        `No PRD found matching '${prdTarget}' in this workspace.\n` +
+          `Provide the full PRD ID or a title substring that uniquely identifies one PRD.\n` +
+          `Run \`depot prd list\` to see available PRDs.`,
+      );
+    }
+
+    if (resolution.kind === "ambiguous") {
+      const candidateLines = resolution.candidates
+        .map((prd) => `  ${prd.id}  ${prd.title}  [${prd.status}]  rev ${prd.revision}`)
+        .join("\n");
+      throw new Error(
+        `'${prdTarget}' matches multiple PRDs. Provide the full ID to target one:\n${candidateLines}`,
+      );
+    }
+
+    const targetedPrd = resolution.prd;
+    const launchability = await checkPrdLaunchability(db, workspaceId, targetedPrd);
+
+    if (!launchability.launchable) {
+      throw new Error(
+        `PRD '${targetedPrd.id}' (${targetedPrd.title}) cannot be launched in dev mode.\n${launchability.reason}`,
+      );
+    }
+
+    // Render dev context for the explicitly targeted PRD
+    const allTasks = await listTasks(db, targetedPrd.id);
+    const previousRevisions = await loadArchivedRevisionChain(db, targetedPrd);
+
+    lines.push(CONTEXT_SECTION_TITLES.dev.activePrd);
+    lines.push(
+      `${targetedPrd.id}  ${targetedPrd.title}  [${targetedPrd.status}]  rev ${targetedPrd.revision}`,
+    );
+    if (targetedPrd.context) {
+      lines.push(`Context : ${targetedPrd.context}`);
+    }
+    if (targetedPrd.scope) {
+      lines.push(`Scope   : ${targetedPrd.scope}`);
+    }
+    lines.push("");
+
+    lines.push(CONTEXT_SECTION_TITLES.dev.previousRevisions);
+    if (previousRevisions.length === 0) {
+      lines.push("No archived revisions in this PRD chain.");
+    } else {
+      for (const revision of previousRevisions) {
+        lines.push(
+          `${revision.id}  ${revision.title}  [${revision.status}]  rev ${revision.revision}`,
+        );
+      }
+    }
+    lines.push("");
+
+    lines.push(CONTEXT_SECTION_TITLES.dev.progress);
+    lines.push(buildProgressSummary(allTasks));
+    lines.push("");
+
+    lines.push(CONTEXT_SECTION_TITLES.dev.currentTask);
+    const currentTask = allTasks.find((task) => task.status === "in_progress");
+    if (!currentTask) {
+      lines.push("No task in progress.");
+    } else {
+      lines.push(`${currentTask.id}  ${currentTask.title}`);
+      lines.push(`Started : ${currentTask.startedAt ?? "unknown"}`);
+      lines.push(
+        `Summary : ${summarizeTaskDescription(currentTask.description, currentTask.descriptionFormat)}`,
+      );
+      lines.push(`Read full spec: depot task show ${currentTask.id}`);
+      lines.push("Criteria:");
+      appendCriteria(lines, currentTask.doneCriteria);
+    }
+    lines.push("");
+
+    lines.push(CONTEXT_SECTION_TITLES.dev.blockedTasks);
+    const blockedTasks = allTasks.filter((task) => task.status === "blocked");
+    if (blockedTasks.length === 0) {
+      lines.push("No blocked tasks.");
+    } else {
+      for (const task of blockedTasks) {
+        lines.push(`${task.id}  ${task.title}`);
+        lines.push(`Reason: ${task.blockedReason ?? "Blocked without a recorded reason"}`);
+      }
+    }
+    lines.push("");
+
+    await appendRecentActivity(lines, db, header.project.id, workspaceId);
+
+    lines.push(CONTEXT_SECTION_TITLES.dev.nextRecommendedTask);
+    const nextTask = findNextRecommendedTask(allTasks);
+    if (!nextTask) {
+      lines.push("No task is currently recommendable.");
+    } else {
+      lines.push(`${nextTask.id}  ${nextTask.title}`);
+      lines.push(`Effort      : ${nextTask.effort}`);
+      lines.push("Dependencies: satisfied");
+      lines.push(
+        `Summary     : ${summarizeTaskDescription(nextTask.description, nextTask.descriptionFormat)}`,
+      );
+      lines.push(`Read full spec: depot task show ${nextTask.id}`);
+      lines.push("Criteria:");
+      appendCriteria(lines, nextTask.doneCriteria);
+    }
+    lines.push("");
+
+    lines.push(CONTEXT_SECTION_TITLES.dev.instructions);
+    lines.push(template);
+    return lines.join("\n");
+  }
+
+  // ── Auto-resolution (no explicit target) ──────────────────────────────────
+  const prds = await listPrds(db, { workspaceId });
+  const activeResolution = resolveActivePrd(prds);
 
   if (activeResolution.kind === "conflict") {
     throw new Error(buildActivePrdConflictMessage("dev", header.workspace, activeResolution.prds));
@@ -472,6 +603,80 @@ async function buildIndexReviewStatus(
 
   const doneTasks = (await listTasks(db, activeResolution.prd.id)).filter((task) => task.status === "done");
   return `${doneTasks.length} done task(s) ready for review in PRD ${activeResolution.prd.id}.`;
+}
+
+/**
+ * Resolve a free-text target to a specific PRD within the current workspace.
+ * Tries exact ID match first, then unique case-insensitive substring title match.
+ */
+export async function resolvePrdTarget(
+  db: Database,
+  workspaceId: string,
+  target: string,
+): Promise<PrdTargetResolution> {
+  const allPrds = await listPrds(db, { workspaceId });
+
+  // Exact ID match — highest confidence
+  const byId = allPrds.find((prd) => prd.id === target);
+  if (byId) {
+    return { kind: "found", prd: byId };
+  }
+
+  // Case-insensitive substring title match
+  const normalizedTarget = target.toLowerCase();
+  const byTitle = allPrds.filter((prd) => prd.title.toLowerCase().includes(normalizedTarget));
+
+  if (byTitle.length === 1) {
+    return { kind: "found", prd: byTitle[0]! };
+  }
+
+  if (byTitle.length > 1) {
+    return { kind: "ambiguous", candidates: byTitle };
+  }
+
+  return { kind: "not_found" };
+}
+
+/**
+ * Verify that a resolved PRD is launchable in dev mode.
+ * Checks status compatibility, workspace coherence, and active-PRD conflicts.
+ */
+export async function checkPrdLaunchability(
+  db: Database,
+  workspaceId: string,
+  prd: PrdRecord,
+): Promise<PrdLaunchability> {
+  // Status must be compatible with the dev execution flow
+  if (prd.status !== "committed" && prd.status !== "in_progress") {
+    return {
+      launchable: false,
+      reason: `PRD status is '${prd.status}'. Only 'committed' or 'in_progress' PRDs can be targeted in dev mode.`,
+    };
+  }
+
+  // Workspace coherence: PRD must belong to the current workspace
+  if (prd.workspaceId !== workspaceId) {
+    return {
+      launchable: false,
+      reason: `PRD '${prd.id}' belongs to a different workspace and cannot be targeted here.`,
+    };
+  }
+
+  // Conflict check: a committed PRD cannot be targeted if another PRD is already active
+  if (prd.status === "committed") {
+    const activePrds = (await listPrds(db, { workspaceId })).filter(
+      (p) => p.status === "in_progress",
+    );
+    if (activePrds.length > 0) {
+      const conflict = activePrds[0]!;
+      return {
+        launchable: false,
+        reason: `Cannot target committed PRD '${prd.id}': workspace already has an active PRD '${conflict.id}' (${conflict.title}). Archive or complete the active PRD first.`,
+      };
+    }
+  }
+
+  return { launchable: true };
 }
 
 function resolveActivePrd(prds: PrdRecord[]): ActivePrdResolution {

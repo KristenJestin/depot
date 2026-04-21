@@ -359,6 +359,7 @@ describe("CLI commands", () => {
       args: {
         _: [],
         mode: "prd" as never,
+        prdTarget: undefined as never,
       },
       cmd: contextCommand,
     });

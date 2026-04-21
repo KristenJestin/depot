@@ -5,6 +5,7 @@ import * as z from "zod";
 
 const contextArgsSchema = z.object({
   mode: z.enum(["prd", "dev", "review"]).optional(),
+  prdTarget: z.string().optional(),
 });
 
 export const contextCommand = defineValidatedCommand({
@@ -14,6 +15,11 @@ export const contextCommand = defineValidatedCommand({
     mode: {
       type: "positional",
       description: "Context mode (prd/dev/review)",
+      required: false,
+    },
+    prdTarget: {
+      type: "positional",
+      description: "PRD ID or title to target (dev mode only)",
       required: false,
     },
   },
@@ -26,7 +32,9 @@ export const contextCommand = defineValidatedCommand({
     }
 
     try {
-      console.log(await renderContextMode(db, ws.id, args.mode as ContextMode));
+      console.log(
+        await renderContextMode(db, ws.id, args.mode as ContextMode, args.prdTarget),
+      );
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);

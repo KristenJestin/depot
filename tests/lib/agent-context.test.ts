@@ -15,7 +15,13 @@ import {
   logActivity,
   startTask,
 } from "#/lib/workflow";
-import { formatPathForDisplay, renderContextIndex, renderContextMode } from "#/lib/agent-context";
+import {
+  checkPrdLaunchability,
+  formatPathForDisplay,
+  renderContextIndex,
+  renderContextMode,
+  resolvePrdTarget,
+} from "#/lib/agent-context";
 
 let db: Database;
 
@@ -227,5 +233,265 @@ describe("agent context renderer", () => {
     expect(formatPathForDisplay("/home/tester/projects/depot")).toBe("~/projects/depot");
 
     process.env.HOME = originalHome;
+  });
+});
+
+describe("resolvePrdTarget", () => {
+  it("resolves by exact ID", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "My feature PRD",
+    });
+
+    const result = await resolvePrdTarget(db, workspace.id, prd.id);
+    expect(result.kind).toBe("found");
+    if (result.kind !== "found") throw new Error("unreachable");
+    expect(result.prd.id).toBe(prd.id);
+  });
+
+  it("resolves by unique title substring (case-insensitive)", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Explicit PRD Targeting Feature",
+    });
+
+    const result = await resolvePrdTarget(db, workspace.id, "explicit prd");
+    expect(result.kind).toBe("found");
+    if (result.kind !== "found") throw new Error("unreachable");
+    expect(result.prd.id).toBe(prd.id);
+  });
+
+  it("returns ambiguous when title matches multiple PRDs", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Auth feature alpha",
+    });
+    await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Auth feature beta",
+    });
+
+    const result = await resolvePrdTarget(db, workspace.id, "auth feature");
+    expect(result.kind).toBe("ambiguous");
+    if (result.kind !== "ambiguous") throw new Error("unreachable");
+    expect(result.candidates).toHaveLength(2);
+  });
+
+  it("returns not_found when no PRD matches", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+
+    const result = await resolvePrdTarget(db, workspace.id, "nonexistent-prd-xyz");
+    expect(result.kind).toBe("not_found");
+  });
+
+  it("does not resolve PRDs from another workspace", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const ws1 = await addWorkspace(db, { projectId: project.id, path: "/ws1" });
+    const ws2 = await addWorkspace(db, { projectId: project.id, path: "/ws2" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: ws1.id,
+      title: "ws1 PRD",
+    });
+
+    const result = await resolvePrdTarget(db, ws2.id, prd.id);
+    expect(result.kind).toBe("not_found");
+  });
+});
+
+describe("checkPrdLaunchability", () => {
+  it("allows a committed PRD with no active PRD in workspace", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "My PRD",
+    });
+    const committed = await commitPrd(db, prd.id);
+
+    const result = await checkPrdLaunchability(db, workspace.id, committed);
+    expect(result.launchable).toBe(true);
+  });
+
+  it("allows an in_progress PRD", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "My PRD",
+    });
+    await commitPrd(db, prd.id);
+    const activated = await activatePrd(db, prd.id);
+
+    const result = await checkPrdLaunchability(db, workspace.id, activated);
+    expect(result.launchable).toBe(true);
+  });
+
+  it("rejects a draft PRD", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Draft PRD",
+    });
+
+    const result = await checkPrdLaunchability(db, workspace.id, prd);
+    expect(result.launchable).toBe(false);
+    if (result.launchable) throw new Error("unreachable");
+    expect(result.reason).toContain("draft");
+  });
+
+  it("rejects an archived PRD", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Archived PRD",
+    });
+    await commitPrd(db, prd.id);
+    await db.update(prds).set({ status: "archived" }).where(eq(prds.id, prd.id));
+
+    const archivedPrd = (await db.query.prds.findFirst({ where: { id: prd.id } }))!;
+    const result = await checkPrdLaunchability(db, workspace.id, archivedPrd);
+    expect(result.launchable).toBe(false);
+    if (result.launchable) throw new Error("unreachable");
+    expect(result.reason).toContain("archived");
+  });
+
+  it("rejects a committed PRD when another PRD is already active", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+
+    const active = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Active PRD",
+    });
+    await commitPrd(db, active.id);
+    await activatePrd(db, active.id);
+
+    const candidate = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Candidate PRD",
+    });
+    const committedCandidate = await commitPrd(db, candidate.id);
+
+    const result = await checkPrdLaunchability(db, workspace.id, committedCandidate);
+    expect(result.launchable).toBe(false);
+    if (result.launchable) throw new Error("unreachable");
+    expect(result.reason).toContain(active.id);
+  });
+});
+
+describe("renderContextMode dev with explicit prdTarget", () => {
+  it("renders dev context for an explicitly targeted PRD by ID", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Targeted PRD",
+      context: "explicit targeting context",
+    });
+    await commitPrd(db, prd.id);
+    await activatePrd(db, prd.id);
+
+    const activePrd = (await db.query.prds.findFirst({ where: { id: prd.id } }))!;
+    const output = await renderContextMode(db, workspace.id, "dev", activePrd.id);
+
+    expect(output).toContain("Targeted PRD");
+    expect(output).toContain("[in_progress]");
+    expect(output).toContain("Context: Dev Agent");
+  });
+
+  it("renders dev context for a targeted PRD by unique title substring", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Unique Feature PRD",
+    });
+    await commitPrd(db, prd.id);
+    await activatePrd(db, prd.id);
+
+    const output = await renderContextMode(db, workspace.id, "dev", "unique feature");
+    expect(output).toContain("Unique Feature PRD");
+  });
+
+  it("throws with a list of candidates on ambiguous target", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const alpha = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Auth alpha",
+    });
+    await commitPrd(db, alpha.id);
+    const beta = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Auth beta",
+    });
+    await commitPrd(db, beta.id);
+
+    await expect(renderContextMode(db, workspace.id, "dev", "auth")).rejects.toThrow(
+      /matches multiple PRDs/,
+    );
+  });
+
+  it("throws with no-match guidance when target is not found", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+
+    await expect(
+      renderContextMode(db, workspace.id, "dev", "totally-unknown-prd"),
+    ).rejects.toThrow(/No PRD found matching/);
+  });
+
+  it("throws with launchability reason when targeted PRD is in draft status", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Draft PRD target",
+    });
+
+    await expect(renderContextMode(db, workspace.id, "dev", prd.id)).rejects.toThrow(
+      /cannot be launched in dev mode/,
+    );
+  });
+
+  it("leaves default behavior unchanged when no prdTarget is given", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, { projectId: project.id, path: "/ws" });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Auto-resolved PRD",
+    });
+    await commitPrd(db, prd.id);
+    await activatePrd(db, prd.id);
+
+    const output = await renderContextMode(db, workspace.id, "dev");
+    expect(output).toContain("Auto-resolved PRD");
+    expect(output).toContain("[in_progress]");
   });
 });
