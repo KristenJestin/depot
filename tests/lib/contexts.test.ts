@@ -44,7 +44,9 @@ describe("context template registry", () => {
     expect(content).toContain("Security");
     expect(content).toContain("depot context review");
     expect(content).not.toContain("--status done");
-    expect(content).toContain("depot log add note");
+    expect(content).toContain("depot review start");
+    expect(content).toContain("depot review findings");
+    expect(content).toContain("depot review decide");
     expect(content).not.toContain("block the task");
   });
 

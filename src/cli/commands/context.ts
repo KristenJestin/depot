@@ -1,5 +1,6 @@
 import { defineValidatedCommand } from "#/cli/command";
 import { resolveCurrentWorkspace } from "#/cli/runtime";
+import { outputError, isJsonMode } from "#/cli/output";
 import { renderContextIndex, renderContextMode, type ContextMode } from "#/lib/agent-context";
 import * as z from "zod";
 
@@ -24,6 +25,13 @@ export const contextCommand = defineValidatedCommand({
     },
   },
   run: async ({ args }) => {
+    if (isJsonMode()) {
+      outputError(
+        "unsupported",
+        "The context command does not support --json output in this version.",
+      );
+    }
+
     const { db, ws } = await resolveCurrentWorkspace({ autoCreate: true });
 
     if (!args.mode) {

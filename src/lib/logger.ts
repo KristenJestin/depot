@@ -1,4 +1,5 @@
 let _debug = false;
+let _jsonMode = false;
 
 // ── Debug flag ───────────────────────────────────────────────────────────────
 
@@ -8,6 +9,16 @@ export function setDebug(enabled: boolean): void {
 
 export function isDebug(): boolean {
   return _debug;
+}
+
+// ── JSON mode flag ───────────────────────────────────────────────────────────
+
+export function setJsonMode(enabled: boolean): void {
+  _jsonMode = enabled;
+}
+
+export function isJsonMode(): boolean {
+  return _jsonMode;
 }
 
 // ── log ──────────────────────────────────────────────────────────────────────

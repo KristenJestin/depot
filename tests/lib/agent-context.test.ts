@@ -11,8 +11,11 @@ import {
   completeTask,
   createPrd,
   createProject,
+  createReview,
   createTask,
   logActivity,
+  recordReviewDecision,
+  recordReviewFindings,
   startTask,
 } from "#/lib/workflow";
 import {
@@ -201,6 +204,91 @@ describe("agent context renderer", () => {
     expect(output).toContain("criterion a");
     expect(output).not.toContain("Pending task");
     expect(output).toContain("Context: Review Agent");
+    expect(output).toContain("## Active Reviews");
+    expect(output).toContain("No active reviews for PRD");
+    expect(output).toContain("depot review start");
+  });
+
+  it("renders review context showing an active review with findings", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, {
+      projectId: project.id,
+      path: "/workspace/depot",
+    });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Reviewable PRD",
+    });
+    await commitPrd(db, prd.id);
+    await activatePrd(db, prd.id);
+
+    const review = await createReview(db, { prdId: prd.id, mode: "autonomous" });
+    await recordReviewFindings(db, review.id, {
+      findings: [{ title: "Issue A", severity: "major", description: "..." }],
+    });
+
+    const output = await renderContextMode(db, workspace.id, "review");
+
+    expect(output).toContain(review.id);
+    expect(output).toContain("in_progress");
+    expect(output).toContain("autonomous");
+    expect(output).toContain("Findings : 1 recorded");
+  });
+
+  it("renders review context showing completed reviews separately", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, {
+      projectId: project.id,
+      path: "/workspace/depot",
+    });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "Reviewable PRD",
+    });
+    await commitPrd(db, prd.id);
+    await activatePrd(db, prd.id);
+
+    const review = await createReview(db, { prdId: prd.id, mode: "autonomous" });
+    await recordReviewDecision(db, review.id, { decision: "approved" });
+
+    const output = await renderContextMode(db, workspace.id, "review");
+
+    expect(output).toContain("Completed reviews: 1");
+    expect(output).toContain("decision:approved");
+  });
+
+  it("includes active review count in the context index review status", async () => {
+    const project = await createProject(db, { name: "depot" });
+    const workspace = await addWorkspace(db, {
+      projectId: project.id,
+      path: "/workspace/depot",
+    });
+    const prd = await createPrd(db, {
+      projectId: project.id,
+      workspaceId: workspace.id,
+      title: "PRD",
+    });
+    await commitPrd(db, prd.id);
+    await activatePrd(db, prd.id);
+
+    const task = await createTask(db, {
+      prdId: prd.id,
+      title: "Task",
+      description: "desc",
+      doneCriteria: "Done",
+      effort: "s",
+    });
+    await startTask(db, task.id);
+    await completeTask(db, task.id);
+
+    await createReview(db, { prdId: prd.id, mode: "autonomous" });
+
+    const output = await renderContextIndex(db, workspace.id);
+
+    expect(output).toContain("1 done task(s) ready for review");
+    expect(output).toContain("1 active review(s)");
   });
 
   it("fails dev and review modes when multiple active PRDs exist", async () => {

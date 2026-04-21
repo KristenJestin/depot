@@ -3,6 +3,7 @@ import { resolveWorkspace } from "#/lib/workflow";
 import { log } from "#/lib/logger";
 import { normalizeWorkspacePath } from "#/lib/paths";
 import { resolveOrCreateWorkspaceForPath } from "#/lib/workspace-bootstrap";
+import { outputError } from "#/cli/output";
 import * as path from "path";
 import fs from "fs/promises";
 
@@ -45,8 +46,7 @@ export async function resolveCurrentWorkspace(options: { autoCreate?: boolean; c
   }
 
   if (!ws) {
-    console.error("No workspace found for current directory. Run `depot init` first.");
-    process.exit(1);
+    outputError("no_workspace", "No workspace found for current directory. Run `depot init` first.");
   }
 
   log.debug("Resolved workspace", ws.id, "->", ws.path);

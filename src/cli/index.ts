@@ -6,13 +6,15 @@ import { logCommand } from "#/cli/commands/log";
 import { handoffCommand } from "#/cli/commands/handoff";
 import { contextCommand } from "#/cli/commands/context";
 import { installCommand } from "#/cli/commands/install";
+import { reviewCommand } from "#/cli/commands/review";
 import { defineValidatedCommand } from "#/cli/command";
-import { setDebug } from "#/lib/logger";
+import { setDebug, setJsonMode } from "#/lib/logger";
 import * as z from "zod";
 import pkg from "../../package.json";
 
 const mainArgsSchema = z.object({
   debug: z.boolean().default(false),
+  json: z.boolean().default(false),
 });
 
 const main = defineValidatedCommand({
@@ -28,10 +30,18 @@ const main = defineValidatedCommand({
       description: "Enable verbose debug output",
       default: false,
     },
+    json: {
+      type: "boolean",
+      description: "Emit machine-readable JSON output on stdout",
+      default: false,
+    },
   },
   setup({ args }) {
     if (args.debug) {
       setDebug(true);
+    }
+    if (args.json) {
+      setJsonMode(true);
     }
   },
   subCommands: {
@@ -43,6 +53,7 @@ const main = defineValidatedCommand({
     handoff: handoffCommand,
     context: contextCommand,
     install: installCommand,
+    review: reviewCommand,
   },
 });
 

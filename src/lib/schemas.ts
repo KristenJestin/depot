@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { VALID_EFFORTS, VALID_EVENT_TYPES } from "#/lib/validator";
+import { isJsonMode } from "#/lib/logger";
 
 function parseLooseJsonLike(input: string): Record<string, unknown> {
   let index = 0;
@@ -202,13 +203,26 @@ export const commaSeparatedIds = z
 /**
  * Validate args using a Zod schema inside a citty `setup` or `run` hook.
  * On failure, prints each validation error and exits with code 1.
+ * In JSON mode, emits a structured error envelope to stdout instead.
  */
 export function validateArgs<T extends z.ZodTypeAny>(schema: T, args: unknown): z.infer<T> {
   const result = schema.safeParse(args);
   if (!result.success) {
-    for (const issue of result.error.issues) {
-      const path = issue.path.length > 0 ? issue.path.join(".") : "input";
-      console.error(`Validation error (${path}): ${issue.message}`);
+    if (isJsonMode()) {
+      const message = result.error.issues
+        .map((issue) => {
+          const path = issue.path.length > 0 ? issue.path.join(".") : "input";
+          return `${path}: ${issue.message}`;
+        })
+        .join("; ");
+      process.stdout.write(
+        JSON.stringify({ kind: "error", error: { code: "validation_error", message } }) + "\n",
+      );
+    } else {
+      for (const issue of result.error.issues) {
+        const path = issue.path.length > 0 ? issue.path.join(".") : "input";
+        console.error(`Validation error (${path}): ${issue.message}`);
+      }
     }
     process.exit(1);
   }

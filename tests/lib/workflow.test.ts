@@ -22,6 +22,11 @@ import {
   listTasks,
   logActivity,
   listActivity,
+  createReview,
+  listReviews,
+  startReview,
+  recordReviewFindings,
+  recordReviewDecision,
 } from "#/lib/workflow";
 
 let db: Database;
@@ -779,6 +784,178 @@ describe("activity log", () => {
         taskId: task.id,
         eventType: "note",
         payload: { message: "wrong prd" },
+      }),
+    ).rejects.toThrow(/does not belong to prd/i);
+  });
+});
+
+// ── Reviews ──────────────────────────────────────────────────────────────────
+
+describe("review lifecycle", () => {
+  let projectId: string;
+  let workspaceId: string;
+  let prdId: string;
+
+  beforeEach(async () => {
+    const project = await createProject(db, { name: "my-app" });
+    projectId = project.id;
+    const ws = await addWorkspace(db, {
+      projectId,
+      path: "/home/user/my-app",
+    });
+    workspaceId = ws.id;
+    const prd = await createPrd(db, {
+      projectId,
+      workspaceId,
+      title: "Core Foundation",
+    });
+    await commitPrd(db, prd.id);
+    await activatePrd(db, prd.id);
+    prdId = prd.id;
+  });
+
+  it("creates a review in pending status with autonomous mode", async () => {
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+    expect(review.status).toBe("pending");
+    expect(review.mode).toBe("autonomous");
+    expect(review.decision).toBeNull();
+    expect(review.userFeedback).toBeNull();
+    expect(review.prdRevision).toBe(1);
+    expect(JSON.parse(review.findings)).toEqual([]);
+  });
+
+  it("creates an assisted review with user feedback", async () => {
+    const review = await createReview(db, {
+      prdId,
+      mode: "assisted",
+      userFeedback: "The auth flow seems too permissive",
+    });
+    expect(review.mode).toBe("assisted");
+    expect(review.userFeedback).toBe("The auth flow seems too permissive");
+  });
+
+  it("starts a pending review setting status to in_progress", async () => {
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+    const started = await startReview(db, review.id);
+    expect(started.status).toBe("in_progress");
+  });
+
+  it("rejects starting a non-pending review", async () => {
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+    await startReview(db, review.id);
+    await expect(startReview(db, review.id)).rejects.toThrow(/expected 'pending'/i);
+  });
+
+  it("records findings with severity and description", async () => {
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+    const findings = [
+      { title: "Missing input validation", severity: "major", description: "The API endpoint accepts unbounded input." },
+    ];
+    const updated = await recordReviewFindings(db, review.id, { findings });
+    expect(JSON.parse(updated.findings)).toHaveLength(1);
+    expect(updated.status).toBe("in_progress");
+  });
+
+  it("records questions and follow-up tasks alongside findings", async () => {
+    const review = await createReview(db, { prdId, mode: "assisted" });
+    const questions = [{ question: "Was error handling tested?", context: "task 2" }];
+    const followupTasks = [{ title: "Add error handling test", description: "...", rationale: "..." }];
+    const updated = await recordReviewFindings(db, review.id, {
+      findings: [],
+      questions,
+      followupTasks,
+    });
+    expect(JSON.parse(updated.questions)).toHaveLength(1);
+    expect(JSON.parse(updated.followupTasks)).toHaveLength(1);
+  });
+
+  it("rejects recording findings on a completed review", async () => {
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+    await recordReviewDecision(db, review.id, { decision: "approved" });
+    await expect(
+      recordReviewFindings(db, review.id, { findings: [] }),
+    ).rejects.toThrow(/already completed/i);
+  });
+
+  it("records a human decision of approved and closes the review", async () => {
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+    const decided = await recordReviewDecision(db, review.id, { decision: "approved" });
+    expect(decided.status).toBe("completed");
+    expect(decided.decision).toBe("approved");
+    expect(decided.completedAt).toBeTruthy();
+  });
+
+  it("records a changes_requested decision with a note", async () => {
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+    const decided = await recordReviewDecision(db, review.id, {
+      decision: "changes_requested",
+      note: "Rework the auth middleware",
+    });
+    expect(decided.decision).toBe("changes_requested");
+    expect(decided.decisionNote).toBe("Rework the auth middleware");
+  });
+
+  it("rejects recording a decision on a completed review", async () => {
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+    await recordReviewDecision(db, review.id, { decision: "approved" });
+    await expect(
+      recordReviewDecision(db, review.id, { decision: "rejected" }),
+    ).rejects.toThrow(/already completed/i);
+  });
+
+  it("lists reviews for a PRD in creation order", async () => {
+    const r1 = await createReview(db, { prdId, mode: "autonomous" });
+    const r2 = await createReview(db, { prdId, mode: "assisted", userFeedback: "looks odd" });
+    const list = await listReviews(db, prdId);
+    expect(list).toHaveLength(2);
+    expect(list[0].id).toBe(r1.id);
+    expect(list[1].id).toBe(r2.id);
+  });
+
+  it("allows multiple reviews across different revisions of the same PRD chain", async () => {
+    // Use a separate workspace to avoid conflicts with the active PRD from beforeEach
+    const ws2 = await addWorkspace(db, {
+      projectId,
+      path: "/home/user/my-app-review-test",
+    });
+    const prd = await createPrd(db, { projectId, workspaceId: ws2.id, title: "PRD v1" });
+    await commitPrd(db, prd.id);
+    await activatePrd(db, prd.id);
+    await createReview(db, { prdId: prd.id, mode: "autonomous" });
+
+    // Amend creates a new revision (archives old)
+    const prdV2 = await amendPrd(db, prd.id, { title: "PRD v2" });
+    await createReview(db, { prdId: prdV2.id, mode: "autonomous" });
+
+    const reviewsV1 = await listReviews(db, prd.id);
+    const reviewsV2 = await listReviews(db, prdV2.id);
+    expect(reviewsV1).toHaveLength(1);
+    expect(reviewsV2).toHaveLength(1);
+    expect(reviewsV2[0].prdRevision).toBe(2);
+  });
+
+  it("rejects creating a review for a non-existent PRD", async () => {
+    await expect(
+      createReview(db, { prdId: "non-existent-id", mode: "autonomous" }),
+    ).rejects.toThrow(/prd not found/i);
+  });
+
+  it("rejects logging a review that does not belong to the supplied PRD", async () => {
+    const otherPrd = await createPrd(db, {
+      projectId,
+      workspaceId,
+      title: "Other PRD",
+    });
+    const review = await createReview(db, { prdId, mode: "autonomous" });
+
+    await expect(
+      logActivity(db, {
+        projectId,
+        workspaceId,
+        prdId: otherPrd.id,
+        reviewId: review.id,
+        eventType: "review_started",
+        payload: {},
       }),
     ).rejects.toThrow(/does not belong to prd/i);
   });

@@ -3,7 +3,7 @@ import { getContextTemplate } from "#/lib/contexts";
 import { normalizeWorkspacePath } from "#/lib/paths";
 import { summarizeTaskDescription } from "#/lib/task-spec";
 import type { TaskDescriptionFormat } from "#/lib/validator";
-import { getProject, getPrd, listActivity, listPrds, listTasks } from "#/lib/workflow";
+import { getProject, getPrd, listActivity, listPrds, listTasks, listReviews } from "#/lib/workflow";
 
 export type ContextMode = "prd" | "dev" | "review";
 
@@ -84,6 +84,7 @@ const CONTEXT_SECTION_TITLES = {
   review: {
     overview: "## Overview",
     activePrd: "## Active PRD",
+    activeReviews: "## Active Reviews",
     tasksToReview: "## Tasks to Review",
     instructions: "## Instructions",
   },
@@ -512,6 +513,9 @@ async function renderReviewContext(db: Database, workspaceId: string): Promise<s
   if (activeResolution.kind === "none") {
     lines.push(...REVIEW_PLACEHOLDERS.noActivePrd);
     lines.push("");
+    lines.push(CONTEXT_SECTION_TITLES.review.activeReviews);
+    lines.push("No active reviews because there is no active PRD.");
+    lines.push("");
     lines.push(CONTEXT_SECTION_TITLES.review.tasksToReview);
     lines.push(...REVIEW_PLACEHOLDERS.noTasksToReview);
     lines.push("");
@@ -526,6 +530,43 @@ async function renderReviewContext(db: Database, workspaceId: string): Promise<s
   lines.push(`Scope   : ${activePrd.scope ?? "No PRD scope recorded."}`);
   lines.push("");
 
+  // ── Active Reviews ─────────────────────────────────────────────────────────
+  lines.push(CONTEXT_SECTION_TITLES.review.activeReviews);
+  const allReviews = await listReviews(db, activePrd.id);
+  const activeReviews = allReviews.filter(
+    (r) => r.status === "pending" || r.status === "in_progress",
+  );
+  const completedReviews = allReviews.filter((r) => r.status === "completed");
+
+  if (activeReviews.length === 0) {
+    lines.push(`No active reviews for PRD ${activePrd.id}.`);
+    lines.push(`Run \`depot review start\` to begin a review.`);
+  } else {
+    for (const review of activeReviews) {
+      lines.push(`${review.id}  [${review.status}]  ${review.mode}  rev ${review.prdRevision}`);
+      if (review.userFeedback) {
+        lines.push(`Feedback : ${review.userFeedback}`);
+      }
+      const findings = JSON.parse(review.findings) as unknown[];
+      lines.push(`Findings : ${findings.length} recorded`);
+      const followups = JSON.parse(review.followupTasks) as unknown[];
+      if (followups.length > 0) {
+        lines.push(`Follow-up tasks suggested: ${followups.length}`);
+      }
+    }
+  }
+
+  if (completedReviews.length > 0) {
+    lines.push(`Completed reviews: ${completedReviews.length}`);
+    for (const review of completedReviews) {
+      lines.push(
+        `  ${review.id}  decision:${review.decision ?? "none"}  rev ${review.prdRevision}  ${review.completedAt ?? ""}`,
+      );
+    }
+  }
+  lines.push("");
+
+  // ── Tasks to Review ────────────────────────────────────────────────────────
   lines.push(CONTEXT_SECTION_TITLES.review.tasksToReview);
   const doneTasks = (await listTasks(db, activePrd.id)).filter((task) => task.status === "done");
   if (doneTasks.length === 0) {
@@ -601,8 +642,17 @@ async function buildIndexReviewStatus(
     return "No active PRD.";
   }
 
-  const doneTasks = (await listTasks(db, activeResolution.prd.id)).filter((task) => task.status === "done");
-  return `${doneTasks.length} done task(s) ready for review in PRD ${activeResolution.prd.id}.`;
+  const allTasks = await listTasks(db, activeResolution.prd.id);
+  const doneTasks = allTasks.filter((task) => task.status === "done");
+  const allReviews = await listReviews(db, activeResolution.prd.id);
+  const activeReviews = allReviews.filter(
+    (r) => r.status === "pending" || r.status === "in_progress",
+  );
+  const reviewSuffix =
+    activeReviews.length > 0
+      ? ` ${activeReviews.length} active review(s).`
+      : " No active reviews.";
+  return `${doneTasks.length} done task(s) ready for review in PRD ${activeResolution.prd.id}.${reviewSuffix}`;
 }
 
 /**

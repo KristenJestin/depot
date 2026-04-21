@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
 import { formatStructuredTaskDescription } from "#/lib/task-spec";
@@ -11,6 +11,7 @@ import {
   listTasks,
   listActivity,
 } from "#/lib/workflow";
+import { setJsonMode } from "#/lib/logger";
 
 const resolveCurrentWorkspace = vi.fn<() => Promise<{ db: Database; ws: unknown }>>();
 
@@ -30,6 +31,25 @@ async function getSubCommand(command: { subCommands?: unknown }, name: string) {
   return (subCommands as Record<string, RunnableSubCommand>)[name]!;
 }
 
+/**
+ * Capture all process.stdout.write calls during fn() and return the
+ * concatenated output as a string.
+ */
+async function captureStdout(fn: () => Promise<void>): Promise<string> {
+  const chunks: string[] = [];
+  const original = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: unknown) => {
+    if (typeof chunk === "string") chunks.push(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    await fn();
+  } finally {
+    process.stdout.write = original;
+  }
+  return chunks.join("");
+}
+
 describe("CLI commands", () => {
   let db: Database;
   let projectId: string;
@@ -37,6 +57,7 @@ describe("CLI commands", () => {
 
   beforeEach(async () => {
     vi.resetAllMocks();
+    setJsonMode(false);
     ({ db } = createTestDb());
 
     const project = await createProject(db, { name: "cli-project" });
@@ -52,6 +73,10 @@ describe("CLI commands", () => {
       db,
       ws: workspace,
     });
+  });
+
+  afterEach(() => {
+    setJsonMode(false);
   });
 
   it("task add requires full PRD IDs and full dependency IDs", async () => {
@@ -110,7 +135,6 @@ describe("CLI commands", () => {
       title: "CLI PRD",
     });
 
-    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
     const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
       throw new Error(`process.exit:${code ?? 0}`);
     }) as never);
@@ -127,12 +151,8 @@ describe("CLI commands", () => {
       }),
     ).rejects.toThrow("process.exit:1");
 
-    expect(stderr).toHaveBeenCalledWith(
-      "New tasks must use a structured description with Intent, Scope, and Non-goals sections.",
-    );
     expect(await listTasks(db, prd.id)).toHaveLength(0);
 
-    stderr.mockRestore();
     exit.mockRestore();
   });
 
@@ -369,5 +389,203 @@ describe("CLI commands", () => {
     expect(String(stdout.mock.calls[0]?.[0])).not.toContain("=== DEPOT CONTEXT — CONTEXT ===");
 
     stdout.mockRestore();
+  });
+
+  // ── JSON mode tests ───────────────────────────────────────────────────────
+
+  describe("--json mode", () => {
+    beforeEach(() => {
+      setJsonMode(true);
+    });
+
+    it("prd list emits a success envelope with items array", async () => {
+      const { prdCommand } = await import("#/cli/commands/prd");
+      const listCommand = await getSubCommand(prdCommand, "list");
+
+      await createPrd(db, { projectId, workspaceId, title: "PRD Alpha" });
+      await createPrd(db, { projectId, workspaceId, title: "PRD Beta" });
+
+      const output = await captureStdout(async () => {
+        await listCommand.run({ args: {} });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(Array.isArray(parsed.payload.items)).toBe(true);
+      expect(parsed.payload.items).toHaveLength(2);
+      expect(parsed.payload.items[0].title).toBeTruthy();
+    });
+
+    it("prd create emits a success envelope with item", async () => {
+      const { prdCommand } = await import("#/cli/commands/prd");
+      const createCommand = await getSubCommand(prdCommand, "create");
+
+      const output = await captureStdout(async () => {
+        await createCommand.run({
+          args: { title: "New PRD", context: "why", scope: "what" },
+        });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(parsed.payload.item.title).toBe("New PRD");
+      expect(parsed.payload.item.status).toBe("draft");
+    });
+
+    it("prd show emits not_found error envelope for missing PRD", async () => {
+      const { prdCommand } = await import("#/cli/commands/prd");
+      const showCommand = await getSubCommand(prdCommand, "show");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const output = await captureStdout(async () => {
+        await expect(
+          showCommand.run({ args: { prdId: "NONEXISTENT" } }),
+        ).rejects.toThrow("process.exit:1");
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("error");
+      expect(parsed.error.code).toBe("not_found");
+
+      exit.mockRestore();
+    });
+
+    it("task list emits success envelope with items and parsed dependsOn arrays", async () => {
+      const { taskCommand } = await import("#/cli/commands/task");
+      const listCmd = await getSubCommand(taskCommand, "list");
+
+      const prd = await createPrd(db, { projectId, workspaceId, title: "JSON PRD" });
+      await commitPrd(db, prd.id);
+
+      const dep = await createTask(db, {
+        prdId: prd.id,
+        title: "Dep task",
+        description: "d",
+        doneCriteria: "c",
+        effort: "s",
+      });
+      await createTask(db, {
+        prdId: prd.id,
+        title: "Main task",
+        description: "d",
+        doneCriteria: "c",
+        effort: "m",
+        dependsOn: [dep.id],
+      });
+
+      const output = await captureStdout(async () => {
+        await listCmd.run({ args: { prdId: prd.id } });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(Array.isArray(parsed.payload.items)).toBe(true);
+      expect(parsed.payload.items).toHaveLength(2);
+      // dependsOn must be a parsed array, not a JSON string
+      for (const item of parsed.payload.items) {
+        expect(Array.isArray(item.dependsOn)).toBe(true);
+      }
+      const mainTask = parsed.payload.items.find((t: { title: string }) => t.title === "Main task");
+      expect(mainTask.dependsOn).toEqual([dep.id]);
+    });
+
+    it("task add emits success envelope with the created task", async () => {
+      const { taskCommand } = await import("#/cli/commands/task");
+      const addCmd = await getSubCommand(taskCommand, "add");
+
+      const prd = await createPrd(db, { projectId, workspaceId, title: "JSON PRD" });
+      await commitPrd(db, prd.id);
+
+      const output = await captureStdout(async () => {
+        await addCmd.run({
+          args: {
+            prd: prd.id,
+            title: "JSON task",
+            desc: formatStructuredTaskDescription({
+              intent: "Test JSON output.",
+              scope: "Cover the add command.",
+              nonGoals: "Not a full integration test.",
+            }),
+            criteria: "emits JSON",
+            effort: "s",
+          },
+        });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(parsed.payload.item.title).toBe("JSON task");
+      expect(Array.isArray(parsed.payload.item.dependsOn)).toBe(true);
+    });
+
+    it("log list emits success envelope with parsed payload objects", async () => {
+      const { logCommand } = await import("#/cli/commands/log");
+      const addCmd = await getSubCommand(logCommand, "add");
+      const listCmd = await getSubCommand(logCommand, "list");
+
+      // Add an entry in text mode, then list in JSON mode
+      setJsonMode(false);
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      await addCmd.run({
+        args: { eventType: "note", payload: '{"message":"hello"}' },
+      });
+      consoleSpy.mockRestore();
+      setJsonMode(true);
+
+      const output = await captureStdout(async () => {
+        await listCmd.run({ args: { last: "20" } });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(Array.isArray(parsed.payload.items)).toBe(true);
+      // payload must be a parsed object, not a JSON string
+      for (const item of parsed.payload.items) {
+        expect(typeof item.payload).toBe("object");
+        expect(item.payload).not.toBeNull();
+      }
+    });
+
+    it("stdout stays pure JSON with no extra text in JSON mode", async () => {
+      const { prdCommand } = await import("#/cli/commands/prd");
+      const listCommand = await getSubCommand(prdCommand, "list");
+
+      const output = await captureStdout(async () => {
+        await listCommand.run({ args: {} });
+      });
+
+      // Must be valid JSON and nothing else
+      const trimmed = output.trim();
+      expect(() => JSON.parse(trimmed)).not.toThrow();
+      // No extra newlines before or after the JSON envelope
+      expect(trimmed).toBe(JSON.stringify(JSON.parse(trimmed)));
+    });
+
+    it("context command emits unsupported error in JSON mode", async () => {
+      const { contextCommand } = await import("#/cli/commands/context");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const output = await captureStdout(async () => {
+        await expect(
+          contextCommand.run?.({
+            rawArgs: [],
+            args: { _: [], mode: undefined as never, prdTarget: undefined as never },
+            cmd: contextCommand,
+          }),
+        ).rejects.toThrow("process.exit:1");
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("error");
+      expect(parsed.error.code).toBe("unsupported");
+
+      exit.mockRestore();
+    });
   });
 });

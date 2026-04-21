@@ -1,5 +1,6 @@
 import { defineValidatedCommand } from "#/cli/command";
 import { resolveCurrentWorkspace } from "#/cli/runtime";
+import { outputSuccess, outputError, isJsonMode } from "#/cli/output";
 import {
   createPrd,
   listPrds,
@@ -58,7 +59,11 @@ const createCommand = defineValidatedCommand({
       context: args.context,
       scope: args.scope,
     });
-    console.log(`Created PRD '${prd.title}' (${prd.id}) [draft]`);
+    if (isJsonMode()) {
+      outputSuccess({ item: prd });
+    } else {
+      console.log(`Created PRD '${prd.title}' (${prd.id}) [draft]`);
+    }
   },
 });
 
@@ -76,21 +81,24 @@ const showCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const prd = await getPrd(db, args.prdId);
     if (!prd) {
-      console.error(`PRD not found: ${args.prdId}`);
-      process.exit(1);
+      outputError("not_found", `PRD not found: ${args.prdId}`);
     }
-    log.fields([
-      ["ID", prd.id],
-      ["Title", prd.title],
-      ["Status", prd.status],
-      ["Revision", prd.revision],
-      ["Context", prd.context],
-      ["Scope", prd.scope],
-      ["Parent", prd.parentId],
-      ["Created", prd.createdAt],
-      ["Committed", prd.committedAt],
-      ["Activated", prd.activatedAt],
-    ]);
+    if (isJsonMode()) {
+      outputSuccess({ item: prd });
+    } else {
+      log.fields([
+        ["ID", prd.id],
+        ["Title", prd.title],
+        ["Status", prd.status],
+        ["Revision", prd.revision],
+        ["Context", prd.context],
+        ["Scope", prd.scope],
+        ["Parent", prd.parentId],
+        ["Created", prd.createdAt],
+        ["Committed", prd.committedAt],
+        ["Activated", prd.activatedAt],
+      ]);
+    }
   },
 });
 
@@ -100,6 +108,10 @@ const listCommand = defineValidatedCommand({
   run: async () => {
     const { db, ws } = await resolveCurrentWorkspace();
     const prdList = await listPrds(db, { projectId: ws.projectId });
+    if (isJsonMode()) {
+      outputSuccess({ items: prdList });
+      return;
+    }
     if (prdList.length === 0) {
       console.log("No PRDs found. Run `depot prd create` to create one.");
       return;
@@ -127,11 +139,14 @@ const commitCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const prd = await getPrd(db, args.prdId);
     if (!prd) {
-      console.error(`PRD not found: ${args.prdId}`);
-      process.exit(1);
+      outputError("not_found", `PRD not found: ${args.prdId}`);
     }
     const committed = await commitPrd(db, prd.id);
-    console.log(`Committed PRD '${committed.title}' (${committed.id})`);
+    if (isJsonMode()) {
+      outputSuccess({ item: committed });
+    } else {
+      console.log(`Committed PRD '${committed.title}' (${committed.id})`);
+    }
   },
 });
 
@@ -152,11 +167,14 @@ const activateCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const prd = await getPrd(db, args.prdId);
     if (!prd) {
-      console.error(`PRD not found: ${args.prdId}`);
-      process.exit(1);
+      outputError("not_found", `PRD not found: ${args.prdId}`);
     }
     const activated = await activatePrd(db, prd.id);
-    console.log(`Activated PRD '${activated.title}' (${activated.id})`);
+    if (isJsonMode()) {
+      outputSuccess({ item: activated });
+    } else {
+      console.log(`Activated PRD '${activated.title}' (${activated.id})`);
+    }
   },
 });
 
@@ -192,15 +210,18 @@ const amendCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const prd = await getPrd(db, args.prdId);
     if (!prd) {
-      console.error(`PRD not found: ${args.prdId}`);
-      process.exit(1);
+      outputError("not_found", `PRD not found: ${args.prdId}`);
     }
     const amended = await amendPrd(db, prd.id, {
       title: args.title,
       context: args.context,
       scope: args.scope,
     });
-    console.log(`Amended PRD -> '${amended.title}' (${amended.id}) rev ${amended.revision}`);
+    if (isJsonMode()) {
+      outputSuccess({ item: amended });
+    } else {
+      console.log(`Amended PRD -> '${amended.title}' (${amended.id}) rev ${amended.revision}`);
+    }
   },
 });
 

@@ -1,5 +1,6 @@
 import { defineValidatedCommand } from "#/cli/command";
 import { resolveCurrentWorkspace } from "#/cli/runtime";
+import { outputSuccess, outputError, isJsonMode } from "#/cli/output";
 import { logActivity, listActivity, getPrd, getTask } from "#/lib/workflow";
 import { eventTypeSchema, jsonString } from "#/lib/schemas";
 import * as z from "zod";
@@ -57,14 +58,12 @@ const addCommand = defineValidatedCommand({
     const payload = args.payload;
     const prd = args.prd ? await getPrd(db, args.prd) : null;
     if (args.prd && !prd) {
-      console.error(`PRD not found: ${args.prd}`);
-      process.exit(1);
+      outputError("not_found", `PRD not found: ${args.prd}`);
     }
 
     const task = args.task ? await getTask(db, args.task) : null;
     if (args.task && !task) {
-      console.error(`Task not found: ${args.task}`);
-      process.exit(1);
+      outputError("not_found", `Task not found: ${args.task}`);
     }
 
     const entry = await logActivity(db, {
@@ -75,7 +74,17 @@ const addCommand = defineValidatedCommand({
       eventType: args.eventType,
       payload,
     });
-    console.log(`Logged ${args.eventType} (id=${entry.id})`);
+
+    if (isJsonMode()) {
+      outputSuccess({
+        item: {
+          ...entry,
+          payload: JSON.parse(entry.payload) as Record<string, unknown>,
+        },
+      });
+    } else {
+      console.log(`Logged ${args.eventType} (id=${entry.id})`);
+    }
   },
 });
 
@@ -96,13 +105,22 @@ const listCommand = defineValidatedCommand({
       projectId: ws.projectId,
       limit: args.last,
     });
+    if (isJsonMode()) {
+      outputSuccess({
+        items: entries.map((e) => ({
+          ...e,
+          payload: JSON.parse(e.payload) as Record<string, unknown>,
+        })),
+      });
+      return;
+    }
     if (entries.length === 0) {
       console.log("No activity logged yet.");
       return;
     }
     for (const e of entries) {
-      const payload = JSON.parse(e.payload);
-      const summary = Object.values(payload).join(" ").slice(0, 80);
+      const p = JSON.parse(e.payload);
+      const summary = Object.values(p).join(" ").slice(0, 80);
       console.log(`${e.createdAt}  ${e.eventType}  ${summary}`);
     }
   },

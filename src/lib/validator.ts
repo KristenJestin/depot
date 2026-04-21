@@ -76,6 +76,25 @@ export function validateNonEmpty(value: string, fieldName: string): void {
   }
 }
 
+// ── Review ────────────────────────────────────────────────────────────────────
+
+export const VALID_REVIEW_STATUSES = [
+  "pending",
+  "in_progress",
+  "completed",
+] as const;
+export type ReviewStatus = (typeof VALID_REVIEW_STATUSES)[number];
+
+export const VALID_REVIEW_MODES = ["autonomous", "assisted"] as const;
+export type ReviewMode = (typeof VALID_REVIEW_MODES)[number];
+
+export const VALID_REVIEW_DECISIONS = [
+  "approved",
+  "changes_requested",
+  "rejected",
+] as const;
+export type ReviewDecision = (typeof VALID_REVIEW_DECISIONS)[number];
+
 // ── Event types ──────────────────────────────────────────────────────────────
 
 export const VALID_EVENT_TYPES = [
@@ -87,6 +106,9 @@ export const VALID_EVENT_TYPES = [
   "prd_committed",
   "prd_activated",
   "prd_amended",
+  "review_started",
+  "review_findings_recorded",
+  "review_decision_recorded",
   "note",
   "handoff",
   "error",

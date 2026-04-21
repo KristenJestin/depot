@@ -6,6 +6,9 @@ import {
   VALID_TASK_DESCRIPTION_FORMATS,
   VALID_TASK_STATUSES,
   VALID_EFFORTS,
+  VALID_REVIEW_STATUSES,
+  VALID_REVIEW_MODES,
+  VALID_REVIEW_DECISIONS,
 } from "#/lib/validator";
 
 // ── Projects ──────────────────────────────────────────────────────────────────
@@ -95,6 +98,30 @@ export const tasks = sqliteTable("tasks", {
   completedAt: text("completed_at"),
 });
 
+// ── Reviews ───────────────────────────────────────────────────────────────────
+
+export const reviews = sqliteTable("reviews", {
+  id: text("id").primaryKey(), // ULID
+  prdId: text("prd_id")
+    .notNull()
+    .references(() => prds.id),
+  prdRevision: integer("prd_revision").notNull(),
+  status: text("status", { enum: VALID_REVIEW_STATUSES })
+    .notNull()
+    .default("pending"),
+  mode: text("mode", { enum: VALID_REVIEW_MODES }).notNull(),
+  userFeedback: text("user_feedback"), // optional free-text from user (assisted mode)
+  findings: text("findings").notNull().default("[]"), // JSON array of finding objects
+  questions: text("questions").notNull().default("[]"), // JSON array of questions asked
+  followupTasks: text("followup_tasks").notNull().default("[]"), // JSON array of suggested follow-up tasks
+  decision: text("decision", { enum: VALID_REVIEW_DECISIONS }),
+  decisionNote: text("decision_note"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  completedAt: text("completed_at"),
+});
+
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
 export const activityLog = sqliteTable("activity_log", {
@@ -105,6 +132,7 @@ export const activityLog = sqliteTable("activity_log", {
   workspaceId: text("workspace_id").references(() => workspaces.id),
   prdId: text("prd_id").references(() => prds.id),
   taskId: text("task_id").references(() => tasks.id),
+  reviewId: text("review_id").references(() => reviews.id),
   eventType: text("event_type").notNull(),
   payload: text("payload").notNull().default("{}"), // JSON
   createdAt: text("created_at")
@@ -115,7 +143,7 @@ export const activityLog = sqliteTable("activity_log", {
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const relations = defineRelations(
-  { projects, workspaces, prds, tasks, activityLog },
+  { projects, workspaces, prds, tasks, reviews, activityLog },
   (r) => ({
     projects: {
       workspaces: r.many.workspaces({
@@ -163,6 +191,10 @@ export const relations = defineRelations(
         from: r.prds.id,
         to: r.tasks.prdId,
       }),
+      reviews: r.many.reviews({
+        from: r.prds.id,
+        to: r.reviews.prdId,
+      }),
       activityLogs: r.many.activityLog({
         from: r.prds.id,
         to: r.activityLog.prdId,
@@ -176,6 +208,16 @@ export const relations = defineRelations(
       activityLogs: r.many.activityLog({
         from: r.tasks.id,
         to: r.activityLog.taskId,
+      }),
+    },
+    reviews: {
+      prd: r.one.prds({
+        from: r.reviews.prdId,
+        to: r.prds.id,
+      }),
+      activityLogs: r.many.activityLog({
+        from: r.reviews.id,
+        to: r.activityLog.reviewId,
       }),
     },
     activityLog: {
@@ -194,6 +236,10 @@ export const relations = defineRelations(
       task: r.one.tasks({
         from: r.activityLog.taskId,
         to: r.tasks.id,
+      }),
+      review: r.one.reviews({
+        from: r.activityLog.reviewId,
+        to: r.reviews.id,
       }),
     },
   }),

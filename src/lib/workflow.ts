@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
-import { projects, workspaces, prds, tasks, activityLog } from "#/db/schema";
+import { projects, workspaces, prds, tasks, reviews, activityLog } from "#/db/schema";
 import { generateId } from "#/lib/ids";
 import type { Database } from "#/db/client";
-import type { Effort } from "#/lib/validator";
+import type { Effort, ReviewMode, ReviewDecision } from "#/lib/validator";
 import { normalizeTaskDescriptionForStorage } from "#/lib/task-spec";
 import { normalizeWorkspacePath } from "#/lib/paths";
 
@@ -390,6 +390,112 @@ export async function skipTask(db: Database, id: string, reason: string) {
   return (await getTask(db, id))!;
 }
 
+// ── Reviews ───────────────────────────────────────────────────────────────────
+
+export async function createReview(
+  db: Database,
+  input: {
+    prdId: string;
+    mode: ReviewMode;
+    userFeedback?: string;
+  },
+) {
+  const prd = await getPrd(db, input.prdId);
+  if (!prd) throw new Error(`PRD not found: ${input.prdId}`);
+
+  const id = generateId();
+  const now = new Date().toISOString();
+  await db.insert(reviews).values({
+    id,
+    prdId: input.prdId,
+    prdRevision: prd.revision,
+    status: "pending",
+    mode: input.mode,
+    userFeedback: input.userFeedback ?? null,
+    findings: "[]",
+    questions: "[]",
+    followupTasks: "[]",
+    decision: null,
+    decisionNote: null,
+    createdAt: now,
+    completedAt: null,
+  });
+  return (await getReview(db, id))!;
+}
+
+export async function getReview(db: Database, id: string) {
+  return (await db.query.reviews.findFirst({ where: { id } })) ?? null;
+}
+
+export async function listReviews(db: Database, prdId: string) {
+  return db.query.reviews.findMany({
+    where: { prdId },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+export async function startReview(db: Database, id: string) {
+  const review = await getReview(db, id);
+  if (!review) throw new Error(`Review not found: ${id}`);
+  if (review.status !== "pending") {
+    throw new Error(`Cannot start review: status is '${review.status}', expected 'pending'`);
+  }
+  await db.update(reviews).set({ status: "in_progress" }).where(eq(reviews.id, id));
+  return (await getReview(db, id))!;
+}
+
+export async function recordReviewFindings(
+  db: Database,
+  id: string,
+  input: {
+    findings: unknown[];
+    questions?: unknown[];
+    followupTasks?: unknown[];
+  },
+) {
+  const review = await getReview(db, id);
+  if (!review) throw new Error(`Review not found: ${id}`);
+  if (review.status === "completed") {
+    throw new Error("Cannot update findings: review is already completed");
+  }
+  await db
+    .update(reviews)
+    .set({
+      status: "in_progress",
+      findings: JSON.stringify(input.findings),
+      questions: JSON.stringify(input.questions ?? []),
+      followupTasks: JSON.stringify(input.followupTasks ?? []),
+    })
+    .where(eq(reviews.id, id));
+  return (await getReview(db, id))!;
+}
+
+export async function recordReviewDecision(
+  db: Database,
+  id: string,
+  input: {
+    decision: ReviewDecision;
+    note?: string;
+  },
+) {
+  const review = await getReview(db, id);
+  if (!review) throw new Error(`Review not found: ${id}`);
+  if (review.status === "completed") {
+    throw new Error("Cannot record decision: review is already completed");
+  }
+  const now = new Date().toISOString();
+  await db
+    .update(reviews)
+    .set({
+      status: "completed",
+      decision: input.decision,
+      decisionNote: input.note ?? null,
+      completedAt: now,
+    })
+    .where(eq(reviews.id, id));
+  return (await getReview(db, id))!;
+}
+
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
 export async function logActivity(
@@ -399,6 +505,7 @@ export async function logActivity(
     workspaceId?: string;
     prdId?: string;
     taskId?: string;
+    reviewId?: string;
     eventType: string;
     payload: Record<string, unknown>;
   },
@@ -453,6 +560,16 @@ export async function logActivity(
     }
   }
 
+  if (input.reviewId) {
+    const review = await getReview(db, input.reviewId);
+    if (!review) {
+      throw new Error(`Review not found: ${input.reviewId}`);
+    }
+    if (prd && review.prdId !== prd.id) {
+      throw new Error(`Review '${input.reviewId}' does not belong to PRD '${prd.id}'`);
+    }
+  }
+
   const now = new Date().toISOString();
   const result = await db
     .insert(activityLog)
@@ -461,6 +578,7 @@ export async function logActivity(
       workspaceId: input.workspaceId ?? null,
       prdId: input.prdId ?? null,
       taskId: input.taskId ?? null,
+      reviewId: input.reviewId ?? null,
       eventType: input.eventType,
       payload: JSON.stringify(input.payload),
       createdAt: now,

@@ -1,5 +1,6 @@
 import { defineValidatedCommand } from "#/cli/command";
 import { getDb } from "#/cli/runtime";
+import { outputSuccess, isJsonMode } from "#/cli/output";
 import {
   createProject,
   addWorkspace,
@@ -56,8 +57,12 @@ export const initCommand = defineValidatedCommand({
     const existing = await resolveWorkspace(db, wsPath);
     if (existing && existing.path === wsPath) {
       const project = await getProject(db, existing.projectId);
-      console.log(`Workspace already registered for project '${project?.name}' (${existing.projectId})`);
-      console.log(`Path: ${existing.path}`);
+      if (isJsonMode()) {
+        outputSuccess({ project, workspace: existing });
+      } else {
+        console.log(`Workspace already registered for project '${project?.name}' (${existing.projectId})`);
+        console.log(`Path: ${existing.path}`);
+      }
       return;
     }
 
@@ -70,9 +75,13 @@ export const initCommand = defineValidatedCommand({
         name: projectName,
         description: args.description,
       });
-      console.log(`Created project '${project.name}' (${project.id})`);
+      if (!isJsonMode()) {
+        console.log(`Created project '${project.name}' (${project.id})`);
+      }
     } else {
-      console.log(`Using existing project '${project.name}' (${project.id})`);
+      if (!isJsonMode()) {
+        console.log(`Using existing project '${project.name}' (${project.id})`);
+      }
     }
 
     const ws = await addWorkspace(db, {
@@ -80,7 +89,12 @@ export const initCommand = defineValidatedCommand({
       path: wsPath,
       label: args.label,
     });
-    console.log(`Linked workspace ${ws.id} -> ${ws.path}`);
+
+    if (isJsonMode()) {
+      outputSuccess({ project, workspace: ws });
+    } else {
+      console.log(`Linked workspace ${ws.id} -> ${ws.path}`);
+    }
   },
 });
 
@@ -90,6 +104,10 @@ const listCommand = defineValidatedCommand({
   run: async () => {
     const db = await getDb();
     const projects = await listProjects(db);
+    if (isJsonMode()) {
+      outputSuccess({ items: projects });
+      return;
+    }
     if (projects.length === 0) {
       console.log("No projects found. Run `depot init` to create one.");
       return;

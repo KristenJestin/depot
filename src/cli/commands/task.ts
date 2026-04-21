@@ -1,5 +1,6 @@
 import { defineValidatedCommand } from "#/cli/command";
 import { resolveCurrentWorkspace } from "#/cli/runtime";
+import { outputSuccess, outputError, isJsonMode } from "#/cli/output";
 import {
   createTask,
   listTasks,
@@ -45,6 +46,31 @@ const taskReasonSchema = z.object({
   reason: z.string().min(1),
 });
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function serializeTask(task: {
+  id: string;
+  prdId: string;
+  position: number;
+  title: string;
+  description: string;
+  descriptionFormat: string;
+  doneCriteria: string;
+  dependsOn: string;
+  effort: string;
+  status: string;
+  blockedReason: string | null;
+  skipReason: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}) {
+  return {
+    ...task,
+    dependsOn: JSON.parse(task.dependsOn) as string[],
+  };
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 const addCommand = defineValidatedCommand({
@@ -87,8 +113,7 @@ const addCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const prd = await getPrd(db, args.prd);
     if (!prd) {
-      console.error(`PRD not found: ${args.prd}`);
-      process.exit(1);
+      outputError("not_found", `PRD not found: ${args.prd}`);
     }
 
     const dependencyIds = args.depends
@@ -96,8 +121,7 @@ const addCommand = defineValidatedCommand({
           args.depends.map(async (taskId) => {
             const dependency = await getTask(db, taskId);
             if (!dependency) {
-              console.error(`Task not found: ${taskId}`);
-              process.exit(1);
+              outputError("not_found", `Task not found: ${taskId}`);
             }
             return dependency.id;
           }),
@@ -105,10 +129,10 @@ const addCommand = defineValidatedCommand({
       : undefined;
 
     if (detectTaskDescriptionFormat(args.desc) !== "structured_v1") {
-      console.error(
+      outputError(
+        "invalid_description",
         "New tasks must use a structured description with Intent, Scope, and Non-goals sections.",
       );
-      process.exit(1);
     }
 
     const task = await createTask(db, {
@@ -120,7 +144,12 @@ const addCommand = defineValidatedCommand({
       effort: args.effort,
       dependsOn: dependencyIds,
     });
-    console.log(`Created task '${task.title}' (${task.id}) [pending] pos=${task.position}`);
+
+    if (isJsonMode()) {
+      outputSuccess({ item: serializeTask(task) });
+    } else {
+      console.log(`Created task '${task.title}' (${task.id}) [pending] pos=${task.position}`);
+    }
   },
 });
 
@@ -143,20 +172,22 @@ const listCommand = defineValidatedCommand({
       const prdList = await listPrds(db, { workspaceId: ws.id });
       const activePrd = prdList.find((p) => p.status === "in_progress");
       if (!activePrd) {
-        console.error("No active PRD found for current workspace. Specify a PRD ID.");
-        process.exit(1);
+        outputError("no_active_prd", "No active PRD found for current workspace. Specify a PRD ID.");
       }
       targetPrdId = activePrd.id;
     } else {
       const prd = await getPrd(db, targetPrdId);
       if (!prd) {
-        console.error(`PRD not found: ${targetPrdId}`);
-        process.exit(1);
+        outputError("not_found", `PRD not found: ${targetPrdId}`);
       }
       targetPrdId = prd.id;
     }
 
     const taskList = await listTasks(db, targetPrdId);
+    if (isJsonMode()) {
+      outputSuccess({ items: taskList.map(serializeTask) });
+      return;
+    }
     if (taskList.length === 0) {
       console.log("No tasks found.");
       return;
@@ -183,8 +214,11 @@ const showCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const task = await getTask(db, args.taskId);
     if (!task) {
-      console.error(`Task not found: ${args.taskId}`);
-      process.exit(1);
+      outputError("not_found", `Task not found: ${args.taskId}`);
+    }
+    if (isJsonMode()) {
+      outputSuccess({ item: serializeTask(task) });
+      return;
     }
     const deps: string[] = JSON.parse(task.dependsOn);
     log.fields([
@@ -231,11 +265,14 @@ const startCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const task = await getTask(db, args.taskId);
     if (!task) {
-      console.error(`Task not found: ${args.taskId}`);
-      process.exit(1);
+      outputError("not_found", `Task not found: ${args.taskId}`);
     }
     const started = await startTask(db, task.id);
-    console.log(`Started task '${started.title}' (${started.id})`);
+    if (isJsonMode()) {
+      outputSuccess({ item: serializeTask(started) });
+    } else {
+      console.log(`Started task '${started.title}' (${started.id})`);
+    }
   },
 });
 
@@ -256,11 +293,14 @@ const doneCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const task = await getTask(db, args.taskId);
     if (!task) {
-      console.error(`Task not found: ${args.taskId}`);
-      process.exit(1);
+      outputError("not_found", `Task not found: ${args.taskId}`);
     }
     const completed = await completeTask(db, task.id);
-    console.log(`Completed task '${completed.title}' (${completed.id})`);
+    if (isJsonMode()) {
+      outputSuccess({ item: serializeTask(completed) });
+    } else {
+      console.log(`Completed task '${completed.title}' (${completed.id})`);
+    }
   },
 });
 
@@ -286,11 +326,14 @@ const blockCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const task = await getTask(db, args.taskId);
     if (!task) {
-      console.error(`Task not found: ${args.taskId}`);
-      process.exit(1);
+      outputError("not_found", `Task not found: ${args.taskId}`);
     }
     const blocked = await blockTask(db, task.id, args.reason);
-    console.log(`Blocked task '${blocked.title}' (${blocked.id}): ${args.reason}`);
+    if (isJsonMode()) {
+      outputSuccess({ item: serializeTask(blocked) });
+    } else {
+      console.log(`Blocked task '${blocked.title}' (${blocked.id}): ${args.reason}`);
+    }
   },
 });
 
@@ -316,11 +359,14 @@ const skipCommand = defineValidatedCommand({
     const { db } = await resolveCurrentWorkspace();
     const task = await getTask(db, args.taskId);
     if (!task) {
-      console.error(`Task not found: ${args.taskId}`);
-      process.exit(1);
+      outputError("not_found", `Task not found: ${args.taskId}`);
     }
     const skipped = await skipTask(db, task.id, args.reason);
-    console.log(`Skipped task '${skipped.title}' (${skipped.id}): ${args.reason}`);
+    if (isJsonMode()) {
+      outputSuccess({ item: serializeTask(skipped) });
+    } else {
+      console.log(`Skipped task '${skipped.title}' (${skipped.id}): ${args.reason}`);
+    }
   },
 });
 
