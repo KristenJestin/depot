@@ -10,16 +10,15 @@ import {
   listTasks,
   listActivity,
 } from "#/lib/workflow";
-import { uniqueIdPrefix } from "#/lib/ids";
 
 const resolveCurrentWorkspace = vi.fn<() => Promise<{ db: Database; ws: unknown }>>();
 
-vi.mock("#/cli/context", () => ({
+vi.mock("#/cli/runtime", () => ({
   resolveCurrentWorkspace,
 }));
 
 type RunnableSubCommand = {
-  run: (ctx: { args: Record<string, string | undefined> }) => Promise<void> | void;
+  run: (ctx: { args: Record<string, unknown> }) => Promise<void> | void;
 };
 
 async function getSubCommand(command: { subCommands?: unknown }, name: string) {
@@ -54,7 +53,7 @@ describe("CLI commands", () => {
     });
   });
 
-  it("task add resolves short PRD IDs and short dependency IDs", async () => {
+  it("task add requires full PRD IDs and full dependency IDs", async () => {
     const { taskCommand } = await import("#/cli/commands/task");
     const addCommand = await getSubCommand(taskCommand, "add");
 
@@ -77,12 +76,12 @@ describe("CLI commands", () => {
 
     await addCommand.run({
       args: {
-        prd: prd.id.slice(0, 8),
+        prd: prd.id,
         title: "Dependent task",
         desc: "desc",
         criteria: "done",
         effort: "m",
-        depends: dependency.id.slice(0, 8),
+        depends: dependency.id,
       },
     });
 
@@ -95,7 +94,7 @@ describe("CLI commands", () => {
     stdout.mockRestore();
   });
 
-  it("task list resolves short PRD IDs", async () => {
+  it("task list requires full PRD IDs", async () => {
     const { taskCommand } = await import("#/cli/commands/task");
     const listCommand = await getSubCommand(taskCommand, "list");
 
@@ -117,16 +116,17 @@ describe("CLI commands", () => {
 
     await listCommand.run({
       args: {
-        prdId: prd.id.slice(0, 8),
+        prdId: prd.id,
       },
     });
 
-    expect(stdout).toHaveBeenCalledWith(expect.stringContaining("Listed task"));
+    const lines = stdout.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((line) => line.includes("Listed task"))).toBe(true);
 
     stdout.mockRestore();
   });
 
-  it("task list prints unique task prefixes when 8 chars collide", async () => {
+  it("task list prints full task IDs", async () => {
     const { taskCommand } = await import("#/cli/commands/task");
     const listCommand = await getSubCommand(taskCommand, "list");
 
@@ -156,21 +156,20 @@ describe("CLI commands", () => {
 
     await listCommand.run({
       args: {
-        prdId: prd.id.slice(0, 8),
+        prdId: prd.id,
       },
     });
 
     const tasks = await listTasks(db, prd.id);
-    const expectedPrefixes = tasks.map((task) => uniqueIdPrefix(task.id, tasks.map((t) => t.id)));
     const lines = stdout.mock.calls.map((call) => String(call[0]));
-    for (const prefix of expectedPrefixes) {
-      expect(lines.some((line) => line.startsWith(prefix))).toBe(true);
+    for (const task of tasks) {
+      expect(lines.some((line) => line.startsWith(task.id))).toBe(true);
     }
 
     stdout.mockRestore();
   });
 
-  it("log add resolves short PRD and task IDs", async () => {
+  it("log add requires full PRD and task IDs", async () => {
     const { logCommand } = await import("#/cli/commands/log");
     const addCommand = await getSubCommand(logCommand, "add");
 
@@ -192,8 +191,8 @@ describe("CLI commands", () => {
     await addCommand.run({
       args: {
         eventType: "note",
-        prd: prd.id.slice(0, 8),
-        task: task.id.slice(0, 8),
+        prd: prd.id,
+        task: task.id,
         payload: '{"message":"hello"}',
       },
     });
@@ -222,6 +221,33 @@ describe("CLI commands", () => {
     const entries = await listActivity(db, { projectId, workspaceId });
     expect(entries).toHaveLength(1);
     expect(JSON.parse(entries[0]!.payload)).toEqual({ message: "hello", count: 1 });
+
+    stdout.mockRestore();
+  });
+
+  it("context mode renders only the requested mode", async () => {
+    const { contextCommand } = await import("#/cli/commands/context");
+    const prd = await createPrd(db, {
+      projectId,
+      workspaceId,
+      title: "CLI PRD",
+    });
+    await commitPrd(db, prd.id);
+
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await contextCommand.run?.({
+      rawArgs: [],
+      args: {
+        _: [],
+        mode: "prd" as never,
+      },
+      cmd: contextCommand,
+    });
+
+    expect(stdout).toHaveBeenCalledTimes(1);
+    expect(String(stdout.mock.calls[0]?.[0])).toContain("=== DEPOT CONTEXT — PRD ===");
+    expect(String(stdout.mock.calls[0]?.[0])).not.toContain("=== DEPOT CONTEXT — CONTEXT ===");
 
     stdout.mockRestore();
   });

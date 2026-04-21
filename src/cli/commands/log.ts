@@ -1,19 +1,36 @@
-import { defineCommand } from "citty";
-import { resolveCurrentWorkspace } from "#/cli/context";
-import { logActivity, listActivity, findPrdByPrefix, findTaskByPrefix } from "#/lib/workflow";
-import { eventTypeSchema, jsonString, parseJsonLike, validateArgs } from "#/lib/schemas";
+import { defineValidatedCommand } from "#/cli/command";
+import { resolveCurrentWorkspace } from "#/cli/runtime";
+import { logActivity, listActivity, getPrd, getTask } from "#/lib/workflow";
+import { eventTypeSchema, jsonString } from "#/lib/schemas";
 import * as z from "zod";
 
 // ── Validation schema ─────────────────────────────────────────────────────────
 
 const addLogSchema = z.object({
   eventType: eventTypeSchema,
+  task: z.string().min(1).optional(),
+  prd: z.string().min(1).optional(),
   payload: jsonString,
+});
+
+const listLogSchema = z.object({
+  last: z.string().min(1).default("20").transform((value, ctx) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Must be a positive integer",
+      });
+      return z.NEVER;
+    }
+    return parsed;
+  }),
 });
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-const addCommand = defineCommand({
+const addCommand = defineValidatedCommand({
+  schema: addLogSchema,
   meta: { name: "add", description: "Log an activity event" },
   args: {
     eventType: {
@@ -35,22 +52,16 @@ const addCommand = defineCommand({
       default: "{}",
     },
   },
-  setup({ args }) {
-    validateArgs(addLogSchema, {
-      eventType: args.eventType,
-      payload: args.payload ?? "{}",
-    });
-  },
   run: async ({ args }) => {
     const { db, ws } = await resolveCurrentWorkspace();
-    const payload = parseJsonLike(args.payload ?? "{}");
-    const prd = args.prd ? await findPrdByPrefix(db, args.prd) : null;
+    const payload = args.payload;
+    const prd = args.prd ? await getPrd(db, args.prd) : null;
     if (args.prd && !prd) {
       console.error(`PRD not found: ${args.prd}`);
       process.exit(1);
     }
 
-    const task = args.task ? await findTaskByPrefix(db, args.task) : null;
+    const task = args.task ? await getTask(db, args.task) : null;
     if (args.task && !task) {
       console.error(`Task not found: ${args.task}`);
       process.exit(1);
@@ -68,7 +79,8 @@ const addCommand = defineCommand({
   },
 });
 
-const listCommand = defineCommand({
+const listCommand = defineValidatedCommand({
+  schema: listLogSchema,
   meta: { name: "list", description: "List recent activity" },
   args: {
     last: {
@@ -80,10 +92,9 @@ const listCommand = defineCommand({
   },
   run: async ({ args }) => {
     const { db, ws } = await resolveCurrentWorkspace();
-    const limit = parseInt(args.last ?? "20", 10);
     const entries = await listActivity(db, {
       projectId: ws.projectId,
-      limit,
+      limit: args.last,
     });
     if (entries.length === 0) {
       console.log("No activity logged yet.");
@@ -97,7 +108,8 @@ const listCommand = defineCommand({
   },
 });
 
-export const logCommand = defineCommand({
+export const logCommand = defineValidatedCommand({
+  schema: z.object({}),
   meta: { name: "log", description: "Activity logging" },
   subCommands: {
     add: addCommand,

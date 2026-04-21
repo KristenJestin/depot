@@ -36,7 +36,7 @@ depot task add --prd <prd-id> --title <title> --desc <text> --criteria <text> --
 - `--desc` is required
 - `--criteria` is required and must not be empty
 - `--effort` must be one of `xs`, `s`, `m`, `l`, `xl`
-- `--depends` accepts comma-separated task IDs or task ID prefixes
+- `--depends` accepts comma-separated full task IDs
 
 ### Example
 
@@ -60,7 +60,7 @@ If no PRD ID is provided, `depot` looks for the active PRD in the current worksp
 
 Each line includes:
 
-- a unique shortened task ID within the PRD
+- the full task ID
 - the task position
 - the title
 - the status
@@ -77,7 +77,7 @@ Show detailed task fields.
 depot task show <task-id>
 ```
 
-The command accepts full IDs or unambiguous prefixes.
+The command requires a full task ID.
 
 ## `depot task start`
 

@@ -1,17 +1,35 @@
-import { defineCommand } from "citty";
-import { resolveCurrentWorkspace } from "#/cli/context";
+import { defineValidatedCommand } from "#/cli/command";
+import { resolveCurrentWorkspace } from "#/cli/runtime";
 import {
   createPrd,
   listPrds,
   commitPrd,
   activatePrd,
   amendPrd,
-  findPrdByPrefix,
+  getPrd,
 } from "#/lib/workflow";
-import { shortId } from "#/lib/ids";
 import { log } from "#/lib/logger";
+import * as z from "zod";
 
-const createCommand = defineCommand({
+const createPrdSchema = z.object({
+  title: z.string().min(1),
+  context: z.string().min(1).optional(),
+  scope: z.string().min(1).optional(),
+});
+
+const prdIdSchema = z.object({
+  prdId: z.string().min(1),
+});
+
+const amendPrdSchema = z.object({
+  prdId: z.string().min(1),
+  title: z.string().min(1).optional(),
+  context: z.string().min(1).optional(),
+  scope: z.string().min(1).optional(),
+});
+
+const createCommand = defineValidatedCommand({
+  schema: createPrdSchema,
   meta: { name: "create", description: "Create a new PRD in draft status" },
   args: {
     title: {
@@ -40,22 +58,23 @@ const createCommand = defineCommand({
       context: args.context,
       scope: args.scope,
     });
-    console.log(`Created PRD '${prd.title}' (${shortId(prd.id)}) [draft]`);
+    console.log(`Created PRD '${prd.title}' (${prd.id}) [draft]`);
   },
 });
 
-const showCommand = defineCommand({
+const showCommand = defineValidatedCommand({
+  schema: prdIdSchema,
   meta: { name: "show", description: "Show PRD details" },
   args: {
     prdId: {
       type: "positional",
-      description: "PRD ID (full or short)",
+      description: "PRD ID",
       required: true,
     },
   },
   run: async ({ args }) => {
     const { db } = await resolveCurrentWorkspace();
-    const prd = await findPrdByPrefix(db, args.prdId);
+    const prd = await getPrd(db, args.prdId);
     if (!prd) {
       console.error(`PRD not found: ${args.prdId}`);
       process.exit(1);
@@ -75,7 +94,8 @@ const showCommand = defineCommand({
   },
 });
 
-const listCommand = defineCommand({
+const listCommand = defineValidatedCommand({
+  schema: z.object({}),
   meta: { name: "list", description: "List PRDs for the current project" },
   run: async () => {
     const { db, ws } = await resolveCurrentWorkspace();
@@ -85,12 +105,13 @@ const listCommand = defineCommand({
       return;
     }
     for (const p of prdList) {
-      console.log(`${shortId(p.id)}  ${p.title}  [${p.status}]  rev ${p.revision}`);
+      console.log(`${p.id}  ${p.title}  [${p.status}]  rev ${p.revision}`);
     }
   },
 });
 
-const commitCommand = defineCommand({
+const commitCommand = defineValidatedCommand({
+  schema: prdIdSchema,
   meta: {
     name: "commit",
     description: "Commit a draft PRD (freeze for execution)",
@@ -104,17 +125,18 @@ const commitCommand = defineCommand({
   },
   run: async ({ args }) => {
     const { db } = await resolveCurrentWorkspace();
-    const prd = await findPrdByPrefix(db, args.prdId);
+    const prd = await getPrd(db, args.prdId);
     if (!prd) {
       console.error(`PRD not found: ${args.prdId}`);
       process.exit(1);
     }
     const committed = await commitPrd(db, prd.id);
-    console.log(`Committed PRD '${committed.title}' (${shortId(committed.id)})`);
+    console.log(`Committed PRD '${committed.title}' (${committed.id})`);
   },
 });
 
-const activateCommand = defineCommand({
+const activateCommand = defineValidatedCommand({
+  schema: prdIdSchema,
   meta: {
     name: "activate",
     description: "Activate a committed PRD (move to in_progress)",
@@ -128,17 +150,18 @@ const activateCommand = defineCommand({
   },
   run: async ({ args }) => {
     const { db } = await resolveCurrentWorkspace();
-    const prd = await findPrdByPrefix(db, args.prdId);
+    const prd = await getPrd(db, args.prdId);
     if (!prd) {
       console.error(`PRD not found: ${args.prdId}`);
       process.exit(1);
     }
     const activated = await activatePrd(db, prd.id);
-    console.log(`Activated PRD '${activated.title}' (${shortId(activated.id)})`);
+    console.log(`Activated PRD '${activated.title}' (${activated.id})`);
   },
 });
 
-const amendCommand = defineCommand({
+const amendCommand = defineValidatedCommand({
+  schema: amendPrdSchema,
   meta: {
     name: "amend",
     description: "Amend a committed/active PRD (creates new revision, archives original)",
@@ -167,7 +190,7 @@ const amendCommand = defineCommand({
   },
   run: async ({ args }) => {
     const { db } = await resolveCurrentWorkspace();
-    const prd = await findPrdByPrefix(db, args.prdId);
+    const prd = await getPrd(db, args.prdId);
     if (!prd) {
       console.error(`PRD not found: ${args.prdId}`);
       process.exit(1);
@@ -177,13 +200,12 @@ const amendCommand = defineCommand({
       context: args.context,
       scope: args.scope,
     });
-    console.log(
-      `Amended PRD -> '${amended.title}' (${shortId(amended.id)}) rev ${amended.revision}`,
-    );
+    console.log(`Amended PRD -> '${amended.title}' (${amended.id}) rev ${amended.revision}`);
   },
 });
 
-export const prdCommand = defineCommand({
+export const prdCommand = defineValidatedCommand({
+  schema: z.object({}),
   meta: { name: "prd", description: "PRD management" },
   subCommands: {
     create: createCommand,

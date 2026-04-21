@@ -149,28 +149,6 @@ export async function listPrds(
   return db.query.prds.findMany({ orderBy: { createdAt: "asc" } });
 }
 
-/**
- * Find a PRD by full or partial (prefix) ID.
- * Returns `null` if not found; exits with code 1 if the prefix is ambiguous.
- */
-export async function findPrdByPrefix(db: Database, partialId: string) {
-  // Fast path: exact match by full ID
-  const exact = await getPrd(db, partialId);
-  if (exact) return exact;
-
-  // Prefix scan across all PRDs
-  const all = await listPrds(db);
-  const matches = all.filter((p) => p.id.startsWith(partialId));
-
-  if (matches.length === 1) return matches[0]!;
-  if (matches.length > 1) {
-    console.error(`Ambiguous PRD ID: '${partialId}' matches ${matches.length} PRDs`);
-    process.exit(1);
-  }
-
-  return null;
-}
-
 export async function commitPrd(db: Database, id: string) {
   const prd = await getPrd(db, id);
   if (!prd) throw new Error(`PRD not found: ${id}`);
@@ -318,35 +296,6 @@ export async function listTasks(db: Database, prdId: string) {
     where: { prdId },
     orderBy: { position: "asc" },
   });
-}
-
-/**
- * Find a task by full or partial (prefix) ID.
- * Searches across all PRDs.
- * Returns `null` if not found; exits with code 1 if the prefix is ambiguous.
- */
-export async function findTaskByPrefix(db: Database, partialId: string) {
-  // Fast path: exact match by full ID
-  const exact = await getTask(db, partialId);
-  if (exact) return exact;
-
-  // Prefix scan across all tasks in all PRDs
-  const allPrds = await listPrds(db);
-  const matches: NonNullable<Awaited<ReturnType<typeof getTask>>>[] = [];
-
-  for (const prd of allPrds) {
-    const prdTasks = await listTasks(db, prd.id);
-    const found = prdTasks.filter((t) => t.id.startsWith(partialId));
-    matches.push(...found);
-  }
-
-  if (matches.length === 1) return matches[0]!;
-  if (matches.length > 1) {
-    console.error(`Ambiguous task ID: '${partialId}' matches ${matches.length} tasks`);
-    process.exit(1);
-  }
-
-  return null;
 }
 
 export async function startTask(db: Database, id: string) {

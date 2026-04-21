@@ -1,6 +1,6 @@
-# Playbook: PRD Agent
+# Context: PRD Agent
 
-## Phase 1 — Interview
+## Phase 1 - Interview
 
 Interview the user relentlessly on every aspect of the plan.
 
@@ -9,17 +9,17 @@ Interview the user relentlessly on every aspect of the plan.
 - For each question, provide your recommendation
 - Do not move to the next question without a validated answer
 
-## Phase 2 — Structured Draft
+## Phase 2 - Structured Draft
 
 Each generated task must contain:
 
 - `title`: concrete action, infinitive verb
 - `description`: context and implementation detail
-- `done_criteria`: list of testable conditions — no ambiguity allowed
+- `done_criteria`: list of testable conditions - no ambiguity allowed
 - `depends_on`: explicit dependencies with other tasks
 - `effort`: estimation xs/s/m/l/xl
 
-## Phase 3 — Devil's Advocate Challenge
+## Phase 3 - Devil's Advocate Challenge
 
 Before committing the PRD:
 
@@ -29,7 +29,7 @@ Before committing the PRD:
 
 Present them to the user. Iterate until resolution.
 
-## Phase 4 — Commit
+## Phase 4 - Commit
 
 ```
 depot prd commit <prd_id>

@@ -2,6 +2,7 @@ import { openDatabase, defaultDbPath, type Database } from "#/db/client";
 import { resolveWorkspace } from "#/lib/workflow";
 import { log } from "#/lib/logger";
 import { normalizeWorkspacePath } from "#/lib/paths";
+import { resolveOrCreateWorkspaceForPath } from "#/lib/workspace-bootstrap";
 import * as path from "path";
 import fs from "fs/promises";
 
@@ -32,12 +33,17 @@ export async function getDb(): Promise<Database> {
  * Resolve the workspace matching the current working directory.
  * Exits with code 1 if no workspace is found.
  */
-export async function resolveCurrentWorkspace() {
+export async function resolveCurrentWorkspace(options: { autoCreate?: boolean; cwd?: string } = {}) {
   const db = await getDb();
-  const cwd = normalizeWorkspacePath(process.cwd());
+  const rawCwd = options.cwd ?? process.cwd();
+  const cwd = normalizeWorkspacePath(rawCwd);
   log.debug("Resolving workspace for", cwd);
 
-  const ws = await resolveWorkspace(db, cwd);
+  let ws = await resolveWorkspace(db, cwd);
+  if (!ws && options.autoCreate) {
+    ws = (await resolveOrCreateWorkspaceForPath(db, rawCwd)).workspace;
+  }
+
   if (!ws) {
     console.error("No workspace found for current directory. Run `depot init` first.");
     process.exit(1);

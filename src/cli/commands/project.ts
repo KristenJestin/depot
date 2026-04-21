@@ -1,5 +1,5 @@
-import { defineCommand } from "citty";
-import { getDb } from "#/cli/context";
+import { defineValidatedCommand } from "#/cli/command";
+import { getDb } from "#/cli/runtime";
 import {
   createProject,
   addWorkspace,
@@ -7,11 +7,19 @@ import {
   listProjects,
   getProject,
 } from "#/lib/workflow";
-import { shortId } from "#/lib/ids";
 import { normalizeWorkspacePath } from "#/lib/paths";
 import * as path from "path";
+import * as z from "zod";
 
-export const initCommand = defineCommand({
+const initArgsSchema = z.object({
+  name: z.string().min(1).optional(),
+  path: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  label: z.string().min(1).optional(),
+});
+
+export const initCommand = defineValidatedCommand({
+  schema: initArgsSchema,
   meta: {
     name: "init",
     description: "Initialize a project and link the current directory as a workspace",
@@ -48,9 +56,7 @@ export const initCommand = defineCommand({
     const existing = await resolveWorkspace(db, wsPath);
     if (existing && existing.path === wsPath) {
       const project = await getProject(db, existing.projectId);
-      console.log(
-        `Workspace already registered for project '${project?.name}' (${shortId(existing.projectId)})`,
-      );
+      console.log(`Workspace already registered for project '${project?.name}' (${existing.projectId})`);
       console.log(`Path: ${existing.path}`);
       return;
     }
@@ -64,9 +70,9 @@ export const initCommand = defineCommand({
         name: projectName,
         description: args.description,
       });
-      console.log(`Created project '${project.name}' (${shortId(project.id)})`);
+      console.log(`Created project '${project.name}' (${project.id})`);
     } else {
-      console.log(`Using existing project '${project.name}' (${shortId(project.id)})`);
+      console.log(`Using existing project '${project.name}' (${project.id})`);
     }
 
     const ws = await addWorkspace(db, {
@@ -74,11 +80,12 @@ export const initCommand = defineCommand({
       path: wsPath,
       label: args.label,
     });
-    console.log(`Linked workspace ${shortId(ws.id)} -> ${ws.path}`);
+    console.log(`Linked workspace ${ws.id} -> ${ws.path}`);
   },
 });
 
-const listCommand = defineCommand({
+const listCommand = defineValidatedCommand({
+  schema: z.object({}),
   meta: { name: "list", description: "List all projects" },
   run: async () => {
     const db = await getDb();
@@ -88,12 +95,13 @@ const listCommand = defineCommand({
       return;
     }
     for (const p of projects) {
-      console.log(`${shortId(p.id)}  ${p.name}  [${p.status}]`);
+      console.log(`${p.id}  ${p.name}  [${p.status}]`);
     }
   },
 });
 
-export const projectCommand = defineCommand({
+export const projectCommand = defineValidatedCommand({
+  schema: z.object({}),
   meta: { name: "project", description: "Project management" },
   subCommands: {
     list: listCommand,

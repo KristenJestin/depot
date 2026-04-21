@@ -22,8 +22,6 @@ import {
   listTasks,
   logActivity,
   listActivity,
-  findPrdByPrefix,
-  findTaskByPrefix,
 } from "#/lib/workflow";
 
 let db: Database;
@@ -757,89 +755,5 @@ describe("activity log", () => {
         payload: { message: "wrong prd" },
       }),
     ).rejects.toThrow(/does not belong to prd/i);
-  });
-});
-
-// ── findPrdByPrefix ───────────────────────────────────────────────────────────
-
-describe("findPrdByPrefix", () => {
-  let projectId: string;
-  let workspaceId: string;
-
-  beforeEach(async () => {
-    const project = await createProject(db, { name: "Prefix Test Project" });
-    projectId = project.id;
-    const workspace = await addWorkspace(db, { projectId, path: "/prefix-test" });
-    workspaceId = workspace.id;
-  });
-
-  it("finds a PRD by exact full ID", async () => {
-    const prd = await createPrd(db, { projectId, workspaceId, title: "My PRD" });
-    const found = await findPrdByPrefix(db, prd.id);
-    expect(found).not.toBeNull();
-    expect(found!.id).toBe(prd.id);
-  });
-
-  it("finds a PRD by unique prefix", async () => {
-    const prd = await createPrd(db, { projectId, workspaceId, title: "Prefix PRD" });
-    // Use a prefix long enough to be unique (first 10 chars of a ULID is typically unique)
-    const prefix = prd.id.slice(0, 10);
-    const found = await findPrdByPrefix(db, prefix);
-    expect(found).not.toBeNull();
-    expect(found!.id).toBe(prd.id);
-  });
-
-  it("returns null when no PRD matches", async () => {
-    const found = await findPrdByPrefix(db, "nonexistent-prefix");
-    expect(found).toBeNull();
-  });
-});
-
-// ── findTaskByPrefix ──────────────────────────────────────────────────────────
-
-describe("findTaskByPrefix", () => {
-  let projectId: string;
-  let workspaceId: string;
-  let prdId: string;
-
-  beforeEach(async () => {
-    const project = await createProject(db, { name: "Task Prefix Project" });
-    projectId = project.id;
-    const workspace = await addWorkspace(db, { projectId, path: "/task-prefix-test" });
-    workspaceId = workspace.id;
-    const prd = await createPrd(db, { projectId, workspaceId, title: "PRD for tasks" });
-    prdId = prd.id;
-  });
-
-  it("finds a task by exact full ID", async () => {
-    const task = await createTask(db, {
-      prdId,
-      title: "My Task",
-      description: "desc",
-      doneCriteria: "done when done",
-      effort: "s",
-    });
-    const found = await findTaskByPrefix(db, task.id);
-    expect(found).not.toBeNull();
-    expect(found!.id).toBe(task.id);
-  });
-
-  it("finds a task by unique prefix", async () => {
-    const task = await createTask(db, {
-      prdId,
-      title: "Prefix Task",
-      description: "desc",
-      doneCriteria: "done when done",
-      effort: "m",
-    });
-    const prefix = task.id.slice(0, 10);
-    const found = await findTaskByPrefix(db, prefix);
-    expect(found).not.toBeNull();
-    expect(found!.id).toBe(task.id);
-  });
-
-  it("returns null when no task matches", async () => {
-    const found = await findTaskByPrefix(db, "nonexistent-prefix");
-    expect(found).toBeNull();
   });
 });

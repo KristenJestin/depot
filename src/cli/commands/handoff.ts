@@ -1,9 +1,11 @@
-import { defineCommand } from "citty";
-import { getDb } from "#/cli/context";
+import { defineValidatedCommand } from "#/cli/command";
+import { getDb } from "#/cli/runtime";
 import { resolveWorkspace } from "#/lib/workflow";
 import { buildHandoff } from "#/lib/handoff";
+import * as z from "zod";
 
-export const handoffCommand = defineCommand({
+export const handoffCommand = defineValidatedCommand({
+  schema: z.object({}),
   meta: {
     name: "handoff",
     description: "Generate a structured handoff summary for the current workspace",

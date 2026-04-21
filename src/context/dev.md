@@ -1,4 +1,4 @@
-# Playbook: Dev Agent
+# Context: Dev Agent
 
 ## Session Start
 
@@ -13,7 +13,7 @@ depot task start <task_id> # Start the task
 - Log every significant step with `depot log add`
 - Only mark `done` once **all** `done_criteria` are satisfied
 - If blocked: `depot task block` with explicit reason, do not continue
-- Stay focused on the current task — do not jump ahead
+- Stay focused on the current task - do not jump ahead
 
 ## Task Completion
 
@@ -26,7 +26,7 @@ Before running `depot task done`:
 ## Session End
 
 ```
-depot log add <project_id> handoff --payload '{"next": "...", "context": "..."}'
+depot log add handoff --payload '{"next": "...", "context": "..."}'
 ```
 
 Always leave a handoff log so the next agent can resume immediately.
@@ -34,6 +34,6 @@ Always leave a handoff log so the next agent can resume immediately.
 ## Rules
 
 - Never mark `done` without satisfying `done_criteria`
-- Never skip a blocked task silently — always log the blockage
+- Never skip a blocked task silently - always log the blockage
 - Always start with `depot handoff` at the beginning of a session
 - Always end with a handoff log entry

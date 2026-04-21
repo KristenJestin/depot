@@ -1,6 +1,6 @@
 {
   "name": "@netsirk/depot",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "AI agent task and PRD management CLI",
   "keywords": [
     "agent",
@@ -45,7 +45,8 @@
     "test": "bun --bun vitest run",
     "test:coverage": "bun --bun vitest run --coverage",
     "test:watch": "bun --bun vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release": "bunx npm publish --access public"
   },
   "dependencies": {
     "chalk": "^5.6.2",

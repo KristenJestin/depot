@@ -16,7 +16,7 @@ This page describes the current implementation shape of `depot`.
 The main code paths are:
 
 - `src/cli/` for command entrypoints and CLI context resolution
-- `src/lib/` for workflow logic, validators, logging, schemas, and handoff generation
+- `src/lib/` for workflow logic, validators, logging, schemas, handoff generation, context rendering, and install helpers
 - `src/db/` for database access, schema, and migrations
 - `tests/` for CLI, database, integration, and library coverage
 
@@ -37,7 +37,7 @@ When `depot` opens the database, it:
 - enables foreign keys
 - applies pending Drizzle migrations automatically
 
-`src/db/schema.ts` is the source of truth for the schema, and generated migrations live under `src/db/migrations/`.
+`src/db/schema.ts` is the source of truth for the schema, and generated migrations live under `src/db/migrations/` in source. The npm package publishes them under `dist/migrations/`, and the installed runtime resolves migrations from that packaged layout.
 
 ## Workflow engine
 
@@ -69,6 +69,12 @@ The current output is:
 - deterministic
 - optimized for terminal use
 - suitable for copy-pasting into a new agent session
+
+## Agent contexts and install flow
+
+`src/lib/agent-context.ts` renders the live `prd`, `dev`, and `review` contexts that back `depot context`.
+
+`src/lib/agent-install.ts` generates slash-command files for OpenCode and Claude Code. Those files do not embed static snapshots; they call `depot context <mode>` at runtime through native shell injection.
 
 ## Current design bias
 

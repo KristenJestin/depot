@@ -50,7 +50,7 @@ depot project list
 
 Each line includes:
 
-- a shortened project ID
+- the full project ID
 - the project name
 - the project status
 

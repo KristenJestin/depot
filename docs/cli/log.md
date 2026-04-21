@@ -30,7 +30,7 @@ depot log add <event-type> [--task <task-id>] [--prd <prd-id>] [--payload <json>
 
 ### Notes
 
-- `--task` and `--prd` accept full IDs or unambiguous prefixes
+- `--task` and `--prd` require full IDs
 - `--payload` defaults to `{}`
 - payload must resolve to a JSON object
 - the CLI accepts both strict JSON and a looser object-like input format

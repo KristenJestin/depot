@@ -41,4 +41,4 @@ depot prd list
 depot task list
 ```
 
-The current implementation also ends with a short resume hint for the next session.
+The current implementation also ends with a short resume hint for the next session, pointing to `depot context dev`.

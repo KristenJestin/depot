@@ -75,6 +75,25 @@ bun run depot -- handoff
 
 The handoff output is designed to be readable in the terminal and easy to paste into a fresh agent session.
 
+## Render live agent context
+
+```bash
+bun run depot -- context
+bun run depot -- context prd
+bun run depot -- context dev
+bun run depot -- context review
+```
+
+`depot context` replaces the older `playbook` command. The instructions remain embedded in the build, while the dynamic state is rendered at runtime from the current workspace.
+
+## Install slash commands for OpenCode or Claude Code
+
+```bash
+bun run depot -- install --all
+```
+
+This writes `depot-prd`, `depot-dev`, and `depot-review` command files that call `depot context <mode>` through the `depot` binary available on your `PATH`.
+
 ## Next steps
 
 - Read `../concepts/index.md` to understand the data model.

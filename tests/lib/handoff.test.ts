@@ -288,7 +288,7 @@ describe("handoff builder", () => {
     expect(output).not.toContain("## Next Recommended Task");
   });
 
-  it("uses short IDs (first 8 chars)", async () => {
+  it("uses full IDs", async () => {
     const project = await createProject(db, { name: "my-app" });
     const ws = await addWorkspace(db, {
       projectId: project.id,
@@ -303,9 +303,7 @@ describe("handoff builder", () => {
     await activatePrd(db, prd.id);
 
     const output = await buildHandoff(db, ws.id);
-    // The full ULID should not appear, only the short version
-    expect(output).toContain(prd.id.slice(0, 8));
-    expect(output).not.toContain(prd.id);
+    expect(output).toContain(prd.id);
   });
 
   it("ends with Resume section", async () => {
@@ -317,7 +315,7 @@ describe("handoff builder", () => {
 
     const output = await buildHandoff(db, ws.id);
     expect(output).toContain("## Resume");
-    expect(output).toContain("depot playbook dev");
+    expect(output).toContain("depot context dev");
   });
 
   it("omits empty sections", async () => {

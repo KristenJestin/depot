@@ -1,6 +1,5 @@
 import type { Database } from "#/db/client";
 import { listPrds, listTasks, listActivity } from "#/lib/workflow";
-import { shortId } from "#/lib/ids";
 
 /**
  * Build a structured plaintext handoff summary for a given workspace.
@@ -51,7 +50,7 @@ export async function buildHandoff(db: Database, workspaceId: string): Promise<s
 
   // ── Active PRD ──────────────────────────────────────────────────────────────
   lines.push("## Active PRD");
-  lines.push(`${shortId(activePrd.id)}  ${activePrd.title}  (revision ${activePrd.revision})`);
+  lines.push(`${activePrd.id}  ${activePrd.title}  (revision ${activePrd.revision})`);
   if (activePrd.context) {
     const truncated =
       activePrd.context.length > 300
@@ -81,7 +80,7 @@ export async function buildHandoff(db: Database, workspaceId: string): Promise<s
     const currentTask = allTasks.find((t) => t.status === "in_progress");
     if (currentTask) {
       lines.push("## Current Task");
-      lines.push(`${shortId(currentTask.id)}  ${currentTask.title}`);
+      lines.push(`${currentTask.id}  ${currentTask.title}`);
       lines.push(`Status    : in_progress`);
       if (currentTask.startedAt) {
         lines.push(`Started   : ${currentTask.startedAt}`);
@@ -98,7 +97,7 @@ export async function buildHandoff(db: Database, workspaceId: string): Promise<s
     if (blockedTasks.length > 0) {
       lines.push("## Blocked Tasks");
       for (const bt of blockedTasks) {
-        lines.push(`${shortId(bt.id)}  ${bt.title}`);
+        lines.push(`${bt.id}  ${bt.title}`);
         lines.push(`Reason: ${bt.blockedReason}`);
       }
       lines.push("");
@@ -120,7 +119,7 @@ export async function buildHandoff(db: Database, workspaceId: string): Promise<s
     const nextTask = await findNextRecommendedTask(db, allTasks);
     if (nextTask) {
       lines.push("## Next Recommended Task");
-      lines.push(`${shortId(nextTask.id)}  ${nextTask.title}`);
+      lines.push(`${nextTask.id}  ${nextTask.title}`);
       lines.push(`Effort      : ${nextTask.effort}`);
       lines.push(`Dependencies: satisfied`);
       lines.push(`Criteria    :`);
@@ -156,7 +155,7 @@ function appendRecentActivity(
 
 function appendResume(lines: string[]): void {
   lines.push("## Resume");
-  lines.push("Run `depot playbook dev` for full execution instructions.");
+  lines.push("Run `depot context dev` for full execution instructions.");
 }
 
 function summarizePayload(eventType: string, payload: Record<string, unknown>): string {

@@ -50,7 +50,7 @@ depot prd list
 
 Each line includes:
 
-- a shortened PRD ID
+- the full PRD ID
 - the title
 - the status
 - the revision number
@@ -65,7 +65,7 @@ Show detailed PRD fields.
 depot prd show <prd-id>
 ```
 
-The command accepts full IDs or unambiguous prefixes.
+The command requires a full PRD ID.
 
 ## `depot prd commit`
 

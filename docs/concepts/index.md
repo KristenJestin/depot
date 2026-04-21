@@ -27,7 +27,7 @@ Important properties:
 - workspace paths are unique
 - a workspace can have an optional human label
 
-If the current directory does not resolve to a workspace, commands that depend on workspace context exit and ask you to run `depot init` first.
+If the current directory does not resolve to a workspace, most workspace-aware commands exit and ask you to run `depot init` first. `depot context` is the exception: it silently creates a project and workspace for the current path before rendering context.
 
 ## PRDs
 
@@ -112,9 +112,25 @@ When there is an active PRD, the handoff includes:
 
 When there is no active PRD, the handoff still shows recent activity and points the operator back to available PRDs.
 
+## Contexts
+
+`depot context` renders live agent context for the current workspace.
+
+Current modes are:
+
+- `prd`
+- `dev`
+- `review`
+
+`depot context` without a mode prints an index with those three modes, a short dynamic status for each, and the exact command to render the detailed mode.
+
+`depot context` replaces the older `playbook` command surface.
+
 ## Local-first behavior
 
 `depot` currently uses a local SQLite database at `~/.depot/depot.db` by default. The CLI applies pending Drizzle migrations automatically when the database is opened.
+
+In the published npm package, the supported packaged migration layout is `dist/migrations/`.
 
 This keeps the workflow:
 

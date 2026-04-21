@@ -77,13 +77,8 @@ function retrySqliteBusy<T>(
 }
 
 export function resolveMigrationsFolder(baseDir = __dirname): string {
-  // Support source execution plus packaged layouts where migrations may live
-  // either in `dist/migrations/*` or directly under `dist/*`.
   const candidates = [
-    path.resolve(baseDir, "db", "migrations"),
-    path.resolve(baseDir, "..", "src", "db", "migrations"),
     path.resolve(baseDir, "migrations"),
-    path.resolve(baseDir),
   ];
 
   const found = candidates.find(isDrizzleMigrationsFolder);

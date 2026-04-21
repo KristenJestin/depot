@@ -31,25 +31,24 @@ afterEach(() => {
 });
 
 describe("db client", () => {
-  it("resolves migrations from packaged dist root layout", () => {
+  it("resolves migrations from packaged dist/migrations layout", () => {
     const distDir = createTempDir();
-    createMigrationLayout(distDir);
-
-    expect(resolveMigrationsFolder(distDir)).toBe(distDir);
-  });
-
-  it("prefers dist/migrations when both packaged layouts exist", () => {
-    const distDir = createTempDir();
-    createMigrationLayout(distDir);
     const nestedMigrationsDir = path.join(distDir, "migrations");
     createMigrationLayout(nestedMigrationsDir);
 
     expect(resolveMigrationsFolder(distDir)).toBe(nestedMigrationsDir);
   });
 
-  it("retries retryable migration failures once the competing process finishes", () => {
+  it("does not accept legacy dist root migrations layout", () => {
     const distDir = createTempDir();
     createMigrationLayout(distDir);
+
+    expect(() => resolveMigrationsFolder(distDir)).toThrow(/Could not find Drizzle migrations folder/);
+  });
+
+  it("retries retryable migration failures once the competing process finishes", () => {
+    const distDir = createTempDir();
+    createMigrationLayout(path.join(distDir, "migrations"));
     let callCount = 0;
     const migrateFn: TestMigrationRunner = () => {
       callCount += 1;
@@ -70,7 +69,7 @@ describe("db client", () => {
 
   it("does not retry non-retryable migration failures", () => {
     const distDir = createTempDir();
-    createMigrationLayout(distDir);
+    createMigrationLayout(path.join(distDir, "migrations"));
     let callCount = 0;
     const migrateFn: TestMigrationRunner = () => {
       callCount += 1;
@@ -90,7 +89,7 @@ describe("db client", () => {
 
   it("retries SQLITE_BUSY during initial PRAGMA setup and closes failed handles", () => {
     const distDir = createTempDir();
-    createMigrationLayout(distDir);
+    createMigrationLayout(path.join(distDir, "migrations"));
     const clients: TestDatabaseClient[] = [];
     let createCount = 0;
     let closeCount = 0;
@@ -128,7 +127,7 @@ describe("db client", () => {
 
   it("closes the handle when migrations fail after opening the DB", () => {
     const distDir = createTempDir();
-    createMigrationLayout(distDir);
+    createMigrationLayout(path.join(distDir, "migrations"));
     let closeCount = 0;
 
     expect(() =>
