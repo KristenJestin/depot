@@ -18,7 +18,16 @@ bun install
 bun run depot -- --help
 ```
 
-## Initialize a project from the current directory
+## Global flags
+
+```bash
+depot [--debug] [--json] <command>
+```
+
+- `--debug` enables verbose debug output to stderr
+- `--json` switches all output to machine-readable JSON (see `../json-output.md`)
+
+## Initialize a project
 
 From the repository or workspace you want to track:
 
@@ -54,8 +63,15 @@ bun run depot -- prd activate <prd-id>
 
 ## Add a task
 
+New tasks must use a structured description with `Intent:`, `Scope:`, and `Non-goals:` sections:
+
 ```bash
-bun run depot -- task add --prd <prd-id> --title "Implement handoff output" --desc "Build a readable summary for the active workspace" --criteria "Handoff includes active PRD\nHandoff includes task progress" --effort m
+bun run depot -- task add \
+  --prd <prd-id> \
+  --title "Implement handoff output" \
+  --desc $'Intent:\nBuild a readable summary for the active workspace.\n\nScope:\n- Include active PRD and task progress.\n- Include recent activity.\n\nNon-goals:\n- Do not redesign the handoff format.' \
+  --criteria "Handoff includes active PRD\nHandoff includes task progress" \
+  --effort m
 ```
 
 ## Work the task
@@ -84,7 +100,17 @@ bun run depot -- context dev
 bun run depot -- context review
 ```
 
-`depot context` replaces the older `playbook` command. The instructions remain embedded in the build, while the dynamic state is rendered at runtime from the current workspace.
+## Run a review
+
+```bash
+bun run depot -- review start
+bun run depot -- review activate <review-id>
+bun run depot -- context review
+bun run depot -- review findings <review-id> \
+  --findings '[{"title":"Missing validation","severity":"major","description":"Input X is not validated"}]'
+# Human only:
+bun run depot -- review decide <review-id> --decision approved
+```
 
 ## Install slash commands for OpenCode or Claude Code
 
@@ -93,6 +119,15 @@ bun run depot -- install --all
 ```
 
 This writes `depot-prd`, `depot-dev`, and `depot-review` command files that call `depot context <mode>` through the `depot` binary available on your `PATH`.
+
+## Inspect projects and workspaces
+
+```bash
+bun run depot -- project list
+bun run depot -- project show <project-id>
+bun run depot -- workspace list
+bun run depot -- workspace show <workspace-id>
+```
 
 ## Next steps
 

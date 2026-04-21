@@ -14,9 +14,14 @@ Current supported event types are:
 - `prd_committed`
 - `prd_activated`
 - `prd_amended`
+- `review_started`
+- `review_findings_recorded`
+- `review_decision_recorded`
 - `note`
 - `handoff`
 - `error`
+
+---
 
 ## `depot log add`
 
@@ -30,18 +35,21 @@ depot log add <event-type> [--task <task-id>] [--prd <prd-id>] [--payload <json>
 
 ### Notes
 
-- `--task` and `--prd` require full IDs
-- `--payload` defaults to `{}`
-- payload must resolve to a JSON object
-- the CLI accepts both strict JSON and a looser object-like input format
+- `--task` and `--prd` require full IDs and must belong to the current workspace.
+- `--payload` defaults to `{}`.
+- Payload must resolve to a JSON object.
+- The CLI accepts both strict JSON and a looser object-like format (unquoted keys, single-quoted strings, bare values).
 
 ### Examples
 
 ```bash
 depot log add note --payload '{"message":"Session started"}'
 depot log add task_started --task <task-id> --payload '{"title":"Implement handoff"}'
+depot log add handoff --payload '{"next":"Review the active PRD","context":"Handoff after task 3"}'
 depot log add error --payload '{"message":"Workspace resolution failed"}'
 ```
+
+---
 
 ## `depot log list`
 
@@ -52,6 +60,8 @@ List recent activity for the current project.
 ```bash
 depot log list [--last <count>]
 ```
+
+`--last` defaults to 20. Must be a positive integer.
 
 ### Example
 

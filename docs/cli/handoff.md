@@ -17,12 +17,12 @@ The current working directory must resolve to a registered workspace. If no work
 When a workspace has an active PRD, the current handoff output includes:
 
 - a header with the project name and workspace label or path
-- the active PRD title and revision
-- task progress counts
-- the current in-progress task, if any
-- blocked tasks, if any
+- the active PRD ID, title, and revision (context truncated to 300 characters)
+- task progress counts (done / total · in progress · blocked · pending)
+- the current in-progress task with started timestamp and done criteria, if any
+- blocked tasks with their block reasons, if any
 - the 10 most recent activity entries
-- the next recommended pending task whose dependencies are already satisfied
+- the next recommended pending task whose dependencies are all satisfied, with done criteria
 
 When there is no active PRD, the handoff still includes recent activity and a prompt to review available PRDs.
 
@@ -31,7 +31,11 @@ When there is no active PRD, the handoff still includes recent activity and a pr
 - plaintext, not JSON
 - deterministic section order
 - terminal-readable
-- easy to paste into a fresh agent session
+- safe to paste into a fresh agent session
+
+## JSON output
+
+When `--json` is active, `depot handoff` emits structured `HandoffData` instead of plaintext. See `../json-output.md` for the full schema.
 
 ## Example flow
 
@@ -41,4 +45,4 @@ depot prd list
 depot task list
 ```
 
-The current implementation also ends with a short resume hint for the next session, pointing to `depot context dev`.
+The output ends with a resume hint pointing to `depot context dev`.

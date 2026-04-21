@@ -11,14 +11,16 @@ Current PRD statuses are:
 - `in_progress`
 - `archived`
 
-The current transition model is:
+Allowed transitions:
 
-- `draft -> committed`
-- `committed -> in_progress`
-- `committed -> archived`
-- `in_progress -> archived`
+- `draft → committed`
+- `committed → in_progress`
+- `committed → archived`
+- `in_progress → archived`
 
-In practice, `depot prd amend` archives the current PRD and creates a new draft revision.
+In practice, `depot prd amend` archives the current PRD and creates a new draft revision at `revision + 1`.
+
+---
 
 ## `depot prd create`
 
@@ -36,6 +38,8 @@ depot prd create --title <title> [--context <text>] [--scope <text>]
 depot prd create --title "Core foundation" --context "Need persistent agent state" --scope "Project, PRD, task, log, and handoff flow"
 ```
 
+---
+
 ## `depot prd list`
 
 List PRDs for the current project.
@@ -48,12 +52,9 @@ depot prd list
 
 ### Output
 
-Each line includes:
+Each line includes the PRD ID, title, status, and revision number.
 
-- the full PRD ID
-- the title
-- the status
-- the revision number
+---
 
 ## `depot prd show`
 
@@ -65,11 +66,15 @@ Show detailed PRD fields.
 depot prd show <prd-id>
 ```
 
-The command requires a full PRD ID.
+### Output
+
+Prints aligned key-value fields: ID, Title, Status, Revision, Context, Scope, Parent, Created, Committed, Activated.
+
+---
 
 ## `depot prd commit`
 
-Commit a draft PRD.
+Commit a draft PRD, freezing it for execution.
 
 ### Usage
 
@@ -78,6 +83,8 @@ depot prd commit <prd-id>
 ```
 
 Only PRDs in `draft` status can be committed.
+
+---
 
 ## `depot prd activate`
 
@@ -89,7 +96,9 @@ Mark a committed PRD as active for execution.
 depot prd activate <prd-id>
 ```
 
-Only PRDs in `committed` status can be activated. A workspace can only have one active PRD at a time.
+Only PRDs in `committed` status can be activated. A workspace can only have one `in_progress` PRD at a time. The command errors if another PRD is already active.
+
+---
 
 ## `depot prd amend`
 
@@ -108,8 +117,24 @@ Create a new PRD revision from a committed or active PRD.
 depot prd amend <prd-id> [--title <title>] [--context <text>] [--scope <text>]
 ```
 
+Fields not provided default to their current values from the original PRD.
+
 ### Example
 
 ```bash
 depot prd amend <prd-id> --scope "Expand the initial CLI scope to cover structured logging"
 ```
+
+---
+
+## `depot prd archive`
+
+Explicitly archive a committed or active PRD.
+
+### Usage
+
+```bash
+depot prd archive <prd-id>
+```
+
+PRDs in `draft` status cannot be archived directly. Use `prd amend` or `prd commit` first.
