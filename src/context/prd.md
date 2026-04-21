@@ -14,10 +14,18 @@ Interview the user relentlessly on every aspect of the plan.
 Each generated task must contain:
 
 - `title`: concrete action, infinitive verb
-- `description`: context and implementation detail
+- `description`: a compact execution spec that makes the intent, scope, and non-goals clear for the dev agent
 - `done_criteria`: list of testable conditions - no ambiguity allowed
 - `depends_on`: explicit dependencies with other tasks
 - `effort`: estimation xs/s/m/l/xl
+
+The task description should make these points explicit whenever they matter:
+
+- `Intent:` why this task exists now
+- `Scope:` what the dev agent should change or verify
+- `Non-goals:` what should not be pulled into this task
+
+Do not finish PRD framing while important execution ambiguity remains in the task specs.
 
 ## Phase 3 - Devil's Advocate Challenge
 

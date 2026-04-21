@@ -20,10 +20,20 @@ describe("context template registry", () => {
   it("returns embedded dev context content", () => {
     const content = getContextTemplate("dev");
     expect(content).toContain("Context: Dev Agent");
-    expect(content).toContain("depot handoff");
+    expect(content).toContain("depot context dev");
+    expect(content).toContain("depot task show <task_id>");
     expect(content).toContain("depot task start");
     expect(content).toContain("depot log add handoff");
+    expect(content).toContain("Do not rely on `depot context dev` alone");
     expect(content).not.toContain("depot log add <project_id> handoff");
+  });
+
+  it("returns embedded prd context task-spec guidance", () => {
+    const content = getContextTemplate("prd");
+    expect(content).toContain("Intent:");
+    expect(content).toContain("Scope:");
+    expect(content).toContain("Non-goals:");
+    expect(content).toContain("important execution ambiguity");
   });
 
   it("returns embedded review context content", () => {

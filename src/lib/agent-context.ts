@@ -312,6 +312,8 @@ async function renderDevContext(db: Database, workspaceId: string): Promise<stri
   } else {
     lines.push(`${currentTask.id}  ${currentTask.title}`);
     lines.push(`Started : ${currentTask.startedAt ?? "unknown"}`);
+    lines.push(`Summary : ${summarizeTaskDescription(currentTask.description)}`);
+    lines.push(`Read full spec: depot task show ${currentTask.id}`);
     lines.push("Criteria:");
     appendCriteria(lines, currentTask.doneCriteria);
   }
@@ -339,6 +341,8 @@ async function renderDevContext(db: Database, workspaceId: string): Promise<stri
     lines.push(`${nextTask.id}  ${nextTask.title}`);
     lines.push(`Effort      : ${nextTask.effort}`);
     lines.push("Dependencies: satisfied");
+    lines.push(`Summary     : ${summarizeTaskDescription(nextTask.description)}`);
+    lines.push(`Read full spec: depot task show ${nextTask.id}`);
     lines.push("Criteria:");
     appendCriteria(lines, nextTask.doneCriteria);
   }
@@ -554,6 +558,19 @@ function appendCriteria(lines: string[], doneCriteria: string): void {
   for (const line of doneCriteria.split("\n")) {
     lines.push(`  - ${line}`);
   }
+}
+
+function summarizeTaskDescription(description: string): string {
+  const summary = description
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  if (!summary) {
+    return "No task description recorded.";
+  }
+
+  return summary;
 }
 
 function sortPrdsNewestFirst<T extends { createdAt: string }>(prds: T[]): T[] {

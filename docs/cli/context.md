@@ -39,13 +39,15 @@ The output includes:
 - the active PRD
 - archived revisions in the PRD chain
 - progress summary
-- current task or an explicit absence message
+- current task summary, done criteria, and an explicit `depot task show <task-id>` reminder
 - blocked tasks or an explicit absence message
 - the last 10 activity entries for the current workspace
-- the next recommended task or an explicit absence message
+- the next recommended task summary plus an explicit `depot task show <task-id>` reminder
 - the embedded Dev instructions
 
 If multiple `in_progress` PRDs exist in the same workspace, the command fails with a clear conflict list.
+
+`depot context dev` is a resume-oriented summary, not the complete task spec. Dev agents are expected to run `depot task show <task-id>` before starting a task and again before resuming after an interruption or handoff.
 
 ## `depot context review`
 

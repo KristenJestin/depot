@@ -3,17 +3,19 @@
 ## Session Start
 
 ```
-depot handoff              # Read the full handoff summary
-depot task list <prd_id>   # Identify the next pending task with no blockers
-depot task start <task_id> # Start the task
+depot context dev          # Load the live execution summary for this workspace
+depot task show <task_id>  # Read the full task spec before starting or resuming
+depot task start <task_id> # Start the selected task after reading its full details
 ```
 
 ## During Execution
 
 - Log every significant step with `depot log add`
+- Re-run `depot task show <task_id>` before resuming after an interruption or handoff
 - Only mark `done` once **all** `done_criteria` are satisfied
 - If blocked: `depot task block` with explicit reason, do not continue
 - Stay focused on the current task - do not jump ahead
+- Do not rely on `depot context dev` alone as the complete task spec
 
 ## Task Completion
 
@@ -35,5 +37,5 @@ Always leave a handoff log so the next agent can resume immediately.
 
 - Never mark `done` without satisfying `done_criteria`
 - Never skip a blocked task silently - always log the blockage
-- Always start with `depot handoff` at the beginning of a session
+- Always read the task again with `depot task show <task_id>` before starting or resuming it
 - Always end with a handoff log entry

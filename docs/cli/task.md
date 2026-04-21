@@ -79,6 +79,8 @@ depot task show <task-id>
 
 The command requires a full task ID.
 
+Dev agents should treat `depot task show` as mandatory before starting a task and before resuming a task after an interruption or handoff, because `depot context dev` is only a summary view.
+
 ## `depot task start`
 
 Start a pending task.

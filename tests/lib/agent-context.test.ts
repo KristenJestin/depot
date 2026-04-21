@@ -134,7 +134,10 @@ describe("agent context renderer", () => {
     expect(output).toContain("Feedback is not modeled in depot yet.");
     expect(output).toContain(current.id);
     expect(output).toContain("Current task");
+    expect(output).toContain("Summary : desc");
+    expect(output).toContain(`Read full spec: depot task show ${currentTask.id}`);
     expect(output).toContain(`${nextTask.id}  Next task`);
+    expect(output).toContain(`Read full spec: depot task show ${nextTask.id}`);
     expect(output).toContain("Last 10 entries for the current workspace:");
     expect(output).toContain("Note 11");
     expect(output).not.toMatch(/\bNote 1\b/);
