@@ -337,7 +337,7 @@ describe("PRD lifecycle", () => {
       title: "Core Foundation",
     });
     await commitPrd(db, prd.id);
-    await expect(commitPrd(db, prd.id)).rejects.toThrow(/expected 'draft'/i);
+    await expect(commitPrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
   });
 
   it("activates a committed PRD", async () => {
@@ -359,7 +359,7 @@ describe("PRD lifecycle", () => {
       title: "Core Foundation",
     });
     // still draft
-    await expect(activatePrd(db, prd.id)).rejects.toThrow(/expected 'committed'/i);
+    await expect(activatePrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
   });
 
   it("rejects activating a second PRD in the same workspace", async () => {
@@ -435,7 +435,7 @@ describe("PRD lifecycle", () => {
       workspaceId,
       title: "Core Foundation",
     });
-    await expect(amendPrd(db, prd.id, { title: "v2" })).rejects.toThrow(/expected 'committed' or 'in_progress'/i);
+    await expect(amendPrd(db, prd.id, { title: "v2" })).rejects.toThrow(/invalid prd transition/i);
   });
 
   it("lists PRDs for a project", async () => {
@@ -612,7 +612,7 @@ describe("task lifecycle", () => {
       effort: "s",
     });
     await startTask(db, task.id);
-    await expect(startTask(db, task.id)).rejects.toThrow(/expected 'pending'/i);
+    await expect(startTask(db, task.id)).rejects.toThrow(/invalid task transition/i);
   });
 
   it("completes an in_progress task", async () => {
@@ -638,7 +638,7 @@ describe("task lifecycle", () => {
       effort: "s",
     });
     // still pending
-    await expect(completeTask(db, task.id)).rejects.toThrow(/expected 'in_progress'/i);
+    await expect(completeTask(db, task.id)).rejects.toThrow(/invalid task transition/i);
   });
 
   it("enforces dependency completion before task done", async () => {

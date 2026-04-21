@@ -1,5 +1,5 @@
 import type { Database } from "#/db/client";
-import { listPrds, listTasks, listActivity } from "#/lib/workflow";
+import { buildWorkspaceStatus, summarizeActivityPayload } from "#/lib/workflow";
 
 // ── Structured handoff data ───────────────────────────────────────────────────
 
@@ -46,37 +46,25 @@ export type HandoffData = {
  * Used by both the text renderer and the JSON output path.
  */
 export async function buildHandoffData(db: Database, workspaceId: string): Promise<HandoffData> {
-  const workspace = await db.query.workspaces.findFirst({
-    where: { id: workspaceId },
-  });
-  if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+  const status = await buildWorkspaceStatus(db, workspaceId);
 
-  const project = await db.query.projects.findFirst({
-    where: { id: workspace.projectId },
-  });
-  if (!project) throw new Error(`Project not found: ${workspace.projectId}`);
-
-  const generatedAt = new Date().toISOString();
-
-  const allPrds = await listPrds(db, { workspaceId });
-  const activePrd = allPrds.find((p) => p.status === "in_progress") ?? null;
-
-  const rawActivity = await listActivity(db, {
-    projectId: project.id,
-    workspaceId,
-    limit: 10,
-  });
-  const recentActivity: HandoffActivityEntry[] = rawActivity.map((e) => ({
+  const recentActivity: HandoffActivityEntry[] = status.recentActivity.map((e) => ({
     createdAt: e.createdAt,
     eventType: e.eventType,
     payload: JSON.parse(e.payload) as Record<string, unknown>,
   }));
 
+  const activePrd = status.activePrd;
+
   if (!activePrd) {
     return {
-      project: { id: project.id, name: project.name },
-      workspace: { id: workspace.id, path: workspace.path, label: workspace.label },
-      generatedAt,
+      project: { id: status.project.id, name: status.project.name },
+      workspace: {
+        id: status.workspace.id,
+        path: status.workspace.path,
+        label: status.workspace.label,
+      },
+      generatedAt: status.generatedAt,
       activePrd: null,
       taskProgress: null,
       currentTask: null,
@@ -86,7 +74,7 @@ export async function buildHandoffData(db: Database, workspaceId: string): Promi
     };
   }
 
-  const allTasks = await listTasks(db, activePrd.id);
+  const allTasks = status.allTasks;
 
   const done = allTasks.filter((t) => t.status === "done").length;
   const inProgress = allTasks.filter((t) => t.status === "in_progress").length;
@@ -112,7 +100,7 @@ export async function buildHandoffData(db: Database, workspaceId: string): Promi
     .filter((t) => t.status === "blocked")
     .map((t) => ({ id: t.id, title: t.title, blockedReason: t.blockedReason }));
 
-  const nextTaskRaw = await findNextRecommendedTask(db, allTasks);
+  const nextTaskRaw = status.nextRecommendedTask;
   const nextRecommendedTask: HandoffTaskSummary | null = nextTaskRaw
     ? {
         id: nextTaskRaw.id,
@@ -128,9 +116,13 @@ export async function buildHandoffData(db: Database, workspaceId: string): Promi
     : null;
 
   return {
-    project: { id: project.id, name: project.name },
-    workspace: { id: workspace.id, path: workspace.path, label: workspace.label },
-    generatedAt,
+    project: { id: status.project.id, name: status.project.name },
+    workspace: {
+      id: status.workspace.id,
+      path: status.workspace.path,
+      label: status.workspace.label,
+    },
+    generatedAt: status.generatedAt,
     activePrd: {
       id: activePrd.id,
       title: activePrd.title,
@@ -245,7 +237,7 @@ export async function buildHandoff(db: Database, workspaceId: string): Promise<s
 function appendRecentActivity(lines: string[], activity: HandoffActivityEntry[]): void {
   lines.push(`## Recent Activity  (last 10 entries)`);
   for (const entry of activity) {
-    const summary = summarizePayload(entry.eventType, entry.payload);
+    const summary = summarizeActivityPayload(entry.eventType, entry.payload);
     lines.push(`${entry.createdAt}  ${entry.eventType}  ${summary}`);
   }
   lines.push("");
@@ -254,62 +246,4 @@ function appendRecentActivity(lines: string[], activity: HandoffActivityEntry[])
 function appendResume(lines: string[]): void {
   lines.push("## Resume");
   lines.push("Run `depot context dev` for full execution instructions.");
-}
-
-function summarizePayload(eventType: string, payload: Record<string, unknown>): string {
-  switch (eventType) {
-    case "note":
-      return String(payload.message ?? "");
-    case "session_start":
-      return String(payload.context ?? "New session");
-    case "task_started":
-    case "task_done":
-      return String(payload.title ?? "");
-    case "task_blocked":
-    case "task_skipped":
-      return `${payload.title ?? ""} — ${payload.reason ?? ""}`;
-    case "prd_committed":
-    case "prd_activated":
-      return String(payload.title ?? "");
-    case "prd_amended":
-      return `rev ${payload.revision ?? "?"}`;
-    case "handoff":
-      return String(payload.context ?? "");
-    case "error":
-      return String(payload.message ?? "");
-    default:
-      return JSON.stringify(payload);
-  }
-}
-
-/**
- * Find the next pending task that has all dependencies satisfied.
- * Tasks are checked in position order.
- */
-async function findNextRecommendedTask(
-  db: Database,
-  allTasks: Array<{
-    id: string;
-    status: string;
-    dependsOn: string;
-    position: number;
-    title: string;
-    effort: string;
-    doneCriteria: string;
-    startedAt: string | null;
-    blockedReason: string | null;
-  }>,
-) {
-  const doneIds = new Set(allTasks.filter((t) => t.status === "done").map((t) => t.id));
-
-  for (const task of allTasks) {
-    if (task.status !== "pending") continue;
-
-    const deps: string[] = JSON.parse(task.dependsOn);
-    const allDepsSatisfied = deps.every((depId) => doneIds.has(depId));
-    if (allDepsSatisfied) {
-      return task;
-    }
-  }
-  return null;
 }

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { projects, workspaces, prds, tasks, reviews, activityLog } from "#/db/schema";
 import { generateId } from "#/lib/ids";
 import type { Database } from "#/db/client";
+import { validatePrdTransition, validateTaskTransition } from "#/lib/validator";
 import type { Effort, ProjectStatus, ReviewMode, ReviewDecision } from "#/lib/validator";
 import { normalizeTaskDescriptionForStorage } from "#/lib/task-spec";
 import { normalizeWorkspacePath } from "#/lib/paths";
@@ -231,9 +232,7 @@ export async function listPrds(
 export async function commitPrd(db: Database, id: string) {
   const prd = await getPrd(db, id);
   if (!prd) throw new Error(`PRD not found: ${id}`);
-  if (prd.status !== "draft") {
-    throw new Error(`Cannot commit PRD: status is '${prd.status}', expected 'draft'`);
-  }
+  validatePrdTransition(prd.status, "committed");
   const now = new Date().toISOString();
   await db
     .update(prds)
@@ -245,9 +244,7 @@ export async function commitPrd(db: Database, id: string) {
 export async function activatePrd(db: Database, id: string) {
   const prd = await getPrd(db, id);
   if (!prd) throw new Error(`PRD not found: ${id}`);
-  if (prd.status !== "committed") {
-    throw new Error(`Cannot activate PRD: status is '${prd.status}', expected 'committed'`);
-  }
+  validatePrdTransition(prd.status, "in_progress");
   const activePrd = await db.query.prds.findFirst({
     where: { workspaceId: prd.workspaceId, status: "in_progress" },
   });
@@ -267,11 +264,7 @@ export async function activatePrd(db: Database, id: string) {
 export async function archivePrd(db: Database, id: string) {
   const prd = await getPrd(db, id);
   if (!prd) throw new Error(`PRD not found: ${id}`);
-  if (prd.status !== "in_progress" && prd.status !== "committed") {
-    throw new Error(
-      `Cannot archive PRD: status is '${prd.status}', expected 'in_progress' or 'committed'`,
-    );
-  }
+  validatePrdTransition(prd.status, "archived");
   await db
     .update(prds)
     .set({ status: "archived", updatedAt: new Date().toISOString() } as any)
@@ -290,11 +283,7 @@ export async function amendPrd(
 ) {
   const original = await getPrd(db, id);
   if (!original) throw new Error(`PRD not found: ${id}`);
-  if (original.status !== "committed" && original.status !== "in_progress") {
-    throw new Error(
-      `Cannot amend PRD: status is '${original.status}', expected 'committed' or 'in_progress'`,
-    );
-  }
+  validatePrdTransition(original.status, "archived");
 
   // Archive the original revision
   await db
@@ -386,9 +375,7 @@ export async function listTasks(db: Database, prdId: string) {
 export async function startTask(db: Database, id: string) {
   const task = await getTask(db, id);
   if (!task) throw new Error(`Task not found: ${id}`);
-  if (task.status !== "pending") {
-    throw new Error(`Cannot start task: status is '${task.status}', expected 'pending'`);
-  }
+  validateTaskTransition(task.status, "in_progress");
   const now = new Date().toISOString();
   await db.update(tasks).set({ status: "in_progress", startedAt: now }).where(eq(tasks.id, id));
   return (await getTask(db, id))!;
@@ -405,9 +392,7 @@ export async function startTask(db: Database, id: string) {
 export async function completeTask(db: Database, id: string) {
   const task = await getTask(db, id);
   if (!task) throw new Error(`Task not found: ${id}`);
-  if (task.status !== "in_progress") {
-    throw new Error(`Cannot complete task: status is '${task.status}', expected 'in_progress'`);
-  }
+  validateTaskTransition(task.status, "done");
   if (!task.startedAt) {
     throw new Error("Cannot complete task: started_at is not set");
   }
@@ -442,9 +427,7 @@ export async function blockTask(db: Database, id: string, reason: string) {
   }
   const task = await getTask(db, id);
   if (!task) throw new Error(`Task not found: ${id}`);
-  if (task.status !== "in_progress") {
-    throw new Error(`Cannot block task: status is '${task.status}', expected 'in_progress'`);
-  }
+  validateTaskTransition(task.status, "blocked");
   await db.update(tasks).set({ status: "blocked", blockedReason: reason }).where(eq(tasks.id, id));
   return (await getTask(db, id))!;
 }
@@ -455,11 +438,7 @@ export async function skipTask(db: Database, id: string, reason: string) {
   }
   const task = await getTask(db, id);
   if (!task) throw new Error(`Task not found: ${id}`);
-  if (task.status !== "pending" && task.status !== "blocked") {
-    throw new Error(
-      `Cannot skip task: status is '${task.status}', expected 'pending' or 'blocked'`,
-    );
-  }
+  validateTaskTransition(task.status, "skipped");
   const now = new Date().toISOString();
   await db
     .update(tasks)
@@ -679,4 +658,117 @@ export async function listActivity(
     limit: filter.limit,
   });
   return rows.reverse();
+}
+
+// ── Row type aliases ──────────────────────────────────────────────────────────
+
+export type WorkspaceRow = typeof workspaces.$inferSelect;
+export type ProjectRow = typeof projects.$inferSelect;
+export type PrdRow = typeof prds.$inferSelect;
+export type TaskRow = typeof tasks.$inferSelect;
+export type ActivityRow = typeof activityLog.$inferSelect;
+
+// ── Shared utilities ──────────────────────────────────────────────────────────
+
+/**
+ * Find the next pending task that has all dependencies satisfied.
+ * Tasks must already be ordered by position (ascending).
+ */
+export function findNextRecommendedTask<
+  T extends { id: string; status: string; dependsOn: string },
+>(tasks: T[]): T | null {
+  const doneIds = new Set(tasks.filter((t) => t.status === "done").map((t) => t.id));
+  for (const task of tasks) {
+    if (task.status !== "pending") continue;
+    const deps: string[] = JSON.parse(task.dependsOn);
+    if (deps.every((depId) => doneIds.has(depId))) return task;
+  }
+  return null;
+}
+
+/**
+ * Produce a human-readable one-line summary of an activity log payload.
+ */
+export function summarizeActivityPayload(
+  eventType: string,
+  payload: Record<string, unknown>,
+): string {
+  switch (eventType) {
+    case "note":
+      return String(payload.message ?? "");
+    case "session_start":
+      return String(payload.context ?? "New session");
+    case "task_started":
+    case "task_done":
+      return String(payload.title ?? "");
+    case "task_blocked":
+    case "task_skipped":
+      return [String(payload.title ?? ""), String(payload.reason ?? "")]
+        .filter(Boolean)
+        .join(" — ");
+    case "prd_committed":
+    case "prd_activated":
+      return String(payload.title ?? "");
+    case "prd_amended":
+      return `rev ${payload.revision ?? "?"}`;
+    case "handoff":
+      return String(payload.context ?? "");
+    case "error":
+      return String(payload.message ?? "");
+    default:
+      return JSON.stringify(payload);
+  }
+}
+
+// ── Workspace status ──────────────────────────────────────────────────────────
+
+export type WorkspaceStatus = {
+  workspace: WorkspaceRow;
+  project: ProjectRow;
+  generatedAt: string;
+  /** Single active (in_progress) PRD, or null if zero or multiple. */
+  activePrd: PrdRow | null;
+  /** Non-empty when multiple PRDs have status in_progress simultaneously. */
+  conflictingPrds: PrdRow[];
+  /** Tasks for activePrd ordered by position. Empty when activePrd is null. */
+  allTasks: TaskRow[];
+  /** Next pending task with all deps satisfied, or null. */
+  nextRecommendedTask: TaskRow | null;
+  /** Last 10 activity entries for this workspace, ascending by time. */
+  recentActivity: ActivityRow[];
+};
+
+export async function buildWorkspaceStatus(
+  db: Database,
+  workspaceId: string,
+): Promise<WorkspaceStatus> {
+  const workspace = await db.query.workspaces.findFirst({ where: { id: workspaceId } });
+  if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+
+  const project = await db.query.projects.findFirst({ where: { id: workspace.projectId } });
+  if (!project) throw new Error(`Project not found: ${workspace.projectId}`);
+
+  const generatedAt = new Date().toISOString();
+
+  const allPrds = await listPrds(db, { workspaceId });
+  const activePrds = allPrds.filter((p) => p.status === "in_progress");
+
+  const activePrd = activePrds.length === 1 ? activePrds[0]! : null;
+  const conflictingPrds = activePrds.length > 1 ? activePrds : [];
+
+  const recentActivity = await listActivity(db, { projectId: project.id, workspaceId, limit: 10 });
+
+  const allTasks = activePrd ? await listTasks(db, activePrd.id) : [];
+  const nextRecommendedTask = activePrd ? findNextRecommendedTask(allTasks) : null;
+
+  return {
+    workspace,
+    project,
+    generatedAt,
+    activePrd,
+    conflictingPrds,
+    allTasks,
+    nextRecommendedTask,
+    recentActivity,
+  };
 }

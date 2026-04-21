@@ -3,7 +3,16 @@ import { getContextTemplate } from "#/lib/contexts";
 import { normalizeWorkspacePath } from "#/lib/paths";
 import { summarizeTaskDescription } from "#/lib/task-spec";
 import type { TaskDescriptionFormat } from "#/lib/validator";
-import { getProject, getPrd, listActivity, listPrds, listTasks, listReviews } from "#/lib/workflow";
+import {
+  buildWorkspaceStatus,
+  findNextRecommendedTask,
+  getProject,
+  getPrd,
+  listPrds,
+  listTasks,
+  listReviews,
+  summarizeActivityPayload,
+} from "#/lib/workflow";
 
 export type ContextMode = "prd" | "dev" | "review";
 
@@ -252,11 +261,11 @@ async function renderDevContext(
   workspaceId: string,
   prdTarget?: string,
 ): Promise<string> {
-  const header = await loadWorkspaceHeader(db, workspaceId);
+  const status = await buildWorkspaceStatus(db, workspaceId);
   const template = getContextTemplate("dev").trim();
   const lines: string[] = [];
 
-  appendHeader(lines, "dev", header.project, header.workspace);
+  appendHeader(lines, "dev", status.project, status.workspace);
   lines.push(CONTEXT_SECTION_TITLES.dev.standards);
   lines.push(...DEV_PLACEHOLDERS.standards);
   lines.push("");
@@ -295,99 +304,20 @@ async function renderDevContext(
       );
     }
 
-    // Render dev context for the explicitly targeted PRD
     const allTasks = await listTasks(db, targetedPrd.id);
     const previousRevisions = await loadArchivedRevisionChain(db, targetedPrd);
-
-    lines.push(CONTEXT_SECTION_TITLES.dev.activePrd);
-    lines.push(
-      `${targetedPrd.id}  ${targetedPrd.title}  [${targetedPrd.status}]  rev ${targetedPrd.revision}`,
-    );
-    if (targetedPrd.context) {
-      lines.push(`Context : ${targetedPrd.context}`);
-    }
-    if (targetedPrd.scope) {
-      lines.push(`Scope   : ${targetedPrd.scope}`);
-    }
-    lines.push("");
-
-    lines.push(CONTEXT_SECTION_TITLES.dev.previousRevisions);
-    if (previousRevisions.length === 0) {
-      lines.push("No archived revisions in this PRD chain.");
-    } else {
-      for (const revision of previousRevisions) {
-        lines.push(
-          `${revision.id}  ${revision.title}  [${revision.status}]  rev ${revision.revision}`,
-        );
-      }
-    }
-    lines.push("");
-
-    lines.push(CONTEXT_SECTION_TITLES.dev.progress);
-    lines.push(buildProgressSummary(allTasks));
-    lines.push("");
-
-    lines.push(CONTEXT_SECTION_TITLES.dev.currentTask);
-    const currentTask = allTasks.find((task) => task.status === "in_progress");
-    if (!currentTask) {
-      lines.push("No task in progress.");
-    } else {
-      lines.push(`${currentTask.id}  ${currentTask.title}`);
-      lines.push(`Started : ${currentTask.startedAt ?? "unknown"}`);
-      lines.push(
-        `Summary : ${summarizeTaskDescription(currentTask.description, currentTask.descriptionFormat)}`,
-      );
-      lines.push(`Read full spec: depot task show ${currentTask.id}`);
-      lines.push("Criteria:");
-      appendCriteria(lines, currentTask.doneCriteria);
-    }
-    lines.push("");
-
-    lines.push(CONTEXT_SECTION_TITLES.dev.blockedTasks);
-    const blockedTasks = allTasks.filter((task) => task.status === "blocked");
-    if (blockedTasks.length === 0) {
-      lines.push("No blocked tasks.");
-    } else {
-      for (const task of blockedTasks) {
-        lines.push(`${task.id}  ${task.title}`);
-        lines.push(`Reason: ${task.blockedReason ?? "Blocked without a recorded reason"}`);
-      }
-    }
-    lines.push("");
-
-    await appendRecentActivity(lines, db, header.project.id, workspaceId);
-
-    lines.push(CONTEXT_SECTION_TITLES.dev.nextRecommendedTask);
-    const nextTask = findNextRecommendedTask(allTasks);
-    if (!nextTask) {
-      lines.push("No task is currently recommendable.");
-    } else {
-      lines.push(`${nextTask.id}  ${nextTask.title}`);
-      lines.push(`Effort      : ${nextTask.effort}`);
-      lines.push("Dependencies: satisfied");
-      lines.push(
-        `Summary     : ${summarizeTaskDescription(nextTask.description, nextTask.descriptionFormat)}`,
-      );
-      lines.push(`Read full spec: depot task show ${nextTask.id}`);
-      lines.push("Criteria:");
-      appendCriteria(lines, nextTask.doneCriteria);
-    }
-    lines.push("");
-
-    lines.push(CONTEXT_SECTION_TITLES.dev.instructions);
-    lines.push(template);
+    appendDevPrdSections(lines, targetedPrd, allTasks, previousRevisions, status.recentActivity, template);
     return lines.join("\n");
   }
 
   // ── Auto-resolution (no explicit target) ──────────────────────────────────
-  const prds = await listPrds(db, { workspaceId });
-  const activeResolution = resolveActivePrd(prds);
-
-  if (activeResolution.kind === "conflict") {
-    throw new Error(buildActivePrdConflictMessage("dev", header.workspace, activeResolution.prds));
+  if (status.conflictingPrds.length > 0) {
+    throw new Error(
+      buildActivePrdConflictMessage("dev", status.workspace, status.conflictingPrds),
+    );
   }
 
-  if (activeResolution.kind === "none") {
+  if (!status.activePrd) {
     lines.push(CONTEXT_SECTION_TITLES.dev.activePrd);
     lines.push(...DEV_PLACEHOLDERS.noActivePrd.activePrd);
     lines.push("");
@@ -403,7 +333,7 @@ async function renderDevContext(
     lines.push(CONTEXT_SECTION_TITLES.dev.blockedTasks);
     lines.push(...DEV_PLACEHOLDERS.noActivePrd.blockedTasks);
     lines.push("");
-    await appendRecentActivity(lines, db, header.project.id, workspaceId);
+    appendRecentActivitySection(lines, status.recentActivity);
     lines.push(CONTEXT_SECTION_TITLES.dev.nextRecommendedTask);
     lines.push(...DEV_PLACEHOLDERS.noActivePrd.nextRecommendedTask);
     lines.push("");
@@ -412,17 +342,33 @@ async function renderDevContext(
     return lines.join("\n");
   }
 
-  const activePrd = activeResolution.prd;
-  const allTasks = await listTasks(db, activePrd.id);
-  const previousRevisions = await loadArchivedRevisionChain(db, activePrd);
+  const previousRevisions = await loadArchivedRevisionChain(db, status.activePrd);
+  appendDevPrdSections(
+    lines,
+    status.activePrd,
+    status.allTasks,
+    previousRevisions,
+    status.recentActivity,
+    template,
+  );
+  return lines.join("\n");
+}
 
+function appendDevPrdSections(
+  lines: string[],
+  prd: PrdRecord,
+  allTasks: TaskRecord[],
+  previousRevisions: PrdRecord[],
+  recentActivity: Array<{ createdAt: string; eventType: string; payload: string }>,
+  template: string,
+): void {
   lines.push(CONTEXT_SECTION_TITLES.dev.activePrd);
-  lines.push(`${activePrd.id}  ${activePrd.title}  [${activePrd.status}]  rev ${activePrd.revision}`);
-  if (activePrd.context) {
-    lines.push(`Context : ${activePrd.context}`);
+  lines.push(`${prd.id}  ${prd.title}  [${prd.status}]  rev ${prd.revision}`);
+  if (prd.context) {
+    lines.push(`Context : ${prd.context}`);
   }
-  if (activePrd.scope) {
-    lines.push(`Scope   : ${activePrd.scope}`);
+  if (prd.scope) {
+    lines.push(`Scope   : ${prd.scope}`);
   }
   lines.push("");
 
@@ -431,7 +377,9 @@ async function renderDevContext(
     lines.push("No archived revisions in this PRD chain.");
   } else {
     for (const revision of previousRevisions) {
-      lines.push(`${revision.id}  ${revision.title}  [${revision.status}]  rev ${revision.revision}`);
+      lines.push(
+        `${revision.id}  ${revision.title}  [${revision.status}]  rev ${revision.revision}`,
+      );
     }
   }
   lines.push("");
@@ -468,7 +416,7 @@ async function renderDevContext(
   }
   lines.push("");
 
-  await appendRecentActivity(lines, db, header.project.id, workspaceId);
+  appendRecentActivitySection(lines, recentActivity);
 
   lines.push(CONTEXT_SECTION_TITLES.dev.nextRecommendedTask);
   const nextTask = findNextRecommendedTask(allTasks);
@@ -489,7 +437,6 @@ async function renderDevContext(
 
   lines.push(CONTEXT_SECTION_TITLES.dev.instructions);
   lines.push(template);
-  return lines.join("\n");
 }
 
 async function renderReviewContext(db: Database, workspaceId: string): Promise<string> {
@@ -758,18 +705,11 @@ async function loadArchivedRevisionChain(db: Database, startingPrd: PrdRecord): 
   return revisions;
 }
 
-async function appendRecentActivity(
+function appendRecentActivitySection(
   lines: string[],
-  db: Database,
-  projectId: string,
-  workspaceId: string,
-): Promise<void> {
+  activity: Array<{ createdAt: string; eventType: string; payload: string }>,
+): void {
   lines.push(CONTEXT_SECTION_TITLES.dev.recentActivity);
-  const activity = await listActivity(db, {
-    projectId,
-    workspaceId,
-    limit: 10,
-  });
 
   if (activity.length === 0) {
     lines.push("No recent activity for this workspace.");
@@ -780,7 +720,9 @@ async function appendRecentActivity(
   lines.push("Last 10 entries for the current workspace:");
   for (const entry of activity) {
     const payload = JSON.parse(entry.payload) as Record<string, unknown>;
-    lines.push(`${entry.createdAt}  ${entry.eventType}  ${summarizePayload(entry.eventType, payload)}`);
+    lines.push(
+      `${entry.createdAt}  ${entry.eventType}  ${summarizeActivityPayload(entry.eventType, payload)}`,
+    );
   }
   lines.push("");
 }
@@ -797,23 +739,6 @@ function buildProgressSummary(tasks: TaskRecord[]): string {
   const skippedCount = tasks.filter((task) => task.status === "skipped").length;
 
   return `${doneCount}/${tasks.length} done · ${inProgressCount} in progress · ${blockedCount} blocked · ${pendingCount} pending · ${skippedCount} skipped`;
-}
-
-function findNextRecommendedTask(tasks: TaskRecord[]): TaskRecord | null {
-  const doneIds = new Set(tasks.filter((task) => task.status === "done").map((task) => task.id));
-
-  for (const task of tasks) {
-    if (task.status !== "pending") {
-      continue;
-    }
-
-    const dependencies = JSON.parse(task.dependsOn) as string[];
-    if (dependencies.every((depId) => doneIds.has(depId))) {
-      return task;
-    }
-  }
-
-  return null;
 }
 
 function appendCriteria(lines: string[], doneCriteria: string): void {
@@ -841,30 +766,4 @@ function buildActivePrdConflictMessage(
   }
 
   return lines.join("\n");
-}
-
-function summarizePayload(eventType: string, payload: Record<string, unknown>): string {
-  switch (eventType) {
-    case "note":
-      return String(payload.message ?? "");
-    case "session_start":
-      return String(payload.context ?? "New session");
-    case "task_started":
-    case "task_done":
-      return String(payload.title ?? "");
-    case "task_blocked":
-    case "task_skipped":
-      return `${payload.title ?? ""} ${payload.reason ?? ""}`.trim();
-    case "prd_committed":
-    case "prd_activated":
-      return String(payload.title ?? "");
-    case "prd_amended":
-      return `rev ${payload.revision ?? "?"}`;
-    case "handoff":
-      return String(payload.context ?? "");
-    case "error":
-      return String(payload.message ?? "");
-    default:
-      return JSON.stringify(payload);
-  }
 }
