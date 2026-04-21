@@ -62,6 +62,8 @@ Each task includes:
 - an ordered position within the PRD
 - optional task dependencies
 
+New PRDs should prefer a compact structured description with `Intent:`, `Scope:`, and `Non-goals:` so the execution intent is explicit. Older freeform task descriptions remain readable without a required retrofit.
+
 The current task lifecycle is:
 
 - `pending`

@@ -19,11 +19,13 @@ Each generated task must contain:
 - `depends_on`: explicit dependencies with other tasks
 - `effort`: estimation xs/s/m/l/xl
 
-The task description should make these points explicit whenever they matter:
+New PRDs should write `description` in this compact structure by default:
 
 - `Intent:` why this task exists now
 - `Scope:` what the dev agent should change or verify
 - `Non-goals:` what should not be pulled into this task
+
+Keep the spec compact, but do not leave execution ambiguity behind. Older tasks may remain as legacy freeform descriptions; reading paths must keep them understandable without a mandatory retrofit.
 
 Do not finish PRD framing while important execution ambiguity remains in the task specs.
 

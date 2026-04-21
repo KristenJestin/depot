@@ -3,6 +3,7 @@ import { projects, workspaces, prds, tasks, activityLog } from "#/db/schema";
 import { generateId } from "#/lib/ids";
 import type { Database } from "#/db/client";
 import type { Effort } from "#/lib/validator";
+import { normalizeTaskDescriptionForStorage } from "#/lib/task-spec";
 import { normalizeWorkspacePath } from "#/lib/paths";
 
 // ── Projects ──────────────────────────────────────────────────────────────────
@@ -251,6 +252,7 @@ export async function createTask(
     prdId: string;
     title: string;
     description: string;
+    descriptionFormat?: "legacy" | "structured_v1";
     doneCriteria: string;
     effort: Effort;
     dependsOn?: string[];
@@ -265,6 +267,10 @@ export async function createTask(
     where: { prdId: input.prdId },
   });
   const nextPosition = existing.length + 1;
+  const storedDescription = normalizeTaskDescriptionForStorage(
+    input.description,
+    input.descriptionFormat,
+  );
 
   const id = generateId();
   const now = new Date().toISOString();
@@ -273,7 +279,8 @@ export async function createTask(
     prdId: input.prdId,
     position: nextPosition,
     title: input.title,
-    description: input.description,
+    description: storedDescription.description,
+    descriptionFormat: storedDescription.descriptionFormat,
     doneCriteria: input.doneCriteria,
     dependsOn: JSON.stringify(input.dependsOn ?? []),
     effort: input.effort,

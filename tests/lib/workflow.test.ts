@@ -408,6 +408,32 @@ describe("task lifecycle", () => {
     });
     expect(task.status).toBe("pending");
     expect(task.position).toBe(1);
+    expect(task.descriptionFormat).toBe("legacy");
+  });
+
+  it("stores structured task descriptions with an explicit format", async () => {
+    const task = await createTask(db, {
+      prdId,
+      title: "Structured task",
+      description: [
+        "Intent:",
+        "Clarify the task intent for execution.",
+        "",
+        "Scope:",
+        "Render structured specs in task show",
+        "Keep old descriptions readable",
+        "",
+        "Non-goals:",
+        "Do not require legacy task rewrites",
+      ].join("\n"),
+      doneCriteria: "Structured output is readable",
+      effort: "m",
+    });
+
+    expect(task.descriptionFormat).toBe("structured_v1");
+    expect(task.description).toContain("Intent:");
+    expect(task.description).toContain("- Render structured specs in task show");
+    expect(task.description).toContain("Non-goals:");
   });
 
   it("auto-increments position within a PRD", async () => {

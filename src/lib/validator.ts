@@ -43,6 +43,9 @@ export const VALID_TASK_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   skipped: [],
 };
 
+export const VALID_TASK_DESCRIPTION_FORMATS = ["legacy", "structured_v1"] as const;
+export type TaskDescriptionFormat = (typeof VALID_TASK_DESCRIPTION_FORMATS)[number];
+
 export function validateTaskTransition(from: TaskStatus, to: TaskStatus): void {
   const allowed = VALID_TASK_TRANSITIONS[from];
   if (!allowed || !allowed.includes(to)) {

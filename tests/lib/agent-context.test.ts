@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
 import { prds } from "#/db/schema";
+import { formatStructuredTaskDescription } from "#/lib/task-spec";
 import {
   activatePrd,
   addWorkspace,
@@ -101,14 +102,22 @@ describe("agent context renderer", () => {
     const currentTask = await createTask(db, {
       prdId: current.id,
       title: "Current task",
-      description: "desc",
+      description: formatStructuredTaskDescription({
+        intent: "Implement the current execution path.",
+        scope: "Touch the active task summary rendering.",
+        nonGoals: "Do not retrofit older tasks.",
+      }),
       doneCriteria: "current criteria",
       effort: "m",
     });
     const nextTask = await createTask(db, {
       prdId: current.id,
       title: "Next task",
-      description: "desc",
+      description: formatStructuredTaskDescription({
+        intent: "Implement the next execution path.",
+        scope: "Touch the next recommended task summary rendering.",
+        nonGoals: "Do not redesign the whole context output.",
+      }),
       doneCriteria: "next criteria",
       effort: "l",
       dependsOn: [doneTask.id],
@@ -134,9 +143,10 @@ describe("agent context renderer", () => {
     expect(output).toContain("Feedback is not modeled in depot yet.");
     expect(output).toContain(current.id);
     expect(output).toContain("Current task");
-    expect(output).toContain("Summary : desc");
+    expect(output).toContain("Summary : Implement the current execution path.");
     expect(output).toContain(`Read full spec: depot task show ${currentTask.id}`);
     expect(output).toContain(`${nextTask.id}  Next task`);
+    expect(output).toContain("Summary     : Implement the next execution path.");
     expect(output).toContain(`Read full spec: depot task show ${nextTask.id}`);
     expect(output).toContain("Last 10 entries for the current workspace:");
     expect(output).toContain("Note 11");

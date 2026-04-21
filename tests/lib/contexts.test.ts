@@ -34,6 +34,7 @@ describe("context template registry", () => {
     expect(content).toContain("Scope:");
     expect(content).toContain("Non-goals:");
     expect(content).toContain("important execution ambiguity");
+    expect(content).toContain("Older tasks may remain as legacy freeform descriptions");
   });
 
   it("returns embedded review context content", () => {

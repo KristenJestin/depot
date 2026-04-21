@@ -13,7 +13,13 @@ import {
 } from "#/lib/workflow";
 import { effortSchema, commaSeparatedIds } from "#/lib/schemas";
 import { log } from "#/lib/logger";
+import {
+  detectTaskDescriptionFormat,
+  getTaskDescriptionSections,
+} from "#/lib/task-spec";
 import * as z from "zod";
+
+const TASK_SHOW_LABEL_WIDTH = 11;
 
 // ── Validation schema ─────────────────────────────────────────────────────────
 
@@ -98,10 +104,18 @@ const addCommand = defineValidatedCommand({
         )
       : undefined;
 
+    if (detectTaskDescriptionFormat(args.desc) !== "structured_v1") {
+      console.error(
+        "New tasks must use a structured description with Intent, Scope, and Non-goals sections.",
+      );
+      process.exit(1);
+    }
+
     const task = await createTask(db, {
       prdId: prd.id,
       title: args.title,
       description: args.desc,
+      descriptionFormat: "structured_v1",
       doneCriteria: args.criteria,
       effort: args.effort,
       dependsOn: dependencyIds,
@@ -179,8 +193,7 @@ const showCommand = defineValidatedCommand({
       ["Status", task.status],
       ["Position", task.position],
       ["Effort", task.effort],
-      ["Description", task.description],
-      ["Criteria", task.doneCriteria],
+      ["Format", task.descriptionFormat],
       ["Depends On", deps.length > 0 ? deps.join(", ") : null],
       ["Blocked", task.blockedReason],
       ["Skipped", task.skipReason],
@@ -188,6 +201,19 @@ const showCommand = defineValidatedCommand({
       ["Started", task.startedAt],
       ["Completed", task.completedAt],
     ]);
+
+    for (const section of getTaskDescriptionSections(task.description, task.descriptionFormat)) {
+      printTaskSection(section.label, section.lines, section.style);
+    }
+
+    printTaskSection(
+      "Criteria",
+      task.doneCriteria
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0),
+      "list",
+    );
   },
 });
 
@@ -311,3 +337,25 @@ export const taskCommand = defineValidatedCommand({
     skip: skipCommand,
   },
 });
+
+function printTaskSection(
+  label: string,
+  lines: string[],
+  style: "text" | "list",
+): void {
+  if (lines.length === 0) {
+    return;
+  }
+
+  const prefix = `${label.padEnd(TASK_SHOW_LABEL_WIDTH)} : `;
+  console.log(`${prefix}${formatSectionLine(lines[0]!, style)}`);
+
+  const continuationPrefix = `${"".padEnd(TASK_SHOW_LABEL_WIDTH)}   `;
+  for (const line of lines.slice(1)) {
+    console.log(`${continuationPrefix}${formatSectionLine(line, style)}`);
+  }
+}
+
+function formatSectionLine(line: string, style: "text" | "list"): string {
+  return style === "list" ? `- ${line}` : line;
+}

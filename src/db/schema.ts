@@ -3,6 +3,7 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import {
   VALID_PROJECT_STATUSES,
   VALID_PRD_STATUSES,
+  VALID_TASK_DESCRIPTION_FORMATS,
   VALID_TASK_STATUSES,
   VALID_EFFORTS,
 } from "#/lib/validator";
@@ -76,6 +77,9 @@ export const tasks = sqliteTable("tasks", {
   position: integer("position").notNull(),
   title: text("title").notNull(),
   description: text("description").notNull(),
+  descriptionFormat: text("description_format", { enum: VALID_TASK_DESCRIPTION_FORMATS })
+    .notNull()
+    .default("legacy"),
   doneCriteria: text("done_criteria").notNull(), // textual, non-empty
   dependsOn: text("depends_on").notNull().default("[]"), // JSON array of task ids
   effort: text("effort", { enum: VALID_EFFORTS }).notNull(),

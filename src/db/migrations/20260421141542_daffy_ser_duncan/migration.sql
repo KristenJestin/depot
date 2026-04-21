@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `description_format` text DEFAULT 'legacy' NOT NULL;
