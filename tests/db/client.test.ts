@@ -11,7 +11,7 @@ import {
 
 type TestMigrationRunner = (db: Database, config: { migrationsFolder: string }) => void;
 type TestDatabaseClient = {
-  run: (sql: string) => void;
+  exec: (sql: string) => void;
   close: () => void;
 };
 
@@ -102,11 +102,11 @@ describe("db client", () => {
     let closeCount = 0;
     const databaseFactory = () => {
       createCount += 1;
-      let runCount = 0;
+      let execCount = 0;
       const client: TestDatabaseClient = {
-        run: () => {
-          runCount += 1;
-          if (createCount === 1 && runCount === 1) {
+        exec: () => {
+          execCount += 1;
+          if (createCount === 1 && execCount === 1) {
             throw new Error("SQLITE_BUSY_RECOVERY: database is locked");
           }
         },
@@ -141,7 +141,7 @@ describe("db client", () => {
       openDatabaseWith(":memory:", {
         baseDir: distDir,
         databaseFactory: () => ({
-          run: () => {},
+          exec: () => {},
           close: () => {
             closeCount += 1;
           },

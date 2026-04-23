@@ -8,7 +8,7 @@
     "skipLibCheck": true,
     "outDir": "dist",
     "resolveJsonModule": true,
-    "types": ["node", "bun"],
+    "types": ["node"],
     "paths": {
       "#/*": ["./src/*"]
     }

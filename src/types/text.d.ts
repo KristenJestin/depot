@@ -1,7 +1,8 @@
 /**
  * Type declaration for importing Markdown files as plain text strings.
- * Used with Bun's `with { type: "text" }` import attribute in contexts.ts.
- * Vitest handles .md files via the rawMdPlugin in vitest.config.ts.
+ * Used with `import ... with { type: "text" }` in contexts.ts — supported in Node 22+
+ * and handled by tsdown at bundle time.
+ * At test time, .md files are transformed by rawMdPlugin in vite.config.ts.
  */
 declare module "*.md" {
   const content: string;

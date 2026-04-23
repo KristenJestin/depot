@@ -13,57 +13,54 @@
   "license": "ISC",
   "author": "netsirk",
   "bin": {
-    "depot": "./dist/index.js"
+    "depot": "./dist/index.mjs"
   },
   "files": [
     "dist"
   ],
-  "main": "dist/index.js",
+  "main": "dist/index.mjs",
   "imports": {
     "#/*": "./src/*"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.mjs"
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "bun run scripts/build.ts",
-    "check": "bun run typecheck && bun run lint && bun run fmt:check && bun run test",
-    "prepublishOnly": "bun run build",
-    "depot": "bun src/cli/index.ts --",
+    "build": "vp pack",
+    "check": "vp check",
+    "prepublishOnly": "vp pack",
+    "depot": "node src/index.ts --",
     "db:check": "drizzle-kit check",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "dev": "bun --watch src/cli/index.ts",
-    "fmt": "oxfmt .",
-    "fmt:check": "oxfmt --check .",
-    "lint": "oxlint src tests",
-    "lint:fix": "oxlint --fix src tests",
-    "test": "bun --bun vitest run",
-    "test:coverage": "bun --bun vitest run --coverage",
-    "test:watch": "bun --bun vitest",
+    "dev": "vp pack --watch",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
+    "lint": "vp lint src tests",
+    "lint:fix": "vp lint --fix src tests",
+    "test": "vp test",
+    "test:coverage": "vp test --coverage",
+    "test:watch": "vp test --watch",
     "typecheck": "tsc --noEmit",
-    "release": "bun publish"
+    "release": "npm publish"
   },
   "dependencies": {
     "citty": "^0.2.2",
-    "drizzle-orm": "^1.0.0-beta.22",
+    "drizzle-orm": "1.0.0-beta.22",
     "effect": "^3.21.1",
     "ulid": "^3.0.2"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.15",
     "@types/node": "^22.0.0",
-    "drizzle-kit": "^1.0.0-beta.22",
-    "oxfmt": "^0.45.0",
-    "oxlint": "^1.60.0",
+    "drizzle-kit": "1.0.0-beta.22",
     "typescript": "^6.0.2",
-    "vitest": "^4.1.4"
+    "vite-plus": "0.1.19"
   },
   "engines": {
-    "bun": ">=1.0"
+    "node": ">=25.0"
   }
 }
