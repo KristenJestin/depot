@@ -43,5 +43,4 @@ Present them to the user. Iterate until resolution.
 
 Once the PRD is fully specified and reviewed, mark it ready for execution.
 
-The exact command will be available once the `prd ready` command is implemented (PRD 1).
-Until then, coordinate with the dev team to move the PRD to `ready` status before activation.
+Once the PRD is fully specified and reviewed, run `depot prd ready <prd-id>` to mark it ready for execution.

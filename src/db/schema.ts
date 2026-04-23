@@ -5,6 +5,9 @@ import {
   VALID_EFFORTS,
   VALID_PRD_STATUSES,
   VALID_PROJECT_STATUSES,
+  VALID_REVIEW_STATUSES,
+  VALID_REVIEW_TYPES,
+  VALID_SEVERITY_LEVELS,
   VALID_TASK_DESCRIPTION_FORMATS,
   VALID_TASK_STATUSES,
 } from "#/shared/validator";
@@ -58,6 +61,7 @@ export const prds = sqliteTable(
       .notNull()
       .references(() => projects.id),
     workspaceId: text().references(() => workspaces.id), // set at activation, null until then
+    rootId: text().references((): AnySQLiteColumn => prds.id), // points to v1 (self if v1)
     parentId: text().references((): AnySQLiteColumn => prds.id), // set when created via `prd fork`
     revision: integer().notNull().default(1),
     title: text().notNull(),
@@ -77,8 +81,33 @@ export const prds = sqliteTable(
   (table) => [
     index("prds_project_id_idx").on(table.projectId),
     index("prds_workspace_id_idx").on(table.workspaceId),
+    index("prds_root_id_idx").on(table.rootId),
     index("prds_parent_id_idx").on(table.parentId),
   ],
+);
+
+// ── Reviews ───────────────────────────────────────────────────────────────────
+
+export const reviews = sqliteTable(
+  "reviews",
+  {
+    id: text().primaryKey(),
+    prdId: text()
+      .notNull()
+      .references(() => prds.id),
+    type: text({ enum: VALID_REVIEW_TYPES }).notNull(),
+    status: text({ enum: VALID_REVIEW_STATUSES }).notNull().default("draft"),
+    userFeedback: text(),
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdateFn(() => new Date()),
+    doneAt: integer({ mode: "timestamp_ms" }),
+  },
+  (table) => [index("reviews_prd_id_idx").on(table.prdId)],
 );
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -100,6 +129,8 @@ export const tasks = sqliteTable(
     dependsOn: text().notNull().default("[]"), // JSON array of task ids
     effort: text({ enum: VALID_EFFORTS }).notNull(),
     status: text({ enum: VALID_TASK_STATUSES }).notNull().default("pending"),
+    reviewId: text().references(() => reviews.id), // set when task belongs to a review
+    severity: text({ enum: VALID_SEVERITY_LEVELS }), // relevant when reviewId is set
     blockedReason: text(), // required when status = blocked
     skipReason: text(), // required when status = skipped
     createdAt: integer({ mode: "timestamp_ms" })
@@ -108,7 +139,10 @@ export const tasks = sqliteTable(
     startedAt: integer({ mode: "timestamp_ms" }),
     completedAt: integer({ mode: "timestamp_ms" }),
   },
-  (table) => [index("tasks_prd_id_idx").on(table.prdId)],
+  (table) => [
+    index("tasks_prd_id_idx").on(table.prdId),
+    index("tasks_review_id_idx").on(table.reviewId),
+  ],
 );
 
 // ── Activity Log ──────────────────────────────────────────────────────────────
@@ -144,13 +178,14 @@ export const activityLog = sqliteTable(
 export type ProjectRow = typeof projects.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type PrdRow = typeof prds.$inferSelect;
+export type ReviewRow = typeof reviews.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 export type ActivityRow = typeof activityLog.$inferSelect;
 
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const relations = defineRelations(
-  { projects, workspaces, prds, tasks, activityLog },
+  { projects, workspaces, prds, reviews, tasks, activityLog },
   (r) => ({
     projects: {
       workspaces: r.many.workspaces({
@@ -189,6 +224,11 @@ export const relations = defineRelations(
         from: r.prds.workspaceId,
         to: r.workspaces.id,
       }),
+      root: r.one.prds({
+        from: r.prds.rootId,
+        to: r.prds.id,
+        alias: "prd_root",
+      }),
       parent: r.one.prds({
         from: r.prds.parentId,
         to: r.prds.id,
@@ -198,15 +238,33 @@ export const relations = defineRelations(
         from: r.prds.id,
         to: r.tasks.prdId,
       }),
+      reviews: r.many.reviews({
+        from: r.prds.id,
+        to: r.reviews.prdId,
+      }),
       activityLogs: r.many.activityLog({
         from: r.prds.id,
         to: r.activityLog.prdId,
+      }),
+    },
+    reviews: {
+      prd: r.one.prds({
+        from: r.reviews.prdId,
+        to: r.prds.id,
+      }),
+      tasks: r.many.tasks({
+        from: r.reviews.id,
+        to: r.tasks.reviewId,
       }),
     },
     tasks: {
       prd: r.one.prds({
         from: r.tasks.prdId,
         to: r.prds.id,
+      }),
+      review: r.one.reviews({
+        from: r.tasks.reviewId,
+        to: r.reviews.id,
       }),
       activityLogs: r.many.activityLog({
         from: r.tasks.id,

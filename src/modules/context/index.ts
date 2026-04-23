@@ -9,10 +9,14 @@
 
 import prdContent from "#/modules/context/templates/prd.md" with { type: "text" };
 import devContent from "#/modules/context/templates/dev.md" with { type: "text" };
+import coderContent from "#/modules/context/templates/coder.md" with { type: "text" };
+import auditorContent from "#/modules/context/templates/auditor.md" with { type: "text" };
 
 const CONTEXT_TEMPLATES: Record<string, string> = {
   prd: prdContent,
   dev: devContent,
+  coder: coderContent,
+  auditor: auditorContent,
 };
 
 export function getContextTemplate(mode: string): string {

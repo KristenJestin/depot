@@ -7,6 +7,7 @@ import { logCommand } from "#/modules/activity/command";
 import { contextCommand } from "#/modules/context/command";
 import { installCommand } from "#/modules/install/command";
 import { workspaceCommand } from "#/modules/workspaces/command";
+import { reviewCommand } from "#/modules/reviews/command";
 import { command } from "#/cli/command";
 import { setDebug, setJsonMode } from "#/shared/logger";
 import pkg from "../../package.json";
@@ -48,6 +49,7 @@ const main = command({
     log: logCommand,
     context: contextCommand,
     install: installCommand,
+    review: reviewCommand,
   },
 });
 

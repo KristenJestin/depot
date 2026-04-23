@@ -6,8 +6,9 @@ describe("context template registry", () => {
     const list = listContextModes();
     expect(list).toContain("prd");
     expect(list).toContain("dev");
+    expect(list).toContain("coder");
+    expect(list).toContain("auditor");
     expect(list).not.toContain("review");
-    expect(list).toHaveLength(2);
   });
 
   it("returns embedded prd context content", () => {
@@ -19,13 +20,10 @@ describe("context template registry", () => {
 
   it("returns embedded dev context content", () => {
     const content = getContextTemplate("dev");
-    expect(content).toContain("Context: Dev Agent");
+    expect(content).toContain("Context: Dev Orchestrator");
     expect(content).toContain("depot context dev");
-    expect(content).toContain("depot task show <task_id>");
-    expect(content).toContain("depot task start");
-    expect(content).not.toContain("depot log add handoff");
-    expect(content).toContain("Do not rely on `depot context dev` alone");
-    expect(content).not.toContain("depot log add <project_id> handoff");
+    expect(content).toContain("depot context coder");
+    expect(content).toContain("depot context auditor");
   });
 
   it("returns embedded prd context task-spec guidance", () => {

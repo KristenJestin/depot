@@ -7,14 +7,18 @@ export const contextCommand = command({
   workspace: { autoCreate: true },
   args: {
     mode: {
-      schema: Schema.Literal("prd", "dev"),
+      schema: Schema.Literal("prd", "dev", "coder", "auditor"),
       positional: true,
-      description: "Context mode (prd/dev)",
+      description: "Context mode (prd/dev/coder/auditor)",
     },
     prdTarget: {
       schema: Schema.String,
       positional: true,
-      description: "PRD ID or title to target (dev mode only)",
+      description: "PRD ID or title to target (dev/coder/auditor mode)",
+    },
+    review: {
+      schema: Schema.String,
+      description: "Review ID (coder mode only)",
     },
   },
   run: async ({ args, db, ws, output }) => {
@@ -35,7 +39,7 @@ export const contextCommand = command({
     }
 
     try {
-      output.print(await renderContextMode(db, ws.id, args.mode, args.prdTarget));
+      output.print(await renderContextMode(db, ws.id, args.mode, args.prdTarget, args.review));
     } catch (error) {
       output.error("render_error", error instanceof Error ? error.message : String(error));
     }

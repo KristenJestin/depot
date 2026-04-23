@@ -9,12 +9,17 @@ import {
   getProject,
   getWorkspace,
   listPrds,
+  listPrdFamily,
+  getPrd,
   listTasks,
+  listReviews,
+  listReviewTasks,
+  getReview,
   summarizeActivityPayload,
   RECENT_ACTIVITY_LIMIT,
 } from "#/lib/workflow";
 
-export type ContextMode = "prd" | "dev";
+export type ContextMode = "prd" | "dev" | "coder" | "auditor";
 
 type ActivePrdResolution =
   | { kind: "none" }
@@ -43,11 +48,24 @@ const CONTEXT_SECTION_TITLES = {
     nextRecommendedTask: "## Next Recommended Task",
     instructions: "## Instructions",
   },
+  coder: {
+    prd: "## PRD",
+    tasks: "## Tasks",
+    instructions: "## Instructions",
+  },
+  auditor: {
+    prd: "## PRD",
+    doneTasks: "## Done Tasks Since Last Audit",
+    lastReview: "## Last Agent Review",
+    instructions: "## Instructions",
+  },
 } as const;
 
 const CONTEXT_INDEX_SECTIONS: Array<{ mode: ContextMode; detail: string }> = [
   { mode: "prd", detail: "depot context prd" },
   { mode: "dev", detail: "depot context dev" },
+  { mode: "coder", detail: "depot context coder <prd-id>" },
+  { mode: "auditor", detail: "depot context auditor <prd-id>" },
 ];
 
 const DEV_PLACEHOLDERS = {
@@ -63,6 +81,8 @@ const DEV_PLACEHOLDERS = {
 const MODE_USAGE: Record<ContextMode, string> = {
   prd: "Frame product work and inspect the current PRD chain.",
   dev: "Load the live execution context for the active PRD.",
+  coder: "Load implementation context for a coder sub-agent.",
+  auditor: "Load audit context for an auditor sub-agent.",
 };
 
 export async function renderContextIndex(db: Database, workspaceId: string): Promise<string> {
@@ -93,12 +113,17 @@ export async function renderContextMode(
   workspaceId: string,
   mode: ContextMode,
   prdTarget?: string,
+  reviewId?: string,
 ): Promise<string> {
   switch (mode) {
     case "prd":
-      return renderPrdContext(db, workspaceId);
+      return renderPrdContext(db, workspaceId, prdTarget);
     case "dev":
       return renderDevContext(db, workspaceId, prdTarget);
+    case "coder":
+      return renderCoderContext(db, workspaceId, prdTarget, reviewId);
+    case "auditor":
+      return renderAuditorContext(db, workspaceId, prdTarget);
   }
 }
 
@@ -134,14 +159,71 @@ async function loadWorkspaceHeader(db: Database, workspaceId: string) {
   };
 }
 
-async function renderPrdContext(db: Database, workspaceId: string): Promise<string> {
+async function renderPrdContext(
+  db: Database,
+  workspaceId: string,
+  prdId?: string,
+): Promise<string> {
   const header = await loadWorkspaceHeader(db, workspaceId);
   const allProjectPrds = await listPrds(db, { projectId: header.project.id });
-  const prds = sortPrdsNewestFirst(allProjectPrds.filter((prd) => isActivePrdStatus(prd.status)));
   const template = getContextTemplate("prd").trim();
   const lines: string[] = [];
 
   appendHeader(lines, "prd", header.project, header.workspace);
+
+  if (prdId) {
+    // Specific PRD provided
+    const targetPrd = allProjectPrds.find((p) => p.id === prdId);
+    if (!targetPrd) {
+      throw new Error(`PRD not found: ${prdId}`);
+    }
+    if (
+      targetPrd.status === "in_progress" ||
+      targetPrd.status === "done" ||
+      targetPrd.status === "canceled"
+    ) {
+      throw new Error(
+        `PRD '${prdId}' is in status '${targetPrd.status}'. Cannot edit a PRD that is in_progress or beyond. ` +
+          `Use \`depot prd fork\` to create a new revision if modifications are needed.`,
+      );
+    }
+
+    lines.push(CONTEXT_SECTION_TITLES.prd.overview);
+    if (targetPrd.status === "ready") {
+      lines.push(
+        `PRD ${targetPrd.id} is 'ready'. A fork (v${targetPrd.revision + 1}) will be created to resume editing.`,
+      );
+    } else {
+      lines.push(
+        `Continuing Q&A for PRD ${targetPrd.id} [${targetPrd.status}] rev ${targetPrd.revision}.`,
+      );
+    }
+    lines.push("");
+
+    // Show family chain
+    if (targetPrd.rootId) {
+      const family = await listPrdFamily(db, targetPrd.rootId);
+      if (family.length > 1) {
+        lines.push(CONTEXT_SECTION_TITLES.prd.prds);
+        lines.push("Revision chain:");
+        for (const p of family) {
+          const marker = p.id === prdId ? " ◄ current" : "";
+          lines.push(`  ${p.id}  ${p.title}  [${p.status}]  rev ${p.revision}${marker}`);
+        }
+        lines.push("");
+      }
+    }
+
+    lines.push(CONTEXT_SECTION_TITLES.prd.instructions);
+    lines.push(`Workspace path: ${formatPathForDisplay(header.workspace.path)}`);
+    lines.push("");
+    lines.push(template);
+    return lines.join("\n");
+  }
+
+  // No specific PRD — default behavior
+  const prds = sortPrdsNewestFirst(allProjectPrds.filter((prd) => isActivePrdStatus(prd.status)));
+
   lines.push(CONTEXT_SECTION_TITLES.prd.overview);
   lines.push(MODE_USAGE.prd);
 
@@ -333,6 +415,10 @@ async function buildIndexStatus(
       return buildIndexPrdStatus(prds);
     case "dev":
       return buildIndexDevStatus(db, activeResolution);
+    case "coder":
+      return "Run: depot context coder <prd-id>";
+    case "auditor":
+      return "Run: depot context auditor <prd-id>";
   }
 }
 
@@ -438,6 +524,144 @@ export async function checkPrdLaunchability(
   }
 
   return { launchable: true };
+}
+
+async function renderCoderContext(
+  db: Database,
+  workspaceId: string,
+  prdId?: string,
+  reviewId?: string,
+): Promise<string> {
+  if (!prdId) {
+    throw new Error(
+      "depot context coder requires a PRD ID.\nUsage: depot context coder <prd-id> [--review <review-id>]",
+    );
+  }
+
+  const prd = await getPrd(db, prdId);
+  if (!prd) throw new Error(`PRD not found: ${prdId}`);
+
+  const header = await loadWorkspaceHeader(db, workspaceId);
+  const template = getContextTemplate("coder").trim();
+  const lines: string[] = [];
+
+  appendHeader(lines, "coder", header.project, header.workspace);
+
+  lines.push(CONTEXT_SECTION_TITLES.coder.prd);
+  lines.push(`${prd.id}  ${prd.title}  [${prd.status}]  rev ${prd.revision}`);
+  if (prd.context) lines.push(`Context : ${prd.context}`);
+  if (prd.scope) lines.push(`Scope   : ${prd.scope}`);
+  lines.push("");
+
+  lines.push(CONTEXT_SECTION_TITLES.coder.tasks);
+
+  if (reviewId) {
+    const review = await getReview(db, reviewId);
+    if (!review) throw new Error(`Review not found: ${reviewId}`);
+    lines.push(`Review: ${review.id} [${review.type}] [${review.status}]`);
+    if (review.userFeedback) lines.push(`User feedback: ${review.userFeedback}`);
+    lines.push("");
+    const reviewTasks = await listReviewTasks(db, reviewId);
+    const pending = reviewTasks.filter((t) => t.status !== "done" && t.status !== "skipped");
+    if (pending.length === 0) {
+      lines.push("No pending review tasks.");
+    } else {
+      for (const task of pending) {
+        const sev = task.severity ? ` [${task.severity}]` : "";
+        lines.push(`${task.id}  ${task.title}${sev}  [${task.status}]`);
+        lines.push(`  Criteria: ${task.doneCriteria}`);
+      }
+    }
+  } else {
+    const allTasks = await listTasks(db, prdId);
+    const pending = allTasks.filter((t) => t.status !== "done" && t.status !== "skipped");
+    if (pending.length === 0) {
+      lines.push("No pending tasks for this PRD.");
+    } else {
+      for (const task of pending) {
+        lines.push(
+          `${task.id}  ${task.title}  [${task.status}]  effort: ${task.effort}  pos: ${task.position}`,
+        );
+        lines.push(
+          `  Summary: ${summarizeTaskDescription(task.description, task.descriptionFormat)}`,
+        );
+        lines.push(`  Criteria: ${task.doneCriteria}`);
+      }
+    }
+  }
+  lines.push("");
+
+  lines.push(CONTEXT_SECTION_TITLES.coder.instructions);
+  lines.push(template);
+
+  return lines.join("\n");
+}
+
+async function renderAuditorContext(
+  db: Database,
+  workspaceId: string,
+  prdId?: string,
+): Promise<string> {
+  if (!prdId) {
+    throw new Error(
+      "depot context auditor requires a PRD ID.\nUsage: depot context auditor <prd-id>",
+    );
+  }
+
+  const prd = await getPrd(db, prdId);
+  if (!prd) throw new Error(`PRD not found: ${prdId}`);
+
+  const header = await loadWorkspaceHeader(db, workspaceId);
+  const template = getContextTemplate("auditor").trim();
+  const lines: string[] = [];
+
+  appendHeader(lines, "auditor", header.project, header.workspace);
+
+  lines.push(CONTEXT_SECTION_TITLES.auditor.prd);
+  lines.push(`${prd.id}  ${prd.title}  [${prd.status}]  rev ${prd.revision}`);
+  if (prd.context) lines.push(`Context : ${prd.context}`);
+  if (prd.scope) lines.push(`Scope   : ${prd.scope}`);
+  lines.push("");
+
+  lines.push(CONTEXT_SECTION_TITLES.auditor.doneTasks);
+  const allTasks = await listTasks(db, prdId);
+  const doneTasks = allTasks.filter((t) => t.status === "done" || t.status === "skipped");
+  if (doneTasks.length === 0) {
+    lines.push("No completed tasks yet.");
+  } else {
+    for (const task of doneTasks) {
+      lines.push(
+        `${task.id}  ${task.title}  [${task.status}]  completed: ${task.completedAt ? formatDate(task.completedAt) : "unknown"}`,
+      );
+    }
+  }
+  lines.push("");
+
+  lines.push(CONTEXT_SECTION_TITLES.auditor.lastReview);
+  const allReviews = await listReviews(db, prdId);
+  const agentReviews = allReviews.filter((r) => r.type === "agent");
+  const lastAgentReview = agentReviews[agentReviews.length - 1];
+  if (!lastAgentReview) {
+    lines.push("No previous agent review for this PRD.");
+  } else {
+    lines.push(
+      `${lastAgentReview.id}  [${lastAgentReview.status}]  created: ${formatDate(lastAgentReview.createdAt)}`,
+    );
+    const reviewTasks = await listReviewTasks(db, lastAgentReview.id);
+    if (reviewTasks.length > 0) {
+      lines.push(`Tasks (${reviewTasks.length}):`);
+      for (const task of reviewTasks) {
+        const sev = task.severity ? ` [${task.severity}]` : "";
+        lines.push(`  ${task.id}  ${task.title}${sev}  [${task.status}]`);
+      }
+    }
+  }
+  lines.push("");
+
+  lines.push(CONTEXT_SECTION_TITLES.auditor.instructions);
+  lines.push(template);
+
+  return lines.join("\n");
 }
 
 function resolveActivePrd(prds: PrdRow[]): ActivePrdResolution {

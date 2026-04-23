@@ -1,32 +1,50 @@
-# Context: Dev Agent
+# Context: Dev Orchestrator
+
+## Role
+
+You are the orchestrator. You coordinate the coder and auditor sub-agents and request human validation.
+
+## Full Loop
+
+```
+[1] You launch the coder:
+    - Without review (first pass): depot context coder <prd-id>
+    - With review: depot context coder <prd-id> --review <review-id>
+
+[2] You launch the auditor:
+    depot context auditor <prd-id>
+
+    → If critical or major findings:
+        Go to [1] with --review <review-id>
+
+    → If clean:
+        Go to [3]
+
+[3] You ask the human for validation:
+    → If human feedback:
+        Q&A phase: if feedback is vague or ambiguous, ask clarifying questions
+        before acting. If clear, proceed directly.
+
+        Once understood:
+        You create the review: depot review start <prd-id> --type human
+        You add one task per action: depot review task add <review-id> ...
+
+        Go to [1] with --review <review-id>
+
+    → If human approves:
+        depot prd done <prd-id>
+```
 
 ## Session Start
 
 ```
-depot context dev          # Load the live execution summary for this workspace
-depot task show <task_id>  # Read the full task spec before starting or resuming
-depot task start <task_id> # Start the selected task after reading its full details
+depot context dev          # Load this orchestrator context
+depot prd show <prd-id>    # Inspect the active PRD before starting
 ```
-
-## During Execution
-
-- Log every significant step with `depot log add`
-- Re-run `depot task show <task_id>` before resuming after an interruption
-- Only mark `done` once **all** `done_criteria` are satisfied
-- If blocked: `depot task block` with explicit reason, do not continue
-- Stay focused on the current task - do not jump ahead
-- Do not rely on `depot context dev` alone as the complete task spec
-
-## Task Completion
-
-Before running `depot task done`:
-
-1. Verify every line of `done_criteria` is satisfied
-2. Run relevant tests
-3. Ensure no regressions on previously completed tasks
 
 ## Rules
 
-- Never mark `done` without satisfying `done_criteria`
-- Never skip a blocked task silently - always log the blockage
-- Always read the task again with `depot task show <task_id>` before starting or resuming it
+- Always run the auditor after the coder, no exception
+- Never skip the human validation step
+- Do not mark the PRD done without explicit human approval
+- Always use depot context coder and depot context auditor as sub-agent entry points

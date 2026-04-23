@@ -43,6 +43,23 @@ export type TaskDescriptionFormat = (typeof VALID_TASK_DESCRIPTION_FORMATS)[numb
 export const VALID_EFFORTS = ["xs", "s", "m", "l", "xl"] as const;
 export type Effort = (typeof VALID_EFFORTS)[number];
 
+// ── Reviews ──────────────────────────────────────────────────────────────────
+
+export const VALID_REVIEW_TYPES = ["human", "agent"] as const;
+export type ReviewType = (typeof VALID_REVIEW_TYPES)[number];
+
+export const VALID_REVIEW_STATUSES = ["draft", "in_progress", "done"] as const;
+export type ReviewStatus = (typeof VALID_REVIEW_STATUSES)[number];
+
+export const VALID_REVIEW_TRANSITIONS: Record<ReviewStatus, ReviewStatus[]> = {
+  draft: ["in_progress", "done"],
+  in_progress: ["done"],
+  done: [],
+};
+
+export const VALID_SEVERITY_LEVELS = ["critical", "major", "minor", "info"] as const;
+export type SeverityLevel = (typeof VALID_SEVERITY_LEVELS)[number];
+
 // ── Event types ──────────────────────────────────────────────────────────────
 
 export const VALID_EVENT_TYPES = [

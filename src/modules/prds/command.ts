@@ -64,6 +64,7 @@ const showCommand = command({
         ["Title", prd.title],
         ["Status", prd.status],
         ["Revision", prd.revision],
+        ["Root", prd.rootId],
         ["Context", prd.context],
         ["Scope", prd.scope],
         ["Parent", prd.parentId],
@@ -79,7 +80,9 @@ const listCommand = command({
   meta: { name: "list", description: "List PRDs for the current project" },
   workspace: true,
   run: async ({ ws, output }) => {
-    const prdList = await runEffect(DomainPrds.listPrds({ projectId: ws.projectId }));
+    const prdList = await runEffect(
+      DomainPrds.listPrds({ projectId: ws.projectId, latestOnly: true }),
+    );
     if (output.isJson()) {
       output.success({ items: prdList });
       return;
@@ -210,6 +213,37 @@ const cancelCommand = command({
   },
 });
 
+const forkCommand = command({
+  meta: {
+    name: "fork",
+    description: "Fork a ready PRD into a new draft revision",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID to fork",
+    },
+  },
+  run: async ({ args, output }) => {
+    const forked = await runEffect(
+      DomainPrds.forkPrd(args.prdId).pipe(
+        Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
+      ),
+    );
+    if (!forked) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    if (output.isJson()) {
+      output.success({ item: forked });
+    } else {
+      output.print(
+        `Forked PRD '${forked.title}' as revision ${forked.revision} (${forked.id}) [draft]`,
+      );
+    }
+  },
+});
+
 export const prdCommand = command({
   meta: { name: "prd", description: "PRD management" },
   subCommands: {
@@ -220,5 +254,6 @@ export const prdCommand = command({
     ready: readyCommand,
     done: doneCommand,
     cancel: cancelCommand,
+    fork: forkCommand,
   },
 });

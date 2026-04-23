@@ -140,7 +140,7 @@ describe("agent context renderer", () => {
     expect(output).toContain("Last 10 entries for the current workspace:");
     expect(output).toContain("Note 11");
     expect(output).not.toMatch(/\bNote 1\b/);
-    expect(output).toContain("Context: Dev Agent");
+    expect(output).toContain("Context: Dev Orchestrator");
   });
 
   it("fails dev mode when multiple active PRDs exist", async () => {
@@ -354,7 +354,7 @@ describe("renderContextMode dev with explicit prdTarget", () => {
 
     expect(output).toContain("Targeted PRD");
     expect(output).toContain("[in_progress]");
-    expect(output).toContain("Context: Dev Agent");
+    expect(output).toContain("Context: Dev Orchestrator");
   });
 
   it("renders dev context for a targeted PRD by unique title substring", async () => {

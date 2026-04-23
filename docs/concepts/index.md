@@ -38,24 +38,36 @@ A PRD belongs to a project and a workspace. It captures why work exists and what
 The lifecycle is:
 
 - `draft`
-- `committed`
+- `ready`
 - `in_progress`
-- `archived`
+- `done`
+- `canceled`
 
 Allowed transitions:
 
-- `draft → committed`
-- `committed → in_progress`
-- `committed → archived`
-- `in_progress → archived`
+- `draft → ready`
+- `ready → in_progress`
+- `ready → draft` (fork: creates a new revision)
+- `in_progress → done`
+- `in_progress → canceled`
 
 Key behaviors:
 
 - `depot prd create` creates a draft PRD.
-- `depot prd commit` freezes a draft PRD for execution.
-- `depot prd activate` marks a committed PRD as the active PRD for its workspace.
-- `depot prd amend` archives the current committed or active PRD and creates a new draft revision with an incremented revision number.
-- `depot prd archive` explicitly archives a committed or active PRD.
+- `depot prd ready` marks a draft PRD as ready for execution.
+- `depot prd activate` marks a ready PRD as in_progress.
+
+### Versioning
+
+Each PRD has a `rootId` that points to the original v1 (itself if it is v1). This allows querying an entire family with a single `WHERE root_id = ?`.
+
+```
+v1 : rootId = v1.id, parentId = null, revision = 1
+v2 : rootId = v1.id, parentId = v1.id, revision = 2
+v3 : rootId = v1.id, parentId = v2.id, revision = 3
+```
+
+When a `ready` PRD is forked, the original stays `ready` and a new `draft` revision is created with `parentId` pointing to it. The PRD listing shows only the latest revision of each family.
 
 Only one PRD can be `in_progress` in a workspace at a time.
 
@@ -71,6 +83,8 @@ Each task includes:
 - an effort estimate: `xs`, `s`, `m`, `l`, or `xl`
 - an ordered position within the PRD
 - optional task dependencies (comma-separated task IDs)
+- an optional `review_id` linking the task to a review
+- an optional `severity`: `critical`, `major`, `minor`, or `info` (relevant when `review_id` is set)
 
 The `structured_v1` description format requires three sections:
 
@@ -106,28 +120,30 @@ Important behaviors:
 
 ## Reviews
 
-A review belongs to a PRD and tracks the human sign-off loop for completed work.
+A review belongs to a PRD and tracks the audit and human sign-off loop for completed work.
 
-Reviews are created by the review agent and decided by the human. The review lifecycle is:
+Reviews are created by the auditor sub-agent or the orchestrator. The review lifecycle is:
 
-- `pending` — created, not yet activated
-- `in_progress` — agent is working on it
-- `completed` — human has recorded a decision
+- `draft` — created, findings being collected (protects against crash mid-audit)
+- `in_progress` — tasks created, coder sub-agent working on them
+- `done` — all review tasks completed
 
-Two review modes exist:
+Two review types exist:
 
-- `autonomous` — the agent reviews all done tasks independently using the PRD context and done criteria
-- `assisted` — the user provides free-text feedback; the agent reformulates it, asks clarifying questions, then produces structured findings
+- `agent` — created by the auditor sub-agent after an autonomous code review
+- `human` — created by the orchestrator after the human provides feedback
 
-A review captures:
+A review's findings are stored as tasks with `review_id` set and an optional `severity` (`critical`, `major`, `minor`, `info`). There are no separate JSON blobs for findings.
 
-- structured findings: `[{ title, severity, description }]`
-- clarifying questions (assisted mode): `[{ question, context }]`
-- suggested follow-up tasks: `[{ title, description, rationale }]`
-- a human decision: `approved`, `changes_requested`, or `rejected`
-- an optional decision note
+`user_feedback` (free text) is preserved on the review record for context.
 
-Only the human can close a review with `depot review decide`. The agent must never call this command autonomously.
+Review commands:
+
+- `depot review start <prd-id> --type <human|agent>` — create a review
+- `depot review task add <review-id> --title ... --description ...` — add a finding task
+- `depot review done <review-id>` — mark the review done
+- `depot review list [prd-id]` — list reviews
+- `depot review show <review-id>` — inspect a review
 
 ## Activity Log
 
@@ -140,9 +156,9 @@ Current event types are:
 - `task_done`
 - `task_blocked`
 - `task_skipped`
-- `prd_committed`
+- `prd_ready`
 - `prd_activated`
-- `prd_amended`
+- `prd_done`
 - `note`
 - `error`
 
@@ -154,10 +170,12 @@ Each log entry includes a JSON payload. The CLI accepts standard JSON and also s
 
 Current modes are:
 
-- `prd` — product framing: non-archived PRD chain, actionable PRD prompt, embedded PRD agent instructions
-- `dev` — execution context: active PRD, previous revisions, task progress, current task, blocked tasks, recent activity, next recommended task, embedded dev agent instructions
+- `prd` — product framing: PRD chain, Q&A, embedded PRD agent instructions. Accepts an optional PRD ID to continue an existing draft or fork a ready PRD.
+- `dev` — orchestrator: launches the coder and auditor sub-agents, manages the review loop, requests human validation.
+- `coder <prd-id> [--review <review-id>]` — implementation sub-agent: works the PRD tasks, or the tasks from a specific review when `--review` is given.
+- `auditor <prd-id>` — audit sub-agent: reviews completed work and records findings as review tasks.
 
-`depot context` without a mode prints an index with those three modes, a short dynamic status for each, and the exact command to render the detailed mode.
+`depot context` without a mode prints an index with those four modes, a short dynamic status for each, and the exact command to render the detailed mode.
 
 `depot context dev` also accepts an optional second positional argument to target a specific PRD by full ID or case-insensitive title substring.
 

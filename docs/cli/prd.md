@@ -6,19 +6,18 @@ PRDs define the intent and scope of work for a workspace.
 
 Current PRD statuses are:
 
-- `draft`
-- `committed`
-- `in_progress`
-- `archived`
+- `draft` — in construction via questions agent. Editable freely.
+- `ready` — all questions answered. PRD complete.
+- `in_progress` — execution in progress (dev + automatic review included).
+- `done` — validated by the human. Terminal.
+- `canceled` — canceled. Terminal.
 
 Allowed transitions:
 
-- `draft → committed`
-- `committed → in_progress`
-- `committed → archived`
-- `in_progress → archived`
-
-In practice, `depot prd amend` archives the current PRD and creates a new draft revision at `revision + 1`.
+- `draft → ready`
+- `ready → in_progress`
+- `ready → draft` (fork v2, via `depot prd fork`)
+- `in_progress → done`
 
 ---
 
@@ -42,7 +41,7 @@ depot prd create --title "Core foundation" --context "Need persistent agent stat
 
 ## `depot prd list`
 
-List PRDs for the current project.
+List the latest revision of each PRD family for the current project.
 
 ### Usage
 
@@ -52,7 +51,7 @@ depot prd list
 
 ### Output
 
-Each line includes the PRD ID, title, status, and revision number.
+Each line includes the PRD ID, title, status, and revision number. Only the latest revision per family is shown.
 
 ---
 
@@ -68,27 +67,27 @@ depot prd show <prd-id>
 
 ### Output
 
-Prints aligned key-value fields: ID, Title, Status, Revision, Context, Scope, Parent, Created, Committed, Activated.
+Prints aligned key-value fields: ID, Title, Status, Revision, Root, Context, Scope, Parent, Created, Ready, Activated.
 
 ---
 
-## `depot prd commit`
+## `depot prd ready`
 
-Commit a draft PRD, freezing it for execution.
+Mark a draft PRD as ready for execution.
 
 ### Usage
 
 ```bash
-depot prd commit <prd-id>
+depot prd ready <prd-id>
 ```
 
-Only PRDs in `draft` status can be committed.
+Only PRDs in `draft` status can be marked ready.
 
 ---
 
 ## `depot prd activate`
 
-Mark a committed PRD as active for execution.
+Mark a ready PRD as active for execution.
 
 ### Usage
 
@@ -96,45 +95,46 @@ Mark a committed PRD as active for execution.
 depot prd activate <prd-id>
 ```
 
-Only PRDs in `committed` status can be activated. A workspace can only have one `in_progress` PRD at a time. The command errors if another PRD is already active.
+Only PRDs in `ready` status can be activated. A workspace can only have one `in_progress` PRD at a time.
 
 ---
 
-## `depot prd amend`
+## `depot prd done`
 
-Create a new PRD revision from a committed or active PRD.
-
-### What it does
-
-- archives the original PRD
-- creates a new PRD with `revision + 1`
-- stores the original PRD ID in `parentId`
-- starts the new revision in `draft`
+Mark an in_progress PRD as done (after human validation).
 
 ### Usage
 
 ```bash
-depot prd amend <prd-id> [--title <title>] [--context <text>] [--scope <text>]
+depot prd done <prd-id>
 ```
 
-Fields not provided default to their current values from the original PRD.
-
-### Example
-
-```bash
-depot prd amend <prd-id> --scope "Expand the initial CLI scope to cover structured logging"
-```
+Only PRDs in `in_progress` status can be marked done.
 
 ---
 
-## `depot prd archive`
+## `depot prd fork`
 
-Explicitly archive a committed or active PRD.
+Fork a ready PRD into a new draft revision.
+
+The original PRD stays in `ready` status (not canceled). The fork creates a new PRD with `revision + 1`, `parentId` pointing to the original, and a shared `rootId` for family queries.
 
 ### Usage
 
 ```bash
-depot prd archive <prd-id>
+depot prd fork <prd-id>
 ```
 
-PRDs in `draft` status cannot be archived directly. Use `prd amend` or `prd commit` first.
+Only PRDs in `ready` status can be forked.
+
+---
+
+## `depot prd cancel`
+
+Cancel a draft, ready, or in_progress PRD.
+
+### Usage
+
+```bash
+depot prd cancel <prd-id>
+```

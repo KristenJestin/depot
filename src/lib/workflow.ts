@@ -18,11 +18,25 @@ import * as DomainPrds from "#/modules/prds/domain";
 import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainActivity from "#/modules/activity/domain";
 import * as DomainStatus from "#/modules/activity/status";
-import type { ProjectStatus, Effort, EventType } from "#/shared/validator";
+import * as DomainReviews from "#/modules/reviews/domain";
+import type {
+  ProjectStatus,
+  Effort,
+  EventType,
+  ReviewType,
+  SeverityLevel,
+} from "#/shared/validator";
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
-export type { WorkspaceRow, ProjectRow, PrdRow, TaskRow, ActivityRow } from "#/db/schema";
+export type {
+  WorkspaceRow,
+  ProjectRow,
+  PrdRow,
+  ReviewRow,
+  TaskRow,
+  ActivityRow,
+} from "#/db/schema";
 export type { WorkspaceStatus } from "#/modules/activity/status";
 export const RECENT_ACTIVITY_LIMIT = DomainStatus.RECENT_ACTIVITY_LIMIT;
 export const findNextRecommendedTask = DomainStatus.findNextRecommendedTask;
@@ -98,12 +112,35 @@ export function getPrd(db: Database, id: string) {
   return runWithDb(db, DomainPrds.getPrd(id));
 }
 
-export function listPrds(db: Database, filter: { projectId?: string; workspaceId?: string } = {}) {
+export function listPrds(
+  db: Database,
+  filter: { projectId?: string; workspaceId?: string; latestOnly?: boolean } = {},
+) {
   return runWithDb(db, DomainPrds.listPrds(filter));
 }
 
 export function activatePrd(db: Database, id: string, workspaceId: string) {
   return runWithDb(db, DomainPrds.activatePrd(id, workspaceId));
+}
+
+export function markPrdReady(db: Database, id: string) {
+  return runWithDb(db, DomainPrds.markPrdReady(id));
+}
+
+export function donePrd(db: Database, id: string) {
+  return runWithDb(db, DomainPrds.donePrd(id));
+}
+
+export function cancelPrd(db: Database, id: string) {
+  return runWithDb(db, DomainPrds.cancelPrd(id));
+}
+
+export function forkPrd(db: Database, id: string) {
+  return runWithDb(db, DomainPrds.forkPrd(id));
+}
+
+export function listPrdFamily(db: Database, rootId: string) {
+  return runWithDb(db, DomainPrds.listPrdFamily(rootId));
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -173,4 +210,44 @@ export function listActivity(
 
 export function buildWorkspaceStatus(db: Database, workspaceId: string) {
   return runWithDb(db, DomainStatus.buildWorkspaceStatus(workspaceId));
+}
+
+// ── Reviews ───────────────────────────────────────────────────────────────────
+
+export function createReview(db: Database, input: { prdId: string; type: ReviewType }) {
+  return runWithDb(db, DomainReviews.createReview(input));
+}
+
+export function getReview(db: Database, id: string) {
+  return runWithDb(db, DomainReviews.getReview(id));
+}
+
+export function listReviews(db: Database, prdId: string) {
+  return runWithDb(db, DomainReviews.listReviews(prdId));
+}
+
+export function startReview(db: Database, id: string) {
+  return runWithDb(db, DomainReviews.startReview(id));
+}
+
+export function doneReview(db: Database, id: string) {
+  return runWithDb(db, DomainReviews.doneReview(id));
+}
+
+export function addReviewTask(
+  db: Database,
+  reviewId: string,
+  input: {
+    title: string;
+    description: string;
+    doneCriteria: string;
+    severity?: SeverityLevel;
+    effort?: Effort;
+  },
+) {
+  return runWithDb(db, DomainReviews.addReviewTask(reviewId, input));
+}
+
+export function listReviewTasks(db: Database, reviewId: string) {
+  return runWithDb(db, DomainReviews.listReviewTasks(reviewId));
 }

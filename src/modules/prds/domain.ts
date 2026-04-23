@@ -42,6 +42,7 @@ export const createPrd = (input: {
           id,
           projectId: input.projectId,
           workspaceId: null,
+          rootId: id, // v1 points to itself
           parentId: null,
           revision: 1,
           title: input.title,
@@ -63,26 +64,37 @@ export const getPrd = (id: string) =>
     return row ?? null;
   });
 
-export const listPrds = (filter: { projectId?: string; workspaceId?: string } = {}) =>
+export const listPrds = (
+  filter: { projectId?: string; workspaceId?: string; latestOnly?: boolean } = {},
+) =>
   Effect.gen(function* () {
     const db = yield* Db;
+    let rows: (typeof prds.$inferSelect)[];
     if (filter.workspaceId) {
-      return yield* dbQuery(() =>
+      rows = yield* dbQuery(() =>
         db.query.prds.findMany({
           where: { workspaceId: filter.workspaceId },
           orderBy: { createdAt: "asc" },
         }),
       );
-    }
-    if (filter.projectId) {
-      return yield* dbQuery(() =>
+    } else if (filter.projectId) {
+      rows = yield* dbQuery(() =>
         db.query.prds.findMany({
           where: { projectId: filter.projectId },
           orderBy: { createdAt: "asc" },
         }),
       );
+    } else {
+      rows = yield* dbQuery(() => db.query.prds.findMany({ orderBy: { createdAt: "asc" } }));
     }
-    return yield* dbQuery(() => db.query.prds.findMany({ orderBy: { createdAt: "asc" } }));
+
+    if (filter.latestOnly) {
+      // Exclude PRDs that are a parent of another PRD (i.e., keep only leaf revisions)
+      const parentIds = new Set(rows.filter((p) => p.parentId !== null).map((p) => p.parentId!));
+      rows = rows.filter((p) => !parentIds.has(p.id));
+    }
+
+    return rows;
   });
 
 export const activatePrd = (id: string, workspaceId: string) =>
@@ -179,4 +191,54 @@ export const cancelPrd = (id: string) =>
       payload: { title: prd.title },
     });
     return rows[0]!;
+  });
+
+export const forkPrd = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const prd = yield* getPrd(id);
+    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    if (prd.status !== "ready") {
+      return yield* Effect.fail(
+        new InvalidTransitionError({
+          entity: "PRD",
+          from: prd.status,
+          to: "draft (fork)",
+          allowed: ["ready"],
+        }),
+      );
+    }
+    const newId = generateId();
+    const rootId = prd.rootId ?? prd.id;
+    const rows = yield* dbQuery(() =>
+      db
+        .insert(prds)
+        .values({
+          id: newId,
+          projectId: prd.projectId,
+          workspaceId: null,
+          rootId,
+          parentId: prd.id,
+          revision: prd.revision + 1,
+          title: prd.title,
+          context: prd.context,
+          scope: prd.scope,
+          status: "draft",
+          readyAt: null,
+          activatedAt: null,
+        })
+        .returning(),
+    );
+    return rows[0]!;
+  });
+
+export const listPrdFamily = (rootId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    return yield* dbQuery(() =>
+      db.query.prds.findMany({
+        where: { rootId },
+        orderBy: { revision: "asc" },
+      }),
+    );
   });
