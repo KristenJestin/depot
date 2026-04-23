@@ -1,4 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { writeFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { createTestDb } from "../helpers/db";
@@ -817,6 +820,205 @@ describe("CLI commands", () => {
       );
 
       exit.mockRestore();
+    });
+  });
+
+  // ── prd load ──────────────────────────────────────────────────────────────
+
+  describe("prd load", () => {
+    let tmpFile: string;
+
+    beforeEach(() => {
+      tmpFile = join(tmpdir(), `depot-test-${Date.now()}.json`);
+    });
+
+    afterEach(() => {
+      try {
+        unlinkSync(tmpFile);
+      } catch {
+        // ignore
+      }
+    });
+
+    it("loads a PRD with tasks from a file (draft)", async () => {
+      setJsonMode(true);
+      const { prdCommand } = await import("#/modules/prds/command");
+      const loadCommand = await getSubCommand(prdCommand, "load");
+
+      const payload = {
+        title: "Loaded PRD",
+        context: "For testing",
+        ready: false,
+        tasks: [
+          {
+            title: "Task A",
+            description: "Desc A",
+            doneCriteria: "Done A",
+            effort: "s",
+            dependsOn: [],
+          },
+          {
+            title: "Task B",
+            description: "Desc B",
+            doneCriteria: "Done B",
+            effort: "m",
+            dependsOn: [0],
+          },
+        ],
+      };
+      writeFileSync(tmpFile, JSON.stringify(payload));
+
+      const output = await captureStdout(async () => {
+        await loadCommand.run({ args: { file: tmpFile } });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(parsed.payload.prd.title).toBe("Loaded PRD");
+      expect(parsed.payload.prd.status).toBe("draft");
+      expect(parsed.payload.tasks).toHaveLength(2);
+      // Check dependency resolved
+      const task1Deps: string[] = JSON.parse(parsed.payload.tasks[1].dependsOn);
+      expect(task1Deps).toEqual([parsed.payload.tasks[0].id]);
+    });
+
+    it("loads a PRD and marks it ready when ready:true", async () => {
+      setJsonMode(true);
+      const { prdCommand } = await import("#/modules/prds/command");
+      const loadCommand = await getSubCommand(prdCommand, "load");
+
+      const payload = {
+        title: "Ready PRD",
+        ready: true,
+        tasks: [
+          { title: "Task 1", description: "D", doneCriteria: "C", effort: "xs", dependsOn: [] },
+        ],
+      };
+      writeFileSync(tmpFile, JSON.stringify(payload));
+
+      const output = await captureStdout(async () => {
+        await loadCommand.run({ args: { file: tmpFile } });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(parsed.payload.prd.status).toBe("ready");
+    });
+
+    it("rejects invalid JSON", async () => {
+      setJsonMode(true);
+      const { prdCommand } = await import("#/modules/prds/command");
+      const loadCommand = await getSubCommand(prdCommand, "load");
+
+      writeFileSync(tmpFile, "not json {{");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const output = await captureStdout(async () => {
+        await expect(loadCommand.run({ args: { file: tmpFile } })).rejects.toThrow(
+          "process.exit:1",
+        );
+      });
+
+      exit.mockRestore();
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("error");
+      expect(parsed.error.code).toBe("invalid_json");
+    });
+
+    it("rejects out-of-bound dependsOn index", async () => {
+      setJsonMode(true);
+      const { prdCommand } = await import("#/modules/prds/command");
+      const loadCommand = await getSubCommand(prdCommand, "load");
+
+      const payload = {
+        title: "Bad Deps PRD",
+        ready: false,
+        tasks: [
+          { title: "Task A", description: "D", doneCriteria: "C", effort: "s", dependsOn: [5] },
+        ],
+      };
+      writeFileSync(tmpFile, JSON.stringify(payload));
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const output = await captureStdout(async () => {
+        await expect(loadCommand.run({ args: { file: tmpFile } })).rejects.toThrow(
+          "process.exit:1",
+        );
+      });
+
+      exit.mockRestore();
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("error");
+      expect(parsed.error.code).toBe("invalid_depends_on");
+    });
+
+    it("rejects forward reference in dependsOn", async () => {
+      setJsonMode(true);
+      const { prdCommand } = await import("#/modules/prds/command");
+      const loadCommand = await getSubCommand(prdCommand, "load");
+
+      const payload = {
+        title: "Forward Ref PRD",
+        ready: false,
+        tasks: [
+          { title: "Task A", description: "D", doneCriteria: "C", effort: "s", dependsOn: [1] },
+          { title: "Task B", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] },
+        ],
+      };
+      writeFileSync(tmpFile, JSON.stringify(payload));
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const output = await captureStdout(async () => {
+        await expect(loadCommand.run({ args: { file: tmpFile } })).rejects.toThrow(
+          "process.exit:1",
+        );
+      });
+
+      exit.mockRestore();
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("error");
+      expect(parsed.error.code).toBe("invalid_depends_on");
+    });
+
+    it("rejects PRD with no tasks", async () => {
+      setJsonMode(true);
+      const { prdCommand } = await import("#/modules/prds/command");
+      const loadCommand = await getSubCommand(prdCommand, "load");
+
+      const payload = { title: "Empty PRD", ready: false, tasks: [] };
+      writeFileSync(tmpFile, JSON.stringify(payload));
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const output = await captureStdout(async () => {
+        await expect(loadCommand.run({ args: { file: tmpFile } })).rejects.toThrow(
+          "process.exit:1",
+        );
+      });
+
+      exit.mockRestore();
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("error");
+      expect(parsed.error.code).toBe("validation_error");
     });
   });
 });

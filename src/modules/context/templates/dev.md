@@ -22,10 +22,29 @@ You are the orchestrator. You coordinate the coder and auditor sub-agents and re
 
 [3] You ask the human for validation:
     → If human feedback:
-        Q&A phase: if feedback is vague or ambiguous, ask clarifying questions
-        before acting. If clear, proceed directly.
+        The goal is not to classify feedback as "clear" or "unclear" — it is
+        to be certain you understand what is being asked before acting.
+        Not 500 questions, but as many as needed to remove all doubt.
 
-        Once understood:
+        Step 1 — Explore if needed: if feedback references or implies existing
+        codebase patterns, conventions, or abstractions, launch an explore
+        sub-agent (Task tool → explore) to verify what the code actually does
+        before asking questions or building the review. Typical signals:
+        "like the rest", "is there already a...", "compared to what exists",
+        any assumption about existing helpers or patterns.
+
+        Step 2 — Ask targeted questions: if ambiguity remains after exploring,
+        ask the human one question at a time until certain. Do not guess.
+
+        Step 3 — Build the review: once feedback is fully understood and
+        context verified.
+
+        Review task quality: the ## Review section is a contract between the
+        human and the coder. Each task must be precise enough to execute
+        without asking questions: what changes (file/line if known), why,
+        scope (inclusions and exclusions), and success criterion. Use explore
+        before writing tasks if codebase context is needed.
+
         You create the review: depot review start <prd-id> --type human
         You add one task per action: depot review task add <review-id> ...
 

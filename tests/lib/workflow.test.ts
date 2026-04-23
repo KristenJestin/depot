@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "../helpers/db";
 import { resolveMigrationsFolder } from "../helpers/db";
@@ -21,6 +21,7 @@ import {
   markPrdReady,
   donePrd,
   forkPrd,
+  loadPrd,
   createTask,
   startTask,
   completeTask,
@@ -934,5 +935,120 @@ describe("activity log", () => {
         payload: { message: "wrong prd" },
       }),
     ).rejects.toThrow(/does not belong to prd/i);
+  });
+});
+
+// ── loadPrd ──────────────────────────────────────────────────────────────────
+
+describe("loadPrd", () => {
+  let projectId: string;
+
+  beforeEach(async () => {
+    const project = await createProject(db, { name: "load-test-app" });
+    projectId = project.id;
+  });
+
+  it("creates a PRD in draft with tasks", async () => {
+    const { prd, tasks } = await loadPrd(db, {
+      projectId,
+      title: "Batch PRD",
+      ready: false,
+      tasks: [
+        {
+          title: "Task A",
+          description: "Desc A",
+          doneCriteria: "Done A",
+          effort: "s",
+          dependsOn: [],
+        },
+        {
+          title: "Task B",
+          description: "Desc B",
+          doneCriteria: "Done B",
+          effort: "m",
+          dependsOn: [],
+        },
+      ],
+    });
+    expect(prd.title).toBe("Batch PRD");
+    expect(prd.status).toBe("draft");
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]!.title).toBe("Task A");
+    expect(tasks[1]!.title).toBe("Task B");
+    expect(tasks[0]!.position).toBe(1);
+    expect(tasks[1]!.position).toBe(2);
+  });
+
+  it("marks PRD as ready when ready:true", async () => {
+    const { prd, tasks } = await loadPrd(db, {
+      projectId,
+      title: "Ready PRD",
+      ready: true,
+      tasks: [
+        { title: "Task 1", description: "Desc", doneCriteria: "Done", effort: "xs", dependsOn: [] },
+      ],
+    });
+    expect(prd.status).toBe("ready");
+    expect(tasks).toHaveLength(1);
+  });
+
+  it("resolves dependsOn indices to task IDs", async () => {
+    const { tasks } = await loadPrd(db, {
+      projectId,
+      title: "Deps PRD",
+      ready: false,
+      tasks: [
+        { title: "Task 0", description: "Desc", doneCriteria: "Done", effort: "s", dependsOn: [] },
+        { title: "Task 1", description: "Desc", doneCriteria: "Done", effort: "m", dependsOn: [0] },
+      ],
+    });
+    expect(tasks).toHaveLength(2);
+    const task1Deps: string[] = JSON.parse(tasks[1]!.dependsOn);
+    expect(task1Deps).toEqual([tasks[0]!.id]);
+  });
+
+  it("keeps PRD in draft when ready:false", async () => {
+    const { prd } = await loadPrd(db, {
+      projectId,
+      title: "Draft PRD",
+      ready: false,
+      tasks: [{ title: "T", description: "D", doneCriteria: "C", effort: "xs", dependsOn: [] }],
+    });
+    expect(prd.status).toBe("draft");
+  });
+
+  it("rolls back the entire batch if a task insert fails", async () => {
+    let callCount = 0;
+    const originalTransaction = db.transaction.bind(db);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(db, "transaction").mockImplementationOnce((fn: (tx: any) => unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return originalTransaction((tx: any) => {
+        const originalInsert = tx.insert.bind(tx);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vi.spyOn(tx, "insert").mockImplementation((table: any) => {
+          callCount += 1;
+          if (callCount > 1) {
+            throw new Error("Simulated task insert failure");
+          }
+          return originalInsert(table);
+        });
+        return fn(tx);
+      });
+    });
+
+    await expect(
+      loadPrd(db, {
+        projectId,
+        title: "Rollback PRD",
+        ready: false,
+        tasks: [
+          { title: "Task A", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] },
+        ],
+      }),
+    ).rejects.toThrow(/Simulated task insert failure|DatabaseError/i);
+
+    const allPrds = await db.query.prds.findMany({ where: { projectId } });
+    expect(allPrds.find((p) => p.title === "Rollback PRD")).toBeUndefined();
   });
 });

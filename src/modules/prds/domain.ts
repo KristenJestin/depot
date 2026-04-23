@@ -1,13 +1,15 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { prds } from "#/db/schema";
+import { prds, tasks } from "#/db/schema";
 import { generateId } from "#/shared/utils";
-import { VALID_PRD_TRANSITIONS, type PrdStatus } from "#/shared/validator";
+import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
+import { VALID_PRD_TRANSITIONS, type PrdStatus, type Effort } from "#/shared/validator";
 import { Db } from "#/services/database";
 import {
   PrdNotFoundError,
   WorkspaceAlreadyHasActivePrdError,
   InvalidTransitionError,
+  DatabaseError,
 } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { logActivity } from "#/modules/activity/domain";
@@ -248,4 +250,117 @@ export const listPrdFamily = (rootId: string) =>
         orderBy: { revision: "asc" },
       }),
     );
+  });
+
+export type BatchTaskInput = {
+  title: string;
+  description: string;
+  doneCriteria: string;
+  effort: Effort;
+  dependsOn?: readonly number[] | number[];
+};
+
+export type LoadPrdBatchInput = {
+  projectId: string;
+  title: string;
+  context?: string;
+  scope?: string;
+  ready?: boolean;
+  tasks: BatchTaskInput[];
+};
+
+/**
+ * Atomically create a PRD with all its tasks in a single SQLite transaction.
+ * If any step fails, the entire batch is rolled back — no partial state is committed.
+ */
+export const loadPrdBatch = (input: LoadPrdBatchInput) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+
+    const result = yield* Effect.try({
+      try: () =>
+        db.transaction((tx) => {
+          const prdId = generateId();
+          const prdRows = tx
+            .insert(prds)
+            .values({
+              id: prdId,
+              projectId: input.projectId,
+              workspaceId: null,
+              rootId: prdId,
+              parentId: null,
+              revision: 1,
+              title: input.title,
+              context: input.context ?? null,
+              scope: input.scope ?? null,
+              status: "draft",
+              readyAt: null,
+              activatedAt: null,
+            })
+            .returning()
+            .all();
+
+          const prd = prdRows[0]!;
+
+          const createdTaskIds: string[] = [];
+          const createdTasks: (typeof tasks.$inferSelect)[] = [];
+
+          for (let i = 0; i < input.tasks.length; i++) {
+            const taskInput = input.tasks[i]!;
+            const resolvedDeps = (taskInput.dependsOn ?? []).map((idx) => {
+              const resolved = createdTaskIds[idx];
+              if (resolved === undefined) {
+                throw new Error(
+                  `Task at index ${i} has invalid dependsOn index ${idx}: task ID not yet created (forward reference or out-of-range)`,
+                );
+              }
+              return resolved;
+            });
+            const storedDescription = normalizeTaskDescriptionForStorage(taskInput.description);
+            const taskId = generateId();
+            const position = i + 1;
+
+            const taskRows = tx
+              .insert(tasks)
+              .values({
+                id: taskId,
+                prdId: prdId,
+                position,
+                title: taskInput.title,
+                description: storedDescription.description,
+                descriptionFormat: storedDescription.descriptionFormat,
+                doneCriteria: taskInput.doneCriteria,
+                dependsOn: JSON.stringify(resolvedDeps),
+                effort: taskInput.effort,
+                status: "pending",
+                blockedReason: null,
+                skipReason: null,
+                startedAt: null,
+                completedAt: null,
+              })
+              .returning()
+              .all();
+
+            const task = taskRows[0]!;
+            createdTaskIds.push(task.id);
+            createdTasks.push(task);
+          }
+
+          let finalPrd = prd;
+          if (input.ready) {
+            const updatedRows = tx
+              .update(prds)
+              .set({ status: "ready", readyAt: new Date() })
+              .where(eq(prds.id, prdId))
+              .returning()
+              .all();
+            finalPrd = updatedRows[0]!;
+          }
+
+          return { prd: finalPrd, tasks: createdTasks };
+        }),
+      catch: (e) => new DatabaseError({ cause: e }),
+    });
+
+    return result;
   });

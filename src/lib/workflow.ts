@@ -11,6 +11,7 @@
  */
 import { Effect } from "effect";
 import type { Database } from "#/db/client";
+import type { TaskRow } from "#/db/schema";
 import { Db } from "#/services/database";
 import * as DomainProjects from "#/modules/projects/domain";
 import * as DomainWorkspaces from "#/modules/workspaces/domain";
@@ -250,4 +251,26 @@ export function addReviewTask(
 
 export function listReviewTasks(db: Database, reviewId: string) {
   return runWithDb(db, DomainReviews.listReviewTasks(reviewId));
+}
+
+// ── Batch operations ──────────────────────────────────────────────────────────
+
+export async function loadPrd(
+  db: Database,
+  input: {
+    projectId: string;
+    title: string;
+    context?: string;
+    scope?: string;
+    ready: boolean;
+    tasks: Array<{
+      title: string;
+      description: string;
+      doneCriteria: string;
+      effort: Effort;
+      dependsOn: number[];
+    }>;
+  },
+): Promise<{ prd: Awaited<ReturnType<typeof createPrd>>; tasks: TaskRow[] }> {
+  return runWithDb(db, DomainPrds.loadPrdBatch(input));
 }

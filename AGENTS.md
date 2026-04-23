@@ -37,6 +37,7 @@ Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain l
 - Reuse the existing `#/` import alias for source imports when appropriate.
 - Keep CLI behavior deterministic and terminal-friendly.
 - `src/types/text.d.ts` declares `*.md` module types required for `import ... with { type: "text" }` in `contexts.ts`. Do not delete it.
+- Do not use numbered step comments (`// 1.`, `// 2. Parse JSON`, etc.). Comments document intent or the _why_, not procedural steps. Omit a comment entirely when the code is self-explanatory.
 
 ## Testing And Validation
 

@@ -1,8 +1,11 @@
 import { Schema, Effect } from "effect";
+import { readFile } from "node:fs/promises";
 import { command } from "#/cli/command";
 import { runEffect } from "#/cli/runtime";
 import * as DomainPrds from "#/modules/prds/domain";
+import { effortSchema } from "#/shared/schemas";
 import { formatDate } from "#/shared/utils";
+import { parseJsonSchema } from "#/lib/json";
 
 const createCommand = command({
   meta: { name: "create", description: "Create a new PRD in draft status" },
@@ -244,6 +247,110 @@ const forkCommand = command({
   },
 });
 
+// ── Schema for prd load ───────────────────────────────────────────────────────
+
+const taskInputSchema = Schema.Struct({
+  title: Schema.String.pipe(Schema.minLength(1)),
+  description: Schema.String.pipe(Schema.minLength(1)),
+  doneCriteria: Schema.String.pipe(Schema.minLength(1)),
+  effort: effortSchema,
+  dependsOn: Schema.optional(Schema.Array(Schema.Int.pipe(Schema.nonNegative()))),
+});
+
+const prdLoadSchema = Schema.Struct({
+  title: Schema.String.pipe(Schema.minLength(1)),
+  context: Schema.optional(Schema.String),
+  scope: Schema.optional(Schema.String),
+  ready: Schema.optional(Schema.Boolean),
+  tasks: Schema.Array(taskInputSchema).pipe(Schema.minItems(1)),
+});
+
+type PrdLoadInput = Schema.Schema.Type<typeof prdLoadSchema>;
+
+// ── loadCommand ───────────────────────────────────────────────────────────────
+
+const loadCommand = command({
+  meta: { name: "load", description: "Create a PRD with tasks from a JSON document" },
+  workspace: true,
+  args: {
+    file: {
+      schema: Schema.String,
+      description: "Path to JSON file (reads stdin if omitted)",
+      alias: "f",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    let rawContent: string;
+    if (args.file) {
+      try {
+        rawContent = await readFile(args.file, "utf-8");
+      } catch (e) {
+        return output.error(
+          "file_read_error",
+          `Cannot read file '${args.file}': ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    } else {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) {
+        chunks.push(chunk as Buffer);
+      }
+      rawContent = Buffer.concat(chunks).toString("utf-8");
+    }
+
+    const parseResult = parseJsonSchema(rawContent, prdLoadSchema);
+    if (!parseResult.ok) {
+      return output.error(parseResult.kind, parseResult.message);
+    }
+
+    const data: PrdLoadInput = parseResult.data;
+
+    for (let i = 0; i < data.tasks.length; i++) {
+      const task = data.tasks[i]!;
+      for (const idx of task.dependsOn ?? []) {
+        if (idx >= i) {
+          return output.error(
+            "invalid_depends_on",
+            `Task at index ${i} has invalid dependsOn index ${idx}: only backward references (index < task index) are allowed`,
+          );
+        }
+      }
+    }
+
+    const result = await runEffect(
+      DomainPrds.loadPrdBatch({
+        projectId: ws.projectId,
+        title: data.title,
+        context: data.context,
+        scope: data.scope,
+        ready: data.ready,
+        tasks: data.tasks.map((t) => ({
+          title: t.title,
+          description: t.description,
+          doneCriteria: t.doneCriteria,
+          effort: t.effort,
+          dependsOn: t.dependsOn,
+        })),
+      }),
+    );
+
+    const { prd: finalPrd, tasks: createdTasks } = result;
+
+    if (output.isJson()) {
+      output.success({ prd: finalPrd, tasks: createdTasks });
+    } else {
+      output.print(`Loaded PRD '${finalPrd.title}' (${finalPrd.id}) [${finalPrd.status}]`);
+      output.print(`  Created ${createdTasks.length} task(s)`);
+      for (const t of createdTasks) {
+        output.print(`  - ${t.id} #${t.position} ${t.title} [${t.status}] ${t.effort}`);
+      }
+      if (!data.ready) {
+        output.print(`  Run: depot prd ready ${finalPrd.id} to mark as ready`);
+      }
+    }
+  },
+});
+
 export const prdCommand = command({
   meta: { name: "prd", description: "PRD management" },
   subCommands: {
@@ -255,5 +362,6 @@ export const prdCommand = command({
     done: doneCommand,
     cancel: cancelCommand,
     fork: forkCommand,
+    load: loadCommand,
   },
 });
