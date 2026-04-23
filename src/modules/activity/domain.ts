@@ -180,6 +180,8 @@ export function summarizeActivityPayload(
     case "prd_done":
     case "prd_canceled":
       return String(payload.title ?? "");
+    case "prd_forked":
+      return `${String(payload.sourcePrdId ?? "")} → ${String(payload.newPrdId ?? "")} (rev ${String(payload.revision ?? "")})`;
     case "error":
       return String(payload.message ?? "");
     default:

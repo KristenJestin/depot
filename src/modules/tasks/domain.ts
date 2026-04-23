@@ -112,8 +112,8 @@ export const startTask = (id: string) =>
         prdId: prd.id,
         taskId: id,
         eventType: "task_started",
-        payload: { title: task.title },
-      });
+        payload: { taskId: task.id, title: task.title },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return rows[0]!;
   });
@@ -157,8 +157,8 @@ export const completeTask = (id: string) =>
         prdId: prd.id,
         taskId: id,
         eventType: "task_done",
-        payload: { title: task.title },
-      });
+        payload: { taskId: task.id, title: task.title },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return rows[0]!;
   });
@@ -187,8 +187,8 @@ export const blockTask = (id: string, reason: string) =>
         prdId: prd.id,
         taskId: id,
         eventType: "task_blocked",
-        payload: { title: task.title, reason },
-      });
+        payload: { taskId: task.id, title: task.title, reason },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return rows[0]!;
   });
@@ -217,8 +217,8 @@ export const skipTask = (id: string, reason: string) =>
         prdId: prd.id,
         taskId: id,
         eventType: "task_skipped",
-        payload: { title: task.title, reason },
-      });
+        payload: { taskId: task.id, title: task.title, reason },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return rows[0]!;
   });

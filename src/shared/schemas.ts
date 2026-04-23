@@ -181,14 +181,29 @@ export const eventTypeSchema = Schema.Literal(...VALID_EVENT_TYPES);
  */
 export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, never>> = {
   session_start: Schema.Struct({ context: Schema.optional(Schema.String) }),
-  task_started: Schema.Struct({ title: Schema.String }),
-  task_done: Schema.Struct({ title: Schema.String }),
-  task_blocked: Schema.Struct({ title: Schema.String, reason: Schema.String }),
-  task_skipped: Schema.Struct({ title: Schema.String, reason: Schema.String }),
-  prd_activated: Schema.Struct({ title: Schema.String }),
-  prd_ready: Schema.Struct({ title: Schema.String }),
-  prd_done: Schema.Struct({ title: Schema.String }),
-  prd_canceled: Schema.Struct({ title: Schema.String }),
+  // taskId and prdId are optional to preserve CLI compatibility: `depot log add` callers
+  // do not supply these fields when logging manually via the CLI.
+  task_started: Schema.Struct({ taskId: Schema.optional(Schema.String), title: Schema.String }),
+  task_done: Schema.Struct({ taskId: Schema.optional(Schema.String), title: Schema.String }),
+  task_blocked: Schema.Struct({
+    taskId: Schema.optional(Schema.String),
+    title: Schema.String,
+    reason: Schema.String,
+  }),
+  task_skipped: Schema.Struct({
+    taskId: Schema.optional(Schema.String),
+    title: Schema.String,
+    reason: Schema.String,
+  }),
+  prd_activated: Schema.Struct({ prdId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_ready: Schema.Struct({ prdId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_done: Schema.Struct({ prdId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_canceled: Schema.Struct({ prdId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_forked: Schema.Struct({
+    sourcePrdId: Schema.String,
+    newPrdId: Schema.String,
+    revision: Schema.Number,
+  }),
   note: Schema.Struct({ message: Schema.String }),
   error: Schema.Struct({ message: Schema.String, details: Schema.optional(Schema.String) }),
 };

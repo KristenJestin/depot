@@ -18,6 +18,9 @@ import {
   activatePrd,
   getPrd,
   listPrds,
+  markPrdReady,
+  donePrd,
+  forkPrd,
   createTask,
   startTask,
   completeTask,
@@ -404,6 +407,55 @@ describe("PRD lifecycle", () => {
     const active = list.filter((p) => p.status === "in_progress");
     expect(active).toHaveLength(2);
   });
+
+  it("auto-logs prd_ready when a PRD is marked ready", async () => {
+    const prd = await createPrd(db, { projectId, title: "My PRD" });
+    await markPrdReady(db, prd.id);
+    const log = await listActivity(db, { projectId });
+    const entry = log.find((e) => e.eventType === "prd_ready");
+    expect(entry).toBeDefined();
+    const payload = JSON.parse(entry!.payload);
+    expect(payload.prdId).toBe(prd.id);
+    expect(payload.title).toBe("My PRD");
+  });
+
+  it("auto-logs prd_activated when a PRD is activated", async () => {
+    const prd = await createPrd(db, { projectId, title: "My PRD" });
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await activatePrd(db, prd.id, workspaceId);
+    const log = await listActivity(db, { projectId });
+    const entry = log.find((e) => e.eventType === "prd_activated");
+    expect(entry).toBeDefined();
+    const payload = JSON.parse(entry!.payload);
+    expect(payload.prdId).toBe(prd.id);
+    expect(payload.title).toBe("My PRD");
+  });
+
+  it("auto-logs prd_done when a PRD is marked done", async () => {
+    const prd = await createPrd(db, { projectId, title: "My PRD" });
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await activatePrd(db, prd.id, workspaceId);
+    await donePrd(db, prd.id);
+    const log = await listActivity(db, { projectId });
+    const entry = log.find((e) => e.eventType === "prd_done");
+    expect(entry).toBeDefined();
+    const payload = JSON.parse(entry!.payload);
+    expect(payload.prdId).toBe(prd.id);
+    expect(payload.title).toBe("My PRD");
+  });
+
+  it("auto-logs prd_forked with sourcePrdId and newPrdId when a PRD is forked", async () => {
+    const prd = await createPrd(db, { projectId, title: "My PRD" });
+    await markPrdReady(db, prd.id);
+    const forked = await forkPrd(db, prd.id);
+    const log = await listActivity(db, { projectId });
+    const entry = log.find((e) => e.eventType === "prd_forked");
+    expect(entry).toBeDefined();
+    const payload = JSON.parse(entry!.payload);
+    expect(payload.sourcePrdId).toBe(prd.id);
+    expect(payload.newPrdId).toBe(forked.id);
+    expect(payload.revision).toBe(2);
+  });
 });
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
@@ -665,6 +717,78 @@ describe("task lifecycle", () => {
     expect(list).toHaveLength(2);
     expect(list[0].title).toBe("Second");
     expect(list[1].title).toBe("First");
+  });
+
+  it("auto-logs task_started when a task is started", async () => {
+    const task = await createTask(db, {
+      prdId,
+      title: "My Task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+    });
+    await startTask(db, task.id);
+    const log = await listActivity(db, { projectId });
+    const entry = log.find((e) => e.eventType === "task_started");
+    expect(entry).toBeDefined();
+    const payload = JSON.parse(entry!.payload);
+    expect(payload.taskId).toBe(task.id);
+    expect(payload.title).toBe("My Task");
+  });
+
+  it("auto-logs task_done when a task is completed", async () => {
+    const task = await createTask(db, {
+      prdId,
+      title: "My Task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+    });
+    await startTask(db, task.id);
+    await completeTask(db, task.id);
+    const log = await listActivity(db, { projectId });
+    const entry = log.find((e) => e.eventType === "task_done");
+    expect(entry).toBeDefined();
+    const payload = JSON.parse(entry!.payload);
+    expect(payload.taskId).toBe(task.id);
+    expect(payload.title).toBe("My Task");
+  });
+
+  it("auto-logs task_blocked with reason when a task is blocked", async () => {
+    const task = await createTask(db, {
+      prdId,
+      title: "My Task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+    });
+    await startTask(db, task.id);
+    await blockTask(db, task.id, "Waiting on design");
+    const log = await listActivity(db, { projectId });
+    const entry = log.find((e) => e.eventType === "task_blocked");
+    expect(entry).toBeDefined();
+    const payload = JSON.parse(entry!.payload);
+    expect(payload.taskId).toBe(task.id);
+    expect(payload.title).toBe("My Task");
+    expect(payload.reason).toBe("Waiting on design");
+  });
+
+  it("auto-logs task_skipped with reason when a task is skipped", async () => {
+    const task = await createTask(db, {
+      prdId,
+      title: "My Task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+    });
+    await skipTask(db, task.id, "No longer needed");
+    const log = await listActivity(db, { projectId });
+    const entry = log.find((e) => e.eventType === "task_skipped");
+    expect(entry).toBeDefined();
+    const payload = JSON.parse(entry!.payload);
+    expect(payload.taskId).toBe(task.id);
+    expect(payload.title).toBe("My Task");
+    expect(payload.reason).toBe("No longer needed");
   });
 });
 

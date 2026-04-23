@@ -45,7 +45,6 @@ Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain l
 - Before finishing a code change, run `bun run check` and `bun run build`.
 - If a change is documentation-only, heavy validation can be skipped.
 - Do not finish with failing tests, lint errors, type errors, or build errors unless the user explicitly accepts that state.
-- Do not modify `tests/lib/workflow.test.ts`; it is a fixed contract and must not be changed.
 
 ## Database And Migrations
 

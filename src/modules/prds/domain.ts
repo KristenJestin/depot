@@ -127,8 +127,8 @@ export const activatePrd = (id: string, workspaceId: string) =>
       workspaceId,
       prdId: id,
       eventType: "prd_activated",
-      payload: { title: prd.title },
-    });
+      payload: { prdId: id, title: prd.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
 
     return rows[0]!;
   });
@@ -150,8 +150,8 @@ export const markPrdReady = (id: string) =>
       projectId: prd.projectId,
       prdId: id,
       eventType: "prd_ready",
-      payload: { title: prd.title },
-    });
+      payload: { prdId: id, title: prd.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
 
@@ -169,8 +169,8 @@ export const donePrd = (id: string) =>
       workspaceId: prd.workspaceId ?? undefined,
       prdId: id,
       eventType: "prd_done",
-      payload: { title: prd.title },
-    });
+      payload: { prdId: id, title: prd.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
 
@@ -188,8 +188,8 @@ export const cancelPrd = (id: string) =>
       workspaceId: prd.workspaceId ?? undefined,
       prdId: id,
       eventType: "prd_canceled",
-      payload: { title: prd.title },
-    });
+      payload: { prdId: id, title: prd.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
 
@@ -229,7 +229,14 @@ export const forkPrd = (id: string) =>
         })
         .returning(),
     );
-    return rows[0]!;
+    const newPrd = rows[0]!;
+    yield* logActivity({
+      projectId: prd.projectId,
+      prdId: newPrd.id,
+      eventType: "prd_forked",
+      payload: { sourcePrdId: prd.id, newPrdId: newPrd.id, revision: newPrd.revision },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return newPrd;
   });
 
 export const listPrdFamily = (rootId: string) =>

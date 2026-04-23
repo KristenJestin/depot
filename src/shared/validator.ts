@@ -72,6 +72,7 @@ export const VALID_EVENT_TYPES = [
   "prd_ready",
   "prd_done",
   "prd_canceled",
+  "prd_forked",
   "note",
   "error",
 ] as const;
