@@ -29,18 +29,18 @@ Debug output and internal logs continue to go to **stderr**.
 
 Exit code is **1** on all errors. Known error codes:
 
-| Code | Meaning |
-|---|---|
-| `not_found` | The requested resource does not exist |
-| `no_workspace` | No workspace registered for the current path |
-| `no_active_prd` | No in-progress PRD in the current workspace |
-| `invalid_description` | Task description does not use `structured_v1` format |
-| `validation_error` | Argument validation failed |
-| `validation` | Inline validation failure in a command (e.g. assisted review without feedback) |
-| `no_changes` | No update fields provided to `project update` |
-| `already_done` | Project is already archived |
-| `linked_data` | Workspace cannot be removed because it has linked PRDs (use `--force`) |
-| `unsupported` | The command does not support `--json` in v1 |
+| Code                  | Meaning                                                                        |
+| --------------------- | ------------------------------------------------------------------------------ |
+| `not_found`           | The requested resource does not exist                                          |
+| `no_workspace`        | No workspace registered for the current path                                   |
+| `no_active_prd`       | No in-progress PRD in the current workspace                                    |
+| `invalid_description` | Task description does not use `structured_v1` format                           |
+| `validation_error`    | Argument validation failed                                                     |
+| `validation`          | Inline validation failure in a command (e.g. assisted review without feedback) |
+| `no_changes`          | No update fields provided to `project update`                                  |
+| `already_done`        | Project is already archived                                                    |
+| `linked_data`         | Workspace cannot be removed because it has linked PRDs (use `--force`)         |
+| `unsupported`         | The command does not support `--json` in v1                                    |
 
 ---
 
@@ -162,27 +162,6 @@ Returns the final task state after the mutation.
 
 ```json
 { "kind": "success", "payload": { "items": [ { ..., "payload": { ... } } ] } }
-```
-
-### `handoff`
-
-```json
-{
-  "kind": "success",
-  "payload": {
-    "item": {
-      "project": { "id", "name" },
-      "workspace": { "id", "path", "label" },
-      "generatedAt": "<ISO 8601>",
-      "activePrd": { "id", "title", "revision", "context" } | null,
-      "taskProgress": { "total", "done", "inProgress", "blocked", "pending" } | null,
-      "currentTask": { "id", "title", "effort", "doneCriteria": [], "startedAt", "blockedReason" } | null,
-      "blockedTasks": [ { "id", "title", "blockedReason" } ],
-      "nextRecommendedTask": { ... } | null,
-      "recentActivity": [ { "createdAt", "eventType", "payload": { ... } } ]
-    }
-  }
-}
 ```
 
 ### `review start`

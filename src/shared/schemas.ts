@@ -1,0 +1,194 @@
+import { Schema } from "effect";
+import { VALID_EFFORTS, VALID_EVENT_TYPES, type EventType } from "#/shared/validator";
+
+function parseLooseJsonLike(input: string): Record<string, unknown> {
+  let index = 0;
+
+  function skipWhitespace(): void {
+    while (index < input.length && /\s/.test(input[index]!)) {
+      index += 1;
+    }
+  }
+
+  function expectChar(char: string): void {
+    skipWhitespace();
+    if (input[index] !== char) {
+      throw new Error(`Expected '${char}' at position ${index}`);
+    }
+    index += 1;
+  }
+
+  function parseQuotedString(): string {
+    const quote = input[index]!;
+    index += 1;
+    let value = "";
+
+    while (index < input.length) {
+      const char = input[index]!;
+      if (char === "\\") {
+        const next = input[index + 1];
+        if (next) {
+          value += next;
+          index += 2;
+          continue;
+        }
+      }
+      if (char === quote) {
+        index += 1;
+        return value;
+      }
+      value += char;
+      index += 1;
+    }
+
+    throw new Error("Unterminated string literal");
+  }
+
+  function parseBareToken(): unknown {
+    const start = index;
+    while (index < input.length && ![",", "}", "]"].includes(input[index]!)) {
+      index += 1;
+    }
+
+    const raw = input.slice(start, index).trim();
+    if (raw === "") {
+      throw new Error(`Unexpected empty token at position ${start}`);
+    }
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    if (raw === "null") return null;
+    if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
+      return Number(raw);
+    }
+
+    return raw;
+  }
+
+  function parseArray(): unknown[] {
+    expectChar("[");
+    const items: unknown[] = [];
+    skipWhitespace();
+    if (input[index] === "]") {
+      index += 1;
+      return items;
+    }
+
+    while (index < input.length) {
+      items.push(parseValue());
+      skipWhitespace();
+      if (input[index] === ",") {
+        index += 1;
+        continue;
+      }
+      if (input[index] === "]") {
+        index += 1;
+        return items;
+      }
+      throw new Error(`Expected ',' or ']' at position ${index}`);
+    }
+
+    throw new Error("Unterminated array literal");
+  }
+
+  function parseKey(): string {
+    skipWhitespace();
+    const current = input[index];
+    if (current === '"' || current === "'") {
+      return parseQuotedString();
+    }
+
+    const start = index;
+    while (index < input.length && input[index] !== ":") {
+      index += 1;
+    }
+    const key = input.slice(start, index).trim();
+    if (!key) {
+      throw new Error(`Expected object key at position ${start}`);
+    }
+    return key;
+  }
+
+  function parseObject(): Record<string, unknown> {
+    expectChar("{");
+    const result: Record<string, unknown> = {};
+    skipWhitespace();
+    if (input[index] === "}") {
+      index += 1;
+      return result;
+    }
+
+    while (index < input.length) {
+      const key = parseKey();
+      expectChar(":");
+      result[key] = parseValue();
+      skipWhitespace();
+      if (input[index] === ",") {
+        index += 1;
+        continue;
+      }
+      if (input[index] === "}") {
+        index += 1;
+        return result;
+      }
+      throw new Error(`Expected ',' or '}' at position ${index}`);
+    }
+
+    throw new Error("Unterminated object literal");
+  }
+
+  function parseValue(): unknown {
+    skipWhitespace();
+    const current = input[index];
+    if (current === "{") return parseObject();
+    if (current === "[") return parseArray();
+    if (current === '"' || current === "'") return parseQuotedString();
+    return parseBareToken();
+  }
+
+  const value = parseValue();
+  skipWhitespace();
+  if (index !== input.length) {
+    throw new Error(`Unexpected trailing content at position ${index}`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Payload must be a JSON object");
+  }
+
+  return value as Record<string, unknown>;
+}
+
+export function parseJsonLike(val: string): Record<string, unknown> {
+  try {
+    return JSON.parse(val) as Record<string, unknown>;
+  } catch {
+    return parseLooseJsonLike(val);
+  }
+}
+
+// ── Field schemas ─────────────────────────────────────────────────────────────
+
+// Single source of truth: enum values come from validator.ts constants.
+export const effortSchema = Schema.Literal(...VALID_EFFORTS);
+export const eventTypeSchema = Schema.Literal(...VALID_EVENT_TYPES);
+
+// ── Activity payload schemas ──────────────────────────────────────────────────
+
+/**
+ * Per-event-type Effect/Schema schemas for activity log payloads.
+ * Used in logActivity() to validate payload shape at runtime.
+ * Unknown extra fields are stripped (forward-compatible).
+ * any: necessary to hold heterogeneous per-event schemas in a single Record.
+ */
+export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, never>> = {
+  session_start: Schema.Struct({ context: Schema.optional(Schema.String) }),
+  task_started: Schema.Struct({ title: Schema.String }),
+  task_done: Schema.Struct({ title: Schema.String }),
+  task_blocked: Schema.Struct({ title: Schema.String, reason: Schema.String }),
+  task_skipped: Schema.Struct({ title: Schema.String, reason: Schema.String }),
+  prd_activated: Schema.Struct({ title: Schema.String }),
+  prd_ready: Schema.Struct({ title: Schema.String }),
+  prd_done: Schema.Struct({ title: Schema.String }),
+  prd_canceled: Schema.Struct({ title: Schema.String }),
+  note: Schema.Struct({ message: Schema.String }),
+  error: Schema.Struct({ message: Schema.String, details: Schema.optional(Schema.String) }),
+};

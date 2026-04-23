@@ -4,7 +4,6 @@ This roadmap reflects the current direction of `depot` without redefining the be
 
 ## Now
 
-- Strengthen the handoff experience so it becomes the default resume point for agent sessions.
 - Improve CLI output consistency and readability across commands.
 - Expand command coverage around projects, logging, and workspace-aware status inspection.
 - Tighten validation rules and mechanical workflow guarantees.

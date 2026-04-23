@@ -1,20 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { getContextTemplate, listContextModes } from "#/lib/contexts";
+import { getContextTemplate, listContextModes } from "#/modules/context/index";
 
 describe("context template registry", () => {
   it("lists all available context modes", () => {
     const list = listContextModes();
     expect(list).toContain("prd");
     expect(list).toContain("dev");
-    expect(list).toContain("review");
-    expect(list).toHaveLength(3);
+    expect(list).not.toContain("review");
+    expect(list).toHaveLength(2);
   });
 
   it("returns embedded prd context content", () => {
     const content = getContextTemplate("prd");
     expect(content).toContain("Context: PRD Agent");
     expect(content).toContain("Interview");
-    expect(content).toContain("depot prd commit");
+    expect(content).toContain("Mark Ready");
   });
 
   it("returns embedded dev context content", () => {
@@ -23,7 +23,7 @@ describe("context template registry", () => {
     expect(content).toContain("depot context dev");
     expect(content).toContain("depot task show <task_id>");
     expect(content).toContain("depot task start");
-    expect(content).toContain("depot log add handoff");
+    expect(content).not.toContain("depot log add handoff");
     expect(content).toContain("Do not rely on `depot context dev` alone");
     expect(content).not.toContain("depot log add <project_id> handoff");
   });
@@ -35,19 +35,6 @@ describe("context template registry", () => {
     expect(content).toContain("Non-goals:");
     expect(content).toContain("important execution ambiguity");
     expect(content).toContain("Older tasks may remain as legacy freeform descriptions");
-  });
-
-  it("returns embedded review context content", () => {
-    const content = getContextTemplate("review");
-    expect(content).toContain("Context: Review Agent");
-    expect(content).toContain("done_criteria");
-    expect(content).toContain("Security");
-    expect(content).toContain("depot context review");
-    expect(content).not.toContain("--status done");
-    expect(content).toContain("depot review start");
-    expect(content).toContain("depot review findings");
-    expect(content).toContain("depot review decide");
-    expect(content).not.toContain("block the task");
   });
 
   it("throws on unknown context mode", () => {

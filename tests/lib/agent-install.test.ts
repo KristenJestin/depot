@@ -6,7 +6,7 @@ import {
   detectCommandShell,
   getInstallDirectory,
   resolveInstallTargets,
-} from "#/lib/agent-install";
+} from "#/modules/install/agent";
 
 describe("agent install helpers", () => {
   it("detects both command directories when they already exist", () => {
@@ -54,12 +54,12 @@ describe("agent install helpers", () => {
   });
 
   it("builds Claude Code command files with host shell injection", () => {
-    const content = buildCommandFileContent("claude-code", "review");
+    const content = buildCommandFileContent("claude-code", "prd");
 
-    expect(content).toContain("description: Inject the live depot review context");
+    expect(content).toContain("description: Inject the live depot prd context");
     expect(content).toContain("disable-model-invocation: true");
     expect(content).toContain(`shell: ${detectCommandShell()}`);
-    expect(content).toContain("!`depot context review`");
+    expect(content).toContain("!`depot context prd`");
   });
 
   it("detects the shell from the platform", () => {
@@ -68,7 +68,7 @@ describe("agent install helpers", () => {
     expect(detectCommandShell("darwin")).toBe("bash");
   });
 
-  it("creates three writes per selected target", () => {
+  it("creates two writes per selected target", () => {
     const writes = buildInstallWrites([
       {
         target: "opencode",
@@ -77,11 +77,10 @@ describe("agent install helpers", () => {
       },
     ]);
 
-    expect(writes).toHaveLength(3);
+    expect(writes).toHaveLength(2);
     expect(writes.map((write) => write.filePath.replace(/\\/g, "/"))).toEqual([
       "/home/tester/.config/opencode/commands/depot-prd.md",
       "/home/tester/.config/opencode/commands/depot-dev.md",
-      "/home/tester/.config/opencode/commands/depot-review.md",
     ]);
   });
 });

@@ -29,7 +29,6 @@ The current CLI supports:
 - Managing tasks with `depot task ...`
 - Running structured reviews with `depot review ...`
 - Recording activity with `depot log ...`
-- Generating a workspace handoff with `depot handoff`
 - Rendering live agent context with `depot context`
 - Installing live slash commands with `depot install`
 

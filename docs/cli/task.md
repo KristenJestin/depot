@@ -45,8 +45,8 @@ depot task add --prd <prd-id> --title <title> --desc <text> --criteria <text> --
 ```bash
 depot task add \
   --prd <prd-id> \
-  --title "Add handoff summary" \
-  --desc $'Intent:\nSummarize active workspace state for the next agent.\n\nScope:\n- Include the active PRD and recent workspace activity.\n\nNon-goals:\n- Do not redesign the handoff format.' \
+  --title "Add context command" \
+  --desc $'Intent:\nBuild the live context renderer for active workspaces.\n\nScope:\n- Include the active PRD and recent workspace activity.\n\nNon-goals:\n- Do not redesign the context output format.' \
   --criteria "Includes active PRD\nIncludes recent activity" \
   --effort m
 ```

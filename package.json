@@ -1,6 +1,6 @@
 {
   "name": "@netsirk/depot",
-  "version": "1.4.0",
+  "version": "0.1.0",
   "description": "AI agent task and PRD management CLI",
   "keywords": [
     "agent",
@@ -29,15 +29,15 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup",
-    "check": "bun run typecheck && bun run lint && bun run test",
+    "build": "bun run scripts/build.ts",
+    "check": "bun run typecheck && bun run lint && bun run fmt:check && bun run test",
     "prepublishOnly": "bun run build",
     "depot": "bun src/cli/index.ts --",
     "db:check": "drizzle-kit check",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "dev": "tsup --watch",
+    "dev": "bun --watch src/cli/index.ts",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
     "lint": "oxlint src tests",
@@ -46,21 +46,20 @@
     "test:coverage": "bun --bun vitest run --coverage",
     "test:watch": "bun --bun vitest",
     "typecheck": "tsc --noEmit",
-    "release": "bunx npm publish --access public"
+    "release": "bun publish"
   },
   "dependencies": {
     "citty": "^0.2.2",
     "drizzle-orm": "^1.0.0-beta.22",
-    "ulid": "^3.0.2",
-    "zod": "^4.3.6"
+    "effect": "^3.21.1",
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
     "@types/bun": "^1.2.15",
-    "@types/node": "^25.6.0",
+    "@types/node": "^22.0.0",
     "drizzle-kit": "^1.0.0-beta.22",
     "oxfmt": "^0.45.0",
     "oxlint": "^1.60.0",
-    "tsup": "^8.5.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.4"
   },

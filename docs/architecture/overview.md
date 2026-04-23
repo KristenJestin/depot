@@ -27,18 +27,15 @@ src/
       prd.ts           # prd create/show/list/commit/activate/amend/archive
       task.ts          # task add/list/show/start/done/block/skip
       log.ts           # log add/list
-      handoff.ts       # handoff
-      context.ts       # context [prd|dev|review]
+      context.ts       # context [prd|dev]
       install.ts       # install
-      review.ts        # review start/show/list/findings/decide/activate
   lib/
     workflow.ts        # All workflow logic and state transitions
     validator.ts       # Valid enums and transition tables
     schemas.ts         # Zod field schemas and validateArgs helper
-    handoff.ts         # buildHandoff and buildHandoffData
     agent-context.ts   # renderContextIndex and renderContextMode
     agent-install.ts   # resolveInstallTargets and buildInstallWrites
-    contexts.ts        # Embedded template registry (prd.md, dev.md, review.md)
+    contexts.ts        # Embedded template registry (prd.md, dev.md)
     task-spec.ts       # structured_v1 description parsing and formatting
     workspace-bootstrap.ts # resolveOrCreateWorkspaceForPath
     logger.ts          # log helper, debug flag, json mode flag
@@ -51,7 +48,6 @@ src/
   context/
     prd.md             # Embedded PRD agent instructions
     dev.md             # Embedded dev agent instructions
-    review.md          # Embedded review agent instructions
   types/
     text.d.ts          # TypeScript declaration for .md with { type: "text" }
 
@@ -84,13 +80,13 @@ When `depot` opens the database, it:
 
 ## Schema summary
 
-| Table | Primary key | Purpose |
-|---|---|---|
-| `projects` | ULID | Top-level project container |
-| `workspaces` | ULID | Path binding, unique per canonical path |
-| `prds` | ULID | PRD lifecycle, supports revision chaining via `parent_id` |
-| `tasks` | ULID | Execution units inside a PRD |
-| `reviews` | ULID | Review objects attached to a PRD revision |
+| Table          | Primary key            | Purpose                                                           |
+| -------------- | ---------------------- | ----------------------------------------------------------------- |
+| `projects`     | ULID                   | Top-level project container                                       |
+| `workspaces`   | ULID                   | Path binding, unique per canonical path                           |
+| `prds`         | ULID                   | PRD lifecycle, supports revision chaining via `parent_id`         |
+| `tasks`        | ULID                   | Execution units inside a PRD                                      |
+| `reviews`      | ULID                   | Review objects attached to a PRD revision                         |
 | `activity_log` | auto-increment integer | Structured event log, linked to project/workspace/prd/task/review |
 
 All timestamps are stored as ISO 8601 strings. IDs are ULIDs.
@@ -107,7 +103,7 @@ That module owns:
 - task creation and status transitions (with dependency enforcement)
 - review CRUD (create, start, record findings, record decision)
 - activity log writes and reads
-- `buildWorkspaceStatus` — builds a consistent snapshot used by both handoff and context rendering
+- `buildWorkspaceStatus` — builds a consistent snapshot used by context rendering
 - `findNextRecommendedTask` — finds the next pending task with all dependencies satisfied
 - `summarizeActivityPayload` — produces a human-readable one-line summary for any event type
 
@@ -121,13 +117,9 @@ The resolution rule is longest-prefix matching on canonical absolute paths. On W
 
 `depot context` uses `autoCreate: true`, which silently creates a project and workspace for the current directory if none exists. All other workspace-aware commands require an existing workspace.
 
-## Handoff generation
-
-`src/lib/handoff.ts` builds a structured `HandoffData` object from `buildWorkspaceStatus`, then renders it as deterministic plaintext. The same `HandoffData` type is used for the JSON output path (`--json`).
-
 ## Agent contexts and install flow
 
-`src/lib/agent-context.ts` renders the `prd`, `dev`, and `review` context modes. The embedded instruction templates (`src/context/*.md`) are imported at build time as text strings, so the binary is self-contained at runtime.
+`src/lib/agent-context.ts` renders the `prd` and `dev` context modes. The embedded instruction templates (`src/context/*.md`) are imported at build time as text strings, so the binary is self-contained at runtime.
 
 `src/lib/agent-install.ts` generates slash-command files for OpenCode and Claude Code. Those files do not embed static snapshots; they call `depot context <mode>` at runtime through native shell injection. On Windows the generated shell is `powershell`; on all other platforms it is `bash`.
 

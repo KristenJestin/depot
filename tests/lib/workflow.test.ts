@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb } from "../helpers/db";
 import { resolveMigrationsFolder } from "../helpers/db";
 import type { Database } from "#/db/client";
+import { prds } from "#/db/schema";
 import {
   createProject,
   listProjects,
@@ -13,10 +15,7 @@ import {
   updateWorkspaceLabel,
   removeWorkspace,
   createPrd,
-  commitPrd,
   activatePrd,
-  amendPrd,
-  archivePrd,
   getPrd,
   listPrds,
   createTask,
@@ -27,11 +26,6 @@ import {
   listTasks,
   logActivity,
   listActivity,
-  createReview,
-  listReviews,
-  startReview,
-  recordReviewFindings,
-  recordReviewDecision,
 } from "#/lib/workflow";
 
 let db: Database;
@@ -253,14 +247,18 @@ describe("workspaces", () => {
   it("blocks workspace removal when PRDs exist", async () => {
     const project = await createProject(db, { name: "my-app" });
     const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
-    await createPrd(db, { projectId: project.id, workspaceId: ws.id, title: "PRD" });
+    const prd = await createPrd(db, { projectId: project.id, title: "PRD" });
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await activatePrd(db, prd.id, ws.id);
     await expect(removeWorkspace(db, ws.id)).rejects.toThrow(/linked PRD/);
   });
 
   it("force-removes a workspace and cascades linked PRDs and tasks", async () => {
     const project = await createProject(db, { name: "my-app" });
     const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
-    const prd = await createPrd(db, { projectId: project.id, workspaceId: ws.id, title: "PRD" });
+    const prd = await createPrd(db, { projectId: project.id, title: "PRD" });
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await activatePrd(db, prd.id, ws.id);
     await createTask(db, {
       prdId: prd.id,
       title: "Task",
@@ -299,7 +297,6 @@ describe("PRD lifecycle", () => {
   it("creates a PRD in draft status", async () => {
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "Core Foundation",
     });
     expect(prd.status).toBe("draft");
@@ -310,7 +307,6 @@ describe("PRD lifecycle", () => {
   it("creates a PRD with context and scope", async () => {
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "Core Foundation",
       context: "Build the initial foundation",
       scope: "CLI + DB + workflow",
@@ -319,156 +315,72 @@ describe("PRD lifecycle", () => {
     expect(prd.scope).toBe("CLI + DB + workflow");
   });
 
-  it("commits a draft PRD", async () => {
+  it("activates a ready PRD", async () => {
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "Core Foundation",
     });
-    const committed = await commitPrd(db, prd.id);
-    expect(committed.status).toBe("committed");
-    expect(committed.committedAt).toBeTruthy();
-  });
-
-  it("rejects committing a non-draft PRD", async () => {
-    const prd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "Core Foundation",
-    });
-    await commitPrd(db, prd.id);
-    await expect(commitPrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
-  });
-
-  it("activates a committed PRD", async () => {
-    const prd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "Core Foundation",
-    });
-    await commitPrd(db, prd.id);
-    const activated = await activatePrd(db, prd.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    const activated = await activatePrd(db, prd.id, workspaceId);
     expect(activated.status).toBe("in_progress");
     expect(activated.activatedAt).toBeTruthy();
   });
 
-  it("rejects activating a non-committed PRD", async () => {
+  it("rejects activating a non-ready PRD", async () => {
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "Core Foundation",
     });
     // still draft
-    await expect(activatePrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
+    await expect(activatePrd(db, prd.id, workspaceId)).rejects.toThrow(/invalid prd transition/i);
   });
 
   it("rejects activating a second PRD in the same workspace", async () => {
     const prd1 = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD A",
     });
     const prd2 = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD B",
     });
 
-    await commitPrd(db, prd1.id);
-    await commitPrd(db, prd2.id);
-    await activatePrd(db, prd1.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    await activatePrd(db, prd1.id, workspaceId);
 
-    await expect(activatePrd(db, prd2.id)).rejects.toThrow(/workspace already has active prd/i);
-  });
-
-  it("archives an in_progress PRD", async () => {
-    const prd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "Core Foundation",
-    });
-    await commitPrd(db, prd.id);
-    await activatePrd(db, prd.id);
-    const archived = await archivePrd(db, prd.id);
-    expect(archived.status).toBe("archived");
-  });
-
-  it("amends a committed PRD creating a new revision", async () => {
-    const prd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "Core Foundation v1",
-      context: "initial",
-    });
-    await commitPrd(db, prd.id);
-    const amended = await amendPrd(db, prd.id, {
-      title: "Core Foundation v2",
-      context: "updated",
-    });
-    expect(amended.parentId).toBe(prd.id);
-    expect(amended.revision).toBe(2);
-    expect(amended.title).toBe("Core Foundation v2");
-    expect(amended.status).toBe("draft");
-    // the original should be archived
-    const original = await getPrd(db, prd.id);
-    expect(original!.status).toBe("archived");
-  });
-
-  it("amends an in_progress PRD", async () => {
-    const prd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "Core Foundation",
-    });
-    await commitPrd(db, prd.id);
-    await activatePrd(db, prd.id);
-    const amended = await amendPrd(db, prd.id, {
-      title: "Core Foundation v2",
-    });
-    expect(amended.parentId).toBe(prd.id);
-    expect(amended.revision).toBe(2);
-  });
-
-  it("rejects amending a draft PRD", async () => {
-    const prd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "Core Foundation",
-    });
-    await expect(amendPrd(db, prd.id, { title: "v2" })).rejects.toThrow(/invalid prd transition/i);
+    await expect(activatePrd(db, prd2.id, workspaceId)).rejects.toThrow(
+      /workspace already has active prd/i,
+    );
   });
 
   it("lists PRDs for a project", async () => {
     await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD A",
     });
     await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD B",
     });
     const list = await listPrds(db, { projectId });
     expect(list).toHaveLength(2);
   });
 
-  it("allows multiple committed PRDs on the same project", async () => {
+  it("allows multiple ready PRDs on the same project", async () => {
     const prd1 = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD A",
     });
     const prd2 = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD B",
     });
-    await commitPrd(db, prd1.id);
-    await commitPrd(db, prd2.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
     const list = await listPrds(db, { projectId });
-    const committed = list.filter((p) => p.status === "committed");
-    expect(committed).toHaveLength(2);
+    const ready = list.filter((p) => p.status === "ready");
+    expect(ready).toHaveLength(2);
   });
 
   it("allows multiple in_progress PRDs across different workspaces", async () => {
@@ -478,18 +390,16 @@ describe("PRD lifecycle", () => {
     });
     const prd1 = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD A",
     });
     const prd2 = await createPrd(db, {
       projectId,
-      workspaceId: ws2.id,
       title: "PRD B",
     });
-    await commitPrd(db, prd1.id);
-    await commitPrd(db, prd2.id);
-    await activatePrd(db, prd1.id);
-    await activatePrd(db, prd2.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    await activatePrd(db, prd1.id, workspaceId);
+    await activatePrd(db, prd2.id, ws2.id);
     const list = await listPrds(db, { projectId });
     const active = list.filter((p) => p.status === "in_progress");
     expect(active).toHaveLength(2);
@@ -513,11 +423,10 @@ describe("task lifecycle", () => {
     workspaceId = ws.id;
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "Core Foundation",
     });
-    await commitPrd(db, prd.id);
-    await activatePrd(db, prd.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await activatePrd(db, prd.id, workspaceId);
     prdId = prd.id;
   });
 
@@ -531,7 +440,7 @@ describe("task lifecycle", () => {
     });
     expect(task.status).toBe("pending");
     expect(task.position).toBe(1);
-    expect(task.descriptionFormat).toBe("legacy");
+    expect(task.descriptionFormat).toBe("structured_v1");
   });
 
   it("stores structured task descriptions with an explicit format", async () => {
@@ -854,13 +763,12 @@ describe("activity log", () => {
 
   it("rejects logging a PRD from another project", async () => {
     const otherProject = await createProject(db, { name: "other-app" });
-    const otherWorkspace = await addWorkspace(db, {
+    const _otherWorkspace = await addWorkspace(db, {
       projectId: otherProject.id,
       path: "/home/user/other-app",
     });
     const otherPrd = await createPrd(db, {
       projectId: otherProject.id,
-      workspaceId: otherWorkspace.id,
       title: "Other PRD",
     });
 
@@ -878,12 +786,10 @@ describe("activity log", () => {
   it("rejects logging a task that does not belong to the supplied PRD", async () => {
     const prd1 = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD A",
     });
     const prd2 = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "PRD B",
     });
     const task = await createTask(db, {
@@ -902,178 +808,6 @@ describe("activity log", () => {
         taskId: task.id,
         eventType: "note",
         payload: { message: "wrong prd" },
-      }),
-    ).rejects.toThrow(/does not belong to prd/i);
-  });
-});
-
-// ── Reviews ──────────────────────────────────────────────────────────────────
-
-describe("review lifecycle", () => {
-  let projectId: string;
-  let workspaceId: string;
-  let prdId: string;
-
-  beforeEach(async () => {
-    const project = await createProject(db, { name: "my-app" });
-    projectId = project.id;
-    const ws = await addWorkspace(db, {
-      projectId,
-      path: "/home/user/my-app",
-    });
-    workspaceId = ws.id;
-    const prd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "Core Foundation",
-    });
-    await commitPrd(db, prd.id);
-    await activatePrd(db, prd.id);
-    prdId = prd.id;
-  });
-
-  it("creates a review in pending status with autonomous mode", async () => {
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-    expect(review.status).toBe("pending");
-    expect(review.mode).toBe("autonomous");
-    expect(review.decision).toBeNull();
-    expect(review.userFeedback).toBeNull();
-    expect(review.prdRevision).toBe(1);
-    expect(JSON.parse(review.findings)).toEqual([]);
-  });
-
-  it("creates an assisted review with user feedback", async () => {
-    const review = await createReview(db, {
-      prdId,
-      mode: "assisted",
-      userFeedback: "The auth flow seems too permissive",
-    });
-    expect(review.mode).toBe("assisted");
-    expect(review.userFeedback).toBe("The auth flow seems too permissive");
-  });
-
-  it("starts a pending review setting status to in_progress", async () => {
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-    const started = await startReview(db, review.id);
-    expect(started.status).toBe("in_progress");
-  });
-
-  it("rejects starting a non-pending review", async () => {
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-    await startReview(db, review.id);
-    await expect(startReview(db, review.id)).rejects.toThrow(/expected 'pending'/i);
-  });
-
-  it("records findings with severity and description", async () => {
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-    const findings = [
-      { title: "Missing input validation", severity: "major", description: "The API endpoint accepts unbounded input." },
-    ];
-    const updated = await recordReviewFindings(db, review.id, { findings });
-    expect(JSON.parse(updated.findings)).toHaveLength(1);
-    expect(updated.status).toBe("in_progress");
-  });
-
-  it("records questions and follow-up tasks alongside findings", async () => {
-    const review = await createReview(db, { prdId, mode: "assisted" });
-    const questions = [{ question: "Was error handling tested?", context: "task 2" }];
-    const followupTasks = [{ title: "Add error handling test", description: "...", rationale: "..." }];
-    const updated = await recordReviewFindings(db, review.id, {
-      findings: [],
-      questions,
-      followupTasks,
-    });
-    expect(JSON.parse(updated.questions)).toHaveLength(1);
-    expect(JSON.parse(updated.followupTasks)).toHaveLength(1);
-  });
-
-  it("rejects recording findings on a completed review", async () => {
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-    await recordReviewDecision(db, review.id, { decision: "approved" });
-    await expect(
-      recordReviewFindings(db, review.id, { findings: [] }),
-    ).rejects.toThrow(/already completed/i);
-  });
-
-  it("records a human decision of approved and closes the review", async () => {
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-    const decided = await recordReviewDecision(db, review.id, { decision: "approved" });
-    expect(decided.status).toBe("completed");
-    expect(decided.decision).toBe("approved");
-    expect(decided.completedAt).toBeTruthy();
-  });
-
-  it("records a changes_requested decision with a note", async () => {
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-    const decided = await recordReviewDecision(db, review.id, {
-      decision: "changes_requested",
-      note: "Rework the auth middleware",
-    });
-    expect(decided.decision).toBe("changes_requested");
-    expect(decided.decisionNote).toBe("Rework the auth middleware");
-  });
-
-  it("rejects recording a decision on a completed review", async () => {
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-    await recordReviewDecision(db, review.id, { decision: "approved" });
-    await expect(
-      recordReviewDecision(db, review.id, { decision: "rejected" }),
-    ).rejects.toThrow(/already completed/i);
-  });
-
-  it("lists reviews for a PRD in creation order", async () => {
-    const r1 = await createReview(db, { prdId, mode: "autonomous" });
-    const r2 = await createReview(db, { prdId, mode: "assisted", userFeedback: "looks odd" });
-    const list = await listReviews(db, prdId);
-    expect(list).toHaveLength(2);
-    expect(list[0].id).toBe(r1.id);
-    expect(list[1].id).toBe(r2.id);
-  });
-
-  it("allows multiple reviews across different revisions of the same PRD chain", async () => {
-    // Use a separate workspace to avoid conflicts with the active PRD from beforeEach
-    const ws2 = await addWorkspace(db, {
-      projectId,
-      path: "/home/user/my-app-review-test",
-    });
-    const prd = await createPrd(db, { projectId, workspaceId: ws2.id, title: "PRD v1" });
-    await commitPrd(db, prd.id);
-    await activatePrd(db, prd.id);
-    await createReview(db, { prdId: prd.id, mode: "autonomous" });
-
-    // Amend creates a new revision (archives old)
-    const prdV2 = await amendPrd(db, prd.id, { title: "PRD v2" });
-    await createReview(db, { prdId: prdV2.id, mode: "autonomous" });
-
-    const reviewsV1 = await listReviews(db, prd.id);
-    const reviewsV2 = await listReviews(db, prdV2.id);
-    expect(reviewsV1).toHaveLength(1);
-    expect(reviewsV2).toHaveLength(1);
-    expect(reviewsV2[0].prdRevision).toBe(2);
-  });
-
-  it("rejects creating a review for a non-existent PRD", async () => {
-    await expect(
-      createReview(db, { prdId: "non-existent-id", mode: "autonomous" }),
-    ).rejects.toThrow(/prd not found/i);
-  });
-
-  it("rejects logging a review that does not belong to the supplied PRD", async () => {
-    const otherPrd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "Other PRD",
-    });
-    const review = await createReview(db, { prdId, mode: "autonomous" });
-
-    await expect(
-      logActivity(db, {
-        projectId,
-        workspaceId,
-        prdId: otherPrd.id,
-        reviewId: review.id,
-        eventType: "review_started",
-        payload: {},
       }),
     ).rejects.toThrow(/does not belong to prd/i);
   });

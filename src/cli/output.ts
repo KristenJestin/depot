@@ -1,4 +1,4 @@
-import { isJsonMode } from "#/lib/logger";
+import { isJsonMode } from "#/shared/logger";
 
 // ── JSON envelope types ───────────────────────────────────────────────────────
 

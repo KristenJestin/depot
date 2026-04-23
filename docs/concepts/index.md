@@ -143,29 +143,10 @@ Current event types are:
 - `prd_committed`
 - `prd_activated`
 - `prd_amended`
-- `review_started`
-- `review_findings_recorded`
-- `review_decision_recorded`
 - `note`
-- `handoff`
 - `error`
 
 Each log entry includes a JSON payload. The CLI accepts standard JSON and also supports a looser object-like syntax for convenience.
-
-## Handoffs
-
-`depot handoff` builds a plaintext summary for the current workspace.
-
-When there is an active PRD, the handoff includes:
-
-- the active PRD title and revision
-- task progress counts
-- the current in-progress task, if any
-- blocked tasks, if any
-- the 10 most recent activity entries
-- the next recommended pending task with all dependencies satisfied, if any
-
-When there is no active PRD, the handoff still shows recent activity and points the operator back to available PRDs.
 
 ## Contexts
 
@@ -175,7 +156,6 @@ Current modes are:
 
 - `prd` — product framing: non-archived PRD chain, actionable PRD prompt, embedded PRD agent instructions
 - `dev` — execution context: active PRD, previous revisions, task progress, current task, blocked tasks, recent activity, next recommended task, embedded dev agent instructions
-- `review` — review context: active PRD, active and completed reviews, done tasks ready for review, embedded review agent instructions
 
 `depot context` without a mode prints an index with those three modes, a short dynamic status for each, and the exact command to render the detailed mode.
 

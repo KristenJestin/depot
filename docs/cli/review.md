@@ -140,11 +140,11 @@ depot review decide <review-id> --decision <approved|changes_requested|rejected>
 
 ### Decisions
 
-| Decision | Meaning | Typical follow-up |
-|---|---|---|
-| `approved` | Work meets all criteria | Archive PRD or move forward |
-| `changes_requested` | Work needs targeted fixes | Create new tasks via `depot task add` |
-| `rejected` | PRD scope or implementation must be reconsidered | Amend PRD via `depot prd amend` |
+| Decision            | Meaning                                          | Typical follow-up                     |
+| ------------------- | ------------------------------------------------ | ------------------------------------- |
+| `approved`          | Work meets all criteria                          | Archive PRD or move forward           |
+| `changes_requested` | Work needs targeted fixes                        | Create new tasks via `depot task add` |
+| `rejected`          | PRD scope or implementation must be reconsidered | Amend PRD via `depot prd amend`       |
 
 ### Notes
 

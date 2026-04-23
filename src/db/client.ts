@@ -21,7 +21,7 @@ export type Database = ReturnType<typeof createDb>;
 // ── Database factory ──────────────────────────────────────────────────────────
 
 function createDb(client: BunDatabase) {
-  return drizzle({ client, relations: schema.relations });
+  return drizzle({ client, relations: schema.relations, casing: "snake_case" });
 }
 
 function isDrizzleMigrationsFolder(candidate: string): boolean {
@@ -31,7 +31,8 @@ function isDrizzleMigrationsFolder(candidate: string): boolean {
 
   try {
     return readdirSync(candidate, { withFileTypes: true }).some(
-      (entry) => entry.isDirectory() && existsSync(path.join(candidate, entry.name, "migration.sql")),
+      (entry) =>
+        entry.isDirectory() && existsSync(path.join(candidate, entry.name, "migration.sql")),
     );
   } catch {
     return false;
@@ -77,9 +78,7 @@ function retrySqliteBusy<T>(
 }
 
 export function resolveMigrationsFolder(baseDir = __dirname): string {
-  const candidates = [
-    path.resolve(baseDir, "migrations"),
-  ];
+  const candidates = [path.resolve(baseDir, "migrations")];
 
   const found = candidates.find(isDrizzleMigrationsFolder);
   if (!found) {
@@ -151,9 +150,17 @@ export function openDatabaseWith<TClient extends BunDatabaseLike = BunDatabase>(
 }
 
 /**
+ * Resolve the default depot directory: `~/.depot`.
+ * Normalises backslashes so the path is forward-slash everywhere.
+ */
+export function defaultDepotDir(): string {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  return `${home.replace(/\\/g, "/")}/.depot`;
+}
+
+/**
  * Resolve the default database path: `~/.depot/depot.db`.
  */
 export function defaultDbPath(): string {
-  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-  return `${home.replace(/\\/g, "/")}/.depot/depot.db`;
+  return `${defaultDepotDir()}/depot.db`;
 }

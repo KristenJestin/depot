@@ -1,774 +1,176 @@
-import { eq } from "drizzle-orm";
-import { projects, workspaces, prds, tasks, reviews, activityLog } from "#/db/schema";
-import { generateId } from "#/lib/ids";
+/**
+ * workflow.ts — Async shim for backward compatibility.
+ *
+ * All functions here wrap the pure Effect domain functions with a raw Database
+ * argument. This keeps the existing tests and any non-Effect callers (e.g.
+ * agent-context.ts, workspace-bootstrap.ts) working without changes.
+ *
+ * The single call-site for Effect.runPromise lives in `runWithDb` below.
+ * CLI commands that need the database directly should continue to use getDb()
+ * from #/cli/runtime.
+ */
+import { Effect } from "effect";
 import type { Database } from "#/db/client";
-import { validatePrdTransition, validateTaskTransition } from "#/lib/validator";
-import type { Effort, ProjectStatus, ReviewMode, ReviewDecision } from "#/lib/validator";
-import { normalizeTaskDescriptionForStorage } from "#/lib/task-spec";
-import { normalizeWorkspacePath } from "#/lib/paths";
+import { Db } from "#/services/database";
+import * as DomainProjects from "#/modules/projects/domain";
+import * as DomainWorkspaces from "#/modules/workspaces/domain";
+import * as DomainPrds from "#/modules/prds/domain";
+import * as DomainTasks from "#/modules/tasks/domain";
+import * as DomainActivity from "#/modules/activity/domain";
+import * as DomainStatus from "#/modules/activity/status";
+import type { ProjectStatus, Effort, EventType } from "#/shared/validator";
+
+// ── Re-exports ────────────────────────────────────────────────────────────────
+
+export type { WorkspaceRow, ProjectRow, PrdRow, TaskRow, ActivityRow } from "#/db/schema";
+export type { WorkspaceStatus } from "#/modules/activity/status";
+export const RECENT_ACTIVITY_LIMIT = DomainStatus.RECENT_ACTIVITY_LIMIT;
+export const findNextRecommendedTask = DomainStatus.findNextRecommendedTask;
+export const summarizeActivityPayload = DomainActivity.summarizeActivityPayload;
+
+// ── Shim helper ───────────────────────────────────────────────────────────────
+
+function runWithDb<A>(db: Database, effect: Effect.Effect<A, any, Db>): Promise<A> {
+  return Effect.runPromise(Effect.provideService(effect, Db, db));
+}
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 
-export async function createProject(db: Database, input: { name: string; description?: string }) {
-  const id = generateId();
-  const now = new Date().toISOString();
-  await db.insert(projects).values({
-    id,
-    name: input.name,
-    description: input.description ?? null,
-    status: "active",
-    createdAt: now,
-    updatedAt: now,
-  });
-  const row = await db.query.projects.findFirst({ where: { id } });
-  return row!;
+export function createProject(db: Database, input: { name: string; description?: string }) {
+  return runWithDb(db, DomainProjects.createProject(input));
 }
 
-export async function listProjects(db: Database) {
-  return db.query.projects.findMany({
-    orderBy: { createdAt: "asc" },
-  });
+export function listProjects(db: Database) {
+  return runWithDb(db, DomainProjects.listProjects());
 }
 
-export async function getProject(db: Database, id: string) {
-  return db.query.projects.findFirst({ where: { id } }) ?? null;
+export function getProject(db: Database, id: string) {
+  return runWithDb(db, DomainProjects.getProject(id));
 }
 
-export async function updateProject(
+export function updateProject(
   db: Database,
   id: string,
   changes: { name?: string; description?: string; status?: ProjectStatus },
 ) {
-  const project = await getProject(db, id);
-  if (!project) throw new Error(`Project not found: ${id}`);
-  const now = new Date().toISOString();
-  await db
-    .update(projects)
-    .set({
-      ...(changes.name !== undefined ? { name: changes.name } : {}),
-      ...(changes.description !== undefined ? { description: changes.description } : {}),
-      ...(changes.status !== undefined ? { status: changes.status } : {}),
-      updatedAt: now,
-    })
-    .where(eq(projects.id, id));
-  return (await getProject(db, id))!;
+  return runWithDb(db, DomainProjects.updateProject(id, changes));
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
 
-export async function addWorkspace(
+export function addWorkspace(
   db: Database,
   input: { projectId: string; path: string; label?: string },
 ) {
-  const id = generateId();
-  const now = new Date().toISOString();
-  const canonicalPath = normalizeWorkspacePath(input.path);
-  await db.insert(workspaces).values({
-    id,
-    projectId: input.projectId,
-    path: canonicalPath,
-    label: input.label ?? null,
-    createdAt: now,
-    updatedAt: now,
-  });
-  const row = await db.query.workspaces.findFirst({ where: { id } });
-  return row!;
+  return runWithDb(db, DomainWorkspaces.addWorkspace(input));
 }
 
-/**
- * Resolve the current workspace using longest-prefix matching on canonical paths.
- * Commands run from any nested subdirectory resolve to the correct workspace.
- */
-export async function resolveWorkspace(db: Database, currentPath: string) {
-  const allWorkspaces = await db.query.workspaces.findMany();
-  const canonicalCurrentPath = normalizeWorkspacePath(currentPath);
-
-  // Longest-prefix matching: find the workspace whose path is the longest
-  // prefix of the current path.
-  let bestMatch: (typeof allWorkspaces)[number] | null = null;
-  let bestLen = 0;
-
-  for (const ws of allWorkspaces) {
-    const wsPath = normalizeWorkspacePath(ws.path);
-    if (
-      canonicalCurrentPath === wsPath ||
-      canonicalCurrentPath.startsWith(wsPath + "/")
-    ) {
-      if (wsPath.length > bestLen) {
-        bestLen = wsPath.length;
-        bestMatch = ws;
-      }
-    }
-  }
-
-  return bestMatch;
+export function resolveWorkspace(db: Database, currentPath: string) {
+  return runWithDb(db, DomainWorkspaces.resolveWorkspace(currentPath));
 }
 
-export async function updateWorkspacePath(db: Database, workspaceId: string, newPath: string) {
-  await db
-    .update(workspaces)
-    .set({
-      path: normalizeWorkspacePath(newPath),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(workspaces.id, workspaceId));
-  return db.query.workspaces.findFirst({ where: { id: workspaceId } });
+export function listWorkspaces(db: Database, filter: { projectId?: string } = {}) {
+  return runWithDb(db, DomainWorkspaces.listWorkspaces(filter));
 }
 
-export async function listWorkspaces(db: Database, filter: { projectId?: string } = {}) {
-  if (filter.projectId) {
-    return db.query.workspaces.findMany({
-      where: { projectId: filter.projectId },
-      orderBy: { createdAt: "asc" },
-    });
-  }
-  return db.query.workspaces.findMany({ orderBy: { createdAt: "asc" } });
+export function getWorkspace(db: Database, id: string) {
+  return runWithDb(db, DomainWorkspaces.getWorkspace(id));
 }
 
-export async function getWorkspace(db: Database, id: string) {
-  return (await db.query.workspaces.findFirst({ where: { id } })) ?? null;
+export function updateWorkspaceLabel(db: Database, id: string, label: string | null) {
+  return runWithDb(db, DomainWorkspaces.updateWorkspaceLabel(id, label));
 }
 
-export async function updateWorkspaceLabel(db: Database, id: string, label: string | null) {
-  const workspace = await getWorkspace(db, id);
-  if (!workspace) throw new Error(`Workspace not found: ${id}`);
-  await db
-    .update(workspaces)
-    .set({ label, updatedAt: new Date().toISOString() })
-    .where(eq(workspaces.id, id));
-  return (await getWorkspace(db, id))!;
-}
-
-export async function removeWorkspace(db: Database, id: string, force = false) {
-  const workspace = await getWorkspace(db, id);
-  if (!workspace) throw new Error(`Workspace not found: ${id}`);
-
-  const linkedPrds = await db.query.prds.findMany({ where: { workspaceId: id } });
-  if (linkedPrds.length > 0 && !force) {
-    throw new Error(
-      `Workspace has ${linkedPrds.length} linked PRD(s). Use --force to remove anyway.`,
-    );
-  }
-
-  if (force && linkedPrds.length > 0) {
-    for (const prd of linkedPrds) {
-      const prdTasks = await db.query.tasks.findMany({ where: { prdId: prd.id } });
-      for (const task of prdTasks) {
-        await db.delete(activityLog).where(eq(activityLog.taskId, task.id));
-      }
-      const prdReviews = await db.query.reviews.findMany({ where: { prdId: prd.id } });
-      for (const review of prdReviews) {
-        await db.delete(activityLog).where(eq(activityLog.reviewId, review.id));
-        await db.delete(reviews).where(eq(reviews.id, review.id));
-      }
-      await db.delete(activityLog).where(eq(activityLog.prdId, prd.id));
-      await db.delete(tasks).where(eq(tasks.prdId, prd.id));
-    }
-    for (const prd of linkedPrds) {
-      await db.delete(prds).where(eq(prds.id, prd.id));
-    }
-  }
-
-  await db.delete(activityLog).where(eq(activityLog.workspaceId, id));
-  await db.delete(workspaces).where(eq(workspaces.id, id));
+export function removeWorkspace(db: Database, id: string, force = false) {
+  return runWithDb(db, DomainWorkspaces.removeWorkspace(id, force));
 }
 
 // ── PRDs ──────────────────────────────────────────────────────────────────────
 
-export async function createPrd(
+export function createPrd(
   db: Database,
-  input: {
-    projectId: string;
-    workspaceId: string;
-    title: string;
-    context?: string;
-    scope?: string;
-  },
+  input: { projectId: string; title: string; context?: string; scope?: string },
 ) {
-  const id = generateId();
-  const now = new Date().toISOString();
-  await db.insert(prds).values({
-    id,
-    projectId: input.projectId,
-    workspaceId: input.workspaceId,
-    parentId: null,
-    revision: 1,
-    title: input.title,
-    context: input.context ?? null,
-    scope: input.scope ?? null,
-    status: "draft",
-    createdAt: now,
-    committedAt: null,
-    activatedAt: null,
-  });
-  const row = await db.query.prds.findFirst({ where: { id } });
-  return row!;
+  return runWithDb(db, DomainPrds.createPrd(input));
 }
 
-export async function getPrd(db: Database, id: string) {
-  return (await db.query.prds.findFirst({ where: { id } })) ?? null;
+export function getPrd(db: Database, id: string) {
+  return runWithDb(db, DomainPrds.getPrd(id));
 }
 
-export async function listPrds(
-  db: Database,
-  filter: { projectId?: string; workspaceId?: string } = {},
-) {
-  // Use query builder for conditional filtering
-  if (filter.workspaceId) {
-    return db.query.prds.findMany({
-      where: { workspaceId: filter.workspaceId },
-      orderBy: { createdAt: "asc" },
-    });
-  }
-  if (filter.projectId) {
-    return db.query.prds.findMany({
-      where: { projectId: filter.projectId },
-      orderBy: { createdAt: "asc" },
-    });
-  }
-  return db.query.prds.findMany({ orderBy: { createdAt: "asc" } });
+export function listPrds(db: Database, filter: { projectId?: string; workspaceId?: string } = {}) {
+  return runWithDb(db, DomainPrds.listPrds(filter));
 }
 
-export async function commitPrd(db: Database, id: string) {
-  const prd = await getPrd(db, id);
-  if (!prd) throw new Error(`PRD not found: ${id}`);
-  validatePrdTransition(prd.status, "committed");
-  const now = new Date().toISOString();
-  await db
-    .update(prds)
-    .set({ status: "committed", committedAt: now, updatedAt: now } as any)
-    .where(eq(prds.id, id));
-  return (await getPrd(db, id))!;
-}
-
-export async function activatePrd(db: Database, id: string) {
-  const prd = await getPrd(db, id);
-  if (!prd) throw new Error(`PRD not found: ${id}`);
-  validatePrdTransition(prd.status, "in_progress");
-  const activePrd = await db.query.prds.findFirst({
-    where: { workspaceId: prd.workspaceId, status: "in_progress" },
-  });
-  if (activePrd && activePrd.id !== id) {
-    throw new Error(
-      `Cannot activate PRD: workspace already has active PRD '${activePrd.id}'`,
-    );
-  }
-  const now = new Date().toISOString();
-  await db
-    .update(prds)
-    .set({ status: "in_progress", activatedAt: now, updatedAt: now } as any)
-    .where(eq(prds.id, id));
-  return (await getPrd(db, id))!;
-}
-
-export async function archivePrd(db: Database, id: string) {
-  const prd = await getPrd(db, id);
-  if (!prd) throw new Error(`PRD not found: ${id}`);
-  validatePrdTransition(prd.status, "archived");
-  await db
-    .update(prds)
-    .set({ status: "archived", updatedAt: new Date().toISOString() } as any)
-    .where(eq(prds.id, id));
-  return (await getPrd(db, id))!;
-}
-
-/**
- * Amend a committed or in_progress PRD by creating a new revision.
- * The original PRD is archived.
- */
-export async function amendPrd(
-  db: Database,
-  id: string,
-  changes: { title?: string; context?: string; scope?: string },
-) {
-  const original = await getPrd(db, id);
-  if (!original) throw new Error(`PRD not found: ${id}`);
-  validatePrdTransition(original.status, "archived");
-
-  // Archive the original revision
-  await db
-    .update(prds)
-    .set({ status: "archived", updatedAt: new Date().toISOString() } as any)
-    .where(eq(prds.id, id));
-
-  // Create the next revision
-  const newId = generateId();
-  const now = new Date().toISOString();
-  await db.insert(prds).values({
-    id: newId,
-    projectId: original.projectId,
-    workspaceId: original.workspaceId,
-    parentId: original.id,
-    revision: original.revision + 1,
-    title: changes.title ?? original.title,
-    context: changes.context ?? original.context,
-    scope: changes.scope ?? original.scope,
-    status: "draft",
-    createdAt: now,
-    committedAt: null,
-    activatedAt: null,
-  });
-  return (await getPrd(db, newId))!;
+export function activatePrd(db: Database, id: string, workspaceId: string) {
+  return runWithDb(db, DomainPrds.activatePrd(id, workspaceId));
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
-export async function createTask(
+export function createTask(
   db: Database,
   input: {
     prdId: string;
     title: string;
     description: string;
-    descriptionFormat?: "legacy" | "structured_v1";
     doneCriteria: string;
     effort: Effort;
     dependsOn?: string[];
   },
 ) {
-  if (!input.doneCriteria || input.doneCriteria.trim() === "") {
-    throw new Error("Task must have non-empty done_criteria");
-  }
-
-  // Determine next position within the PRD
-  const existing = await db.query.tasks.findMany({
-    where: { prdId: input.prdId },
-  });
-  const nextPosition = existing.length + 1;
-  const storedDescription = normalizeTaskDescriptionForStorage(
-    input.description,
-    input.descriptionFormat,
-  );
-
-  const id = generateId();
-  const now = new Date().toISOString();
-  await db.insert(tasks).values({
-    id,
-    prdId: input.prdId,
-    position: nextPosition,
-    title: input.title,
-    description: storedDescription.description,
-    descriptionFormat: storedDescription.descriptionFormat,
-    doneCriteria: input.doneCriteria,
-    dependsOn: JSON.stringify(input.dependsOn ?? []),
-    effort: input.effort,
-    status: "pending",
-    blockedReason: null,
-    skipReason: null,
-    createdAt: now,
-    startedAt: null,
-    completedAt: null,
-  });
-  return (await getTask(db, id))!;
+  return runWithDb(db, DomainTasks.createTask(input));
 }
 
-export async function getTask(db: Database, id: string) {
-  return (await db.query.tasks.findFirst({ where: { id } })) ?? null;
+export function getTask(db: Database, id: string) {
+  return runWithDb(db, DomainTasks.getTask(id));
 }
 
-export async function listTasks(db: Database, prdId: string) {
-  return db.query.tasks.findMany({
-    where: { prdId },
-    orderBy: { position: "asc" },
-  });
+export function listTasks(db: Database, prdId: string) {
+  return runWithDb(db, DomainTasks.listTasks(prdId));
 }
 
-export async function startTask(db: Database, id: string) {
-  const task = await getTask(db, id);
-  if (!task) throw new Error(`Task not found: ${id}`);
-  validateTaskTransition(task.status, "in_progress");
-  const now = new Date().toISOString();
-  await db.update(tasks).set({ status: "in_progress", startedAt: now }).where(eq(tasks.id, id));
-  return (await getTask(db, id))!;
+export function startTask(db: Database, id: string) {
+  return runWithDb(db, DomainTasks.startTask(id));
 }
 
-/**
- * Complete an in_progress task.
- * Enforces mechanical checks:
- * - Task is currently in_progress
- * - All dependency tasks have status 'done'
- * - done_criteria is non-empty
- * - started_at is set
- */
-export async function completeTask(db: Database, id: string) {
-  const task = await getTask(db, id);
-  if (!task) throw new Error(`Task not found: ${id}`);
-  validateTaskTransition(task.status, "done");
-  if (!task.startedAt) {
-    throw new Error("Cannot complete task: started_at is not set");
-  }
-  if (!task.doneCriteria || task.doneCriteria.trim() === "") {
-    throw new Error("Cannot complete task: done_criteria is empty");
-  }
-
-  // Verify all declared dependencies are done
-  const deps: string[] = JSON.parse(task.dependsOn);
-  if (deps.length > 0) {
-    for (const depId of deps) {
-      const dep = await getTask(db, depId);
-      if (!dep) {
-        throw new Error(`Dependency task not found: ${depId}`);
-      }
-      if (dep.status !== "done") {
-        throw new Error(
-          `Cannot complete task: dependency '${depId}' is not done (status: '${dep.status}')`,
-        );
-      }
-    }
-  }
-
-  const now = new Date().toISOString();
-  await db.update(tasks).set({ status: "done", completedAt: now }).where(eq(tasks.id, id));
-  return (await getTask(db, id))!;
+export function completeTask(db: Database, id: string) {
+  return runWithDb(db, DomainTasks.completeTask(id));
 }
 
-export async function blockTask(db: Database, id: string, reason: string) {
-  if (!reason || reason.trim() === "") {
-    throw new Error("Block reason is required");
-  }
-  const task = await getTask(db, id);
-  if (!task) throw new Error(`Task not found: ${id}`);
-  validateTaskTransition(task.status, "blocked");
-  await db.update(tasks).set({ status: "blocked", blockedReason: reason }).where(eq(tasks.id, id));
-  return (await getTask(db, id))!;
+export function blockTask(db: Database, id: string, reason: string) {
+  return runWithDb(db, DomainTasks.blockTask(id, reason));
 }
 
-export async function skipTask(db: Database, id: string, reason: string) {
-  if (!reason || reason.trim() === "") {
-    throw new Error("Skip reason is required");
-  }
-  const task = await getTask(db, id);
-  if (!task) throw new Error(`Task not found: ${id}`);
-  validateTaskTransition(task.status, "skipped");
-  const now = new Date().toISOString();
-  await db
-    .update(tasks)
-    .set({ status: "skipped", skipReason: reason, completedAt: now })
-    .where(eq(tasks.id, id));
-  return (await getTask(db, id))!;
-}
-
-// ── Reviews ───────────────────────────────────────────────────────────────────
-
-export async function createReview(
-  db: Database,
-  input: {
-    prdId: string;
-    mode: ReviewMode;
-    userFeedback?: string;
-  },
-) {
-  const prd = await getPrd(db, input.prdId);
-  if (!prd) throw new Error(`PRD not found: ${input.prdId}`);
-
-  const id = generateId();
-  const now = new Date().toISOString();
-  await db.insert(reviews).values({
-    id,
-    prdId: input.prdId,
-    prdRevision: prd.revision,
-    status: "pending",
-    mode: input.mode,
-    userFeedback: input.userFeedback ?? null,
-    findings: "[]",
-    questions: "[]",
-    followupTasks: "[]",
-    decision: null,
-    decisionNote: null,
-    createdAt: now,
-    completedAt: null,
-  });
-  return (await getReview(db, id))!;
-}
-
-export async function getReview(db: Database, id: string) {
-  return (await db.query.reviews.findFirst({ where: { id } })) ?? null;
-}
-
-export async function listReviews(db: Database, prdId: string) {
-  return db.query.reviews.findMany({
-    where: { prdId },
-    orderBy: { createdAt: "asc" },
-  });
-}
-
-export async function startReview(db: Database, id: string) {
-  const review = await getReview(db, id);
-  if (!review) throw new Error(`Review not found: ${id}`);
-  if (review.status !== "pending") {
-    throw new Error(`Cannot start review: status is '${review.status}', expected 'pending'`);
-  }
-  await db.update(reviews).set({ status: "in_progress" }).where(eq(reviews.id, id));
-  return (await getReview(db, id))!;
-}
-
-export async function recordReviewFindings(
-  db: Database,
-  id: string,
-  input: {
-    findings: unknown[];
-    questions?: unknown[];
-    followupTasks?: unknown[];
-  },
-) {
-  const review = await getReview(db, id);
-  if (!review) throw new Error(`Review not found: ${id}`);
-  if (review.status === "completed") {
-    throw new Error("Cannot update findings: review is already completed");
-  }
-  await db
-    .update(reviews)
-    .set({
-      status: "in_progress",
-      findings: JSON.stringify(input.findings),
-      questions: JSON.stringify(input.questions ?? []),
-      followupTasks: JSON.stringify(input.followupTasks ?? []),
-    })
-    .where(eq(reviews.id, id));
-  return (await getReview(db, id))!;
-}
-
-export async function recordReviewDecision(
-  db: Database,
-  id: string,
-  input: {
-    decision: ReviewDecision;
-    note?: string;
-  },
-) {
-  const review = await getReview(db, id);
-  if (!review) throw new Error(`Review not found: ${id}`);
-  if (review.status === "completed") {
-    throw new Error("Cannot record decision: review is already completed");
-  }
-  const now = new Date().toISOString();
-  await db
-    .update(reviews)
-    .set({
-      status: "completed",
-      decision: input.decision,
-      decisionNote: input.note ?? null,
-      completedAt: now,
-    })
-    .where(eq(reviews.id, id));
-  return (await getReview(db, id))!;
+export function skipTask(db: Database, id: string, reason: string) {
+  return runWithDb(db, DomainTasks.skipTask(id, reason));
 }
 
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
-export async function logActivity(
+export function logActivity(
   db: Database,
   input: {
     projectId: string;
     workspaceId?: string;
     prdId?: string;
     taskId?: string;
-    reviewId?: string;
-    eventType: string;
+    eventType: EventType;
     payload: Record<string, unknown>;
   },
 ) {
-  const project = await getProject(db, input.projectId);
-  if (!project) {
-    throw new Error(`Project not found: ${input.projectId}`);
-  }
-
-  let workspace = null;
-  if (input.workspaceId) {
-    workspace = await db.query.workspaces.findFirst({ where: { id: input.workspaceId } });
-    if (!workspace) {
-      throw new Error(`Workspace not found: ${input.workspaceId}`);
-    }
-    if (workspace.projectId !== input.projectId) {
-      throw new Error(`Workspace '${input.workspaceId}' does not belong to project '${input.projectId}'`);
-    }
-  }
-
-  let prd = null;
-  if (input.prdId) {
-    prd = await getPrd(db, input.prdId);
-    if (!prd) {
-      throw new Error(`PRD not found: ${input.prdId}`);
-    }
-    if (prd.projectId !== input.projectId) {
-      throw new Error(`PRD '${input.prdId}' does not belong to project '${input.projectId}'`);
-    }
-    if (workspace && prd.workspaceId !== workspace.id) {
-      throw new Error(`PRD '${input.prdId}' does not belong to workspace '${workspace.id}'`);
-    }
-  }
-
-  if (input.taskId) {
-    const task = await getTask(db, input.taskId);
-    if (!task) {
-      throw new Error(`Task not found: ${input.taskId}`);
-    }
-    const taskPrd = prd && prd.id === task.prdId ? prd : await getPrd(db, task.prdId);
-    if (!taskPrd) {
-      throw new Error(`PRD not found for task '${input.taskId}'`);
-    }
-    if (taskPrd.projectId !== input.projectId) {
-      throw new Error(`Task '${input.taskId}' does not belong to project '${input.projectId}'`);
-    }
-    if (workspace && taskPrd.workspaceId !== workspace.id) {
-      throw new Error(`Task '${input.taskId}' does not belong to workspace '${workspace.id}'`);
-    }
-    if (prd && taskPrd.id !== prd.id) {
-      throw new Error(`Task '${input.taskId}' does not belong to PRD '${prd.id}'`);
-    }
-  }
-
-  if (input.reviewId) {
-    const review = await getReview(db, input.reviewId);
-    if (!review) {
-      throw new Error(`Review not found: ${input.reviewId}`);
-    }
-    if (prd && review.prdId !== prd.id) {
-      throw new Error(`Review '${input.reviewId}' does not belong to PRD '${prd.id}'`);
-    }
-  }
-
-  const now = new Date().toISOString();
-  const result = await db
-    .insert(activityLog)
-    .values({
-      projectId: input.projectId,
-      workspaceId: input.workspaceId ?? null,
-      prdId: input.prdId ?? null,
-      taskId: input.taskId ?? null,
-      reviewId: input.reviewId ?? null,
-      eventType: input.eventType,
-      payload: JSON.stringify(input.payload),
-      createdAt: now,
-    })
-    .returning();
-  return result[0]!;
+  return runWithDb(db, DomainActivity.logActivity(input));
 }
 
-export async function listActivity(
+export function listActivity(
   db: Database,
   filter: { projectId: string; workspaceId?: string; limit?: number },
 ) {
-  const where = filter.workspaceId
-    ? { projectId: filter.projectId, workspaceId: filter.workspaceId }
-    : { projectId: filter.projectId };
-
-  const rows = await db.query.activityLog.findMany({
-    where,
-    orderBy: { id: "desc" },
-    limit: filter.limit,
-  });
-  return rows.reverse();
-}
-
-// ── Row type aliases ──────────────────────────────────────────────────────────
-
-export type WorkspaceRow = typeof workspaces.$inferSelect;
-export type ProjectRow = typeof projects.$inferSelect;
-export type PrdRow = typeof prds.$inferSelect;
-export type TaskRow = typeof tasks.$inferSelect;
-export type ActivityRow = typeof activityLog.$inferSelect;
-
-// ── Shared utilities ──────────────────────────────────────────────────────────
-
-/**
- * Find the next pending task that has all dependencies satisfied.
- * Tasks must already be ordered by position (ascending).
- */
-export function findNextRecommendedTask<
-  T extends { id: string; status: string; dependsOn: string },
->(tasks: T[]): T | null {
-  const doneIds = new Set(tasks.filter((t) => t.status === "done").map((t) => t.id));
-  for (const task of tasks) {
-    if (task.status !== "pending") continue;
-    const deps: string[] = JSON.parse(task.dependsOn);
-    if (deps.every((depId) => doneIds.has(depId))) return task;
-  }
-  return null;
-}
-
-/**
- * Produce a human-readable one-line summary of an activity log payload.
- */
-export function summarizeActivityPayload(
-  eventType: string,
-  payload: Record<string, unknown>,
-): string {
-  switch (eventType) {
-    case "note":
-      return String(payload.message ?? "");
-    case "session_start":
-      return String(payload.context ?? "New session");
-    case "task_started":
-    case "task_done":
-      return String(payload.title ?? "");
-    case "task_blocked":
-    case "task_skipped":
-      return [String(payload.title ?? ""), String(payload.reason ?? "")]
-        .filter(Boolean)
-        .join(" — ");
-    case "prd_committed":
-    case "prd_activated":
-      return String(payload.title ?? "");
-    case "prd_amended":
-      return `rev ${payload.revision ?? "?"}`;
-    case "handoff":
-      return String(payload.context ?? "");
-    case "error":
-      return String(payload.message ?? "");
-    default:
-      return JSON.stringify(payload);
-  }
+  return runWithDb(db, DomainActivity.listActivity(filter));
 }
 
 // ── Workspace status ──────────────────────────────────────────────────────────
 
-export type WorkspaceStatus = {
-  workspace: WorkspaceRow;
-  project: ProjectRow;
-  generatedAt: string;
-  /** Single active (in_progress) PRD, or null if zero or multiple. */
-  activePrd: PrdRow | null;
-  /** Non-empty when multiple PRDs have status in_progress simultaneously. */
-  conflictingPrds: PrdRow[];
-  /** Tasks for activePrd ordered by position. Empty when activePrd is null. */
-  allTasks: TaskRow[];
-  /** Next pending task with all deps satisfied, or null. */
-  nextRecommendedTask: TaskRow | null;
-  /** Last 10 activity entries for this workspace, ascending by time. */
-  recentActivity: ActivityRow[];
-};
-
-export async function buildWorkspaceStatus(
-  db: Database,
-  workspaceId: string,
-): Promise<WorkspaceStatus> {
-  const workspace = await db.query.workspaces.findFirst({ where: { id: workspaceId } });
-  if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
-
-  const project = await db.query.projects.findFirst({ where: { id: workspace.projectId } });
-  if (!project) throw new Error(`Project not found: ${workspace.projectId}`);
-
-  const generatedAt = new Date().toISOString();
-
-  const allPrds = await listPrds(db, { workspaceId });
-  const activePrds = allPrds.filter((p) => p.status === "in_progress");
-
-  const activePrd = activePrds.length === 1 ? activePrds[0]! : null;
-  const conflictingPrds = activePrds.length > 1 ? activePrds : [];
-
-  const recentActivity = await listActivity(db, { projectId: project.id, workspaceId, limit: 10 });
-
-  const allTasks = activePrd ? await listTasks(db, activePrd.id) : [];
-  const nextRecommendedTask = activePrd ? findNextRecommendedTask(allTasks) : null;
-
-  return {
-    workspace,
-    project,
-    generatedAt,
-    activePrd,
-    conflictingPrds,
-    allTasks,
-    nextRecommendedTask,
-    recentActivity,
-  };
+export function buildWorkspaceStatus(db: Database, workspaceId: string) {
+  return runWithDb(db, DomainStatus.buildWorkspaceStatus(workspaceId));
 }

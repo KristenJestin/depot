@@ -1,10 +1,14 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { Effect } from "effect";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
-import { formatStructuredTaskDescription } from "#/lib/task-spec";
+import { prds } from "#/db/schema";
+import { Db } from "#/services/database";
+import { formatStructuredTaskDescription } from "#/modules/tasks/spec";
 import {
   addWorkspace,
-  commitPrd,
+  activatePrd,
   createPrd,
   createProject,
   createTask,
@@ -13,15 +17,24 @@ import {
   getProject,
   getWorkspace,
 } from "#/lib/workflow";
-import { setJsonMode } from "#/lib/logger";
+import { setJsonMode } from "#/shared/logger";
 
 const resolveCurrentWorkspace = vi.fn<() => Promise<{ db: Database; ws: unknown }>>();
 const getDb = vi.fn<() => Promise<Database>>();
 
-vi.mock("#/cli/runtime", () => ({
-  resolveCurrentWorkspace,
-  getDb,
-}));
+// Holds the current test database; updated in beforeEach so each test gets a fresh db.
+let currentTestDb: Database;
+
+vi.mock("#/cli/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#/cli/runtime")>();
+  return {
+    ...actual,
+    resolveCurrentWorkspace,
+    getDb,
+    runEffect: <A, E>(effect: Effect.Effect<A, E, Db>) =>
+      Effect.runPromise(Effect.provideService(effect, Db, currentTestDb)),
+  };
+});
 
 type RunnableSubCommand = {
   run: (ctx: { args: Record<string, unknown> }) => Promise<void> | void;
@@ -63,6 +76,7 @@ describe("CLI commands", () => {
     vi.resetAllMocks();
     setJsonMode(false);
     ({ db } = createTestDb());
+    currentTestDb = db;
 
     const project = await createProject(db, { name: "cli-project" });
     projectId = project.id;
@@ -85,15 +99,14 @@ describe("CLI commands", () => {
   });
 
   it("task add requires full PRD IDs and full dependency IDs", async () => {
-    const { taskCommand } = await import("#/cli/commands/task");
+    const { taskCommand } = await import("#/modules/tasks/command");
     const addCommand = await getSubCommand(taskCommand, "add");
 
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "CLI PRD",
     });
-    await commitPrd(db, prd.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
 
     const dependency = await createTask(db, {
       prdId: prd.id,
@@ -107,7 +120,7 @@ describe("CLI commands", () => {
 
     await addCommand.run({
       args: {
-        prd: prd.id,
+        prdId: prd.id,
         title: "Dependent task",
         desc: formatStructuredTaskDescription({
           intent: "Create a dependent task.",
@@ -130,44 +143,12 @@ describe("CLI commands", () => {
     stdout.mockRestore();
   });
 
-  it("task add rejects legacy task descriptions", async () => {
-    const { taskCommand } = await import("#/cli/commands/task");
-    const addCommand = await getSubCommand(taskCommand, "add");
-
-    const prd = await createPrd(db, {
-      projectId,
-      workspaceId,
-      title: "CLI PRD",
-    });
-
-    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
-      throw new Error(`process.exit:${code ?? 0}`);
-    }) as never);
-
-    await expect(
-      addCommand.run({
-        args: {
-          prd: prd.id,
-          title: "Legacy task",
-          desc: "Plain legacy description",
-          criteria: "done",
-          effort: "m",
-        },
-      }),
-    ).rejects.toThrow("process.exit:1");
-
-    expect(await listTasks(db, prd.id)).toHaveLength(0);
-
-    exit.mockRestore();
-  });
-
   it("task add stores structured task descriptions explicitly", async () => {
-    const { taskCommand } = await import("#/cli/commands/task");
+    const { taskCommand } = await import("#/modules/tasks/command");
     const addCommand = await getSubCommand(taskCommand, "add");
 
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "CLI PRD",
     });
 
@@ -175,7 +156,7 @@ describe("CLI commands", () => {
 
     await addCommand.run({
       args: {
-        prd: prd.id,
+        prdId: prd.id,
         title: "Structured task",
         desc: formatStructuredTaskDescription({
           intent: "Clarify the implementation intent.",
@@ -197,15 +178,14 @@ describe("CLI commands", () => {
   });
 
   it("task list requires full PRD IDs", async () => {
-    const { taskCommand } = await import("#/cli/commands/task");
+    const { taskCommand } = await import("#/modules/tasks/command");
     const listCommand = await getSubCommand(taskCommand, "list");
 
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "CLI PRD",
     });
-    await commitPrd(db, prd.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
     await createTask(db, {
       prdId: prd.id,
       title: "Listed task",
@@ -229,15 +209,14 @@ describe("CLI commands", () => {
   });
 
   it("task list prints full task IDs", async () => {
-    const { taskCommand } = await import("#/cli/commands/task");
+    const { taskCommand } = await import("#/modules/tasks/command");
     const listCommand = await getSubCommand(taskCommand, "list");
 
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "CLI PRD",
     });
-    await commitPrd(db, prd.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
 
     await createTask(db, {
       prdId: prd.id,
@@ -272,12 +251,11 @@ describe("CLI commands", () => {
   });
 
   it("log add requires full PRD and task IDs", async () => {
-    const { logCommand } = await import("#/cli/commands/log");
+    const { logCommand } = await import("#/modules/activity/command");
     const addCommand = await getSubCommand(logCommand, "add");
 
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "CLI PRD",
     });
     const task = await createTask(db, {
@@ -308,7 +286,7 @@ describe("CLI commands", () => {
   });
 
   it("log add accepts PowerShell-mangled payload objects", async () => {
-    const { logCommand } = await import("#/cli/commands/log");
+    const { logCommand } = await import("#/modules/activity/command");
     const addCommand = await getSubCommand(logCommand, "add");
 
     const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -328,12 +306,11 @@ describe("CLI commands", () => {
   });
 
   it("task show renders structured task descriptions section by section", async () => {
-    const { taskCommand } = await import("#/cli/commands/task");
+    const { taskCommand } = await import("#/modules/tasks/command");
     const showCommand = await getSubCommand(taskCommand, "show");
 
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "CLI PRD",
     });
 
@@ -369,23 +346,19 @@ describe("CLI commands", () => {
   });
 
   it("context mode renders only the requested mode", async () => {
-    const { contextCommand } = await import("#/cli/commands/context");
+    const { contextCommand } = await import("#/modules/context/command");
     const prd = await createPrd(db, {
       projectId,
-      workspaceId,
       title: "CLI PRD",
     });
-    await commitPrd(db, prd.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
 
     const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await contextCommand.run?.({
       rawArgs: [],
-      args: {
-        _: [],
-        mode: "prd" as never,
-        prdTarget: undefined as never,
-      },
+      // citty's raw arg values don't include undefined; cast is required here
+      args: { mode: "prd", prdTarget: undefined } as any,
       cmd: contextCommand,
     });
 
@@ -404,11 +377,11 @@ describe("CLI commands", () => {
     });
 
     it("prd list emits a success envelope with items array", async () => {
-      const { prdCommand } = await import("#/cli/commands/prd");
+      const { prdCommand } = await import("#/modules/prds/command");
       const listCommand = await getSubCommand(prdCommand, "list");
 
-      await createPrd(db, { projectId, workspaceId, title: "PRD Alpha" });
-      await createPrd(db, { projectId, workspaceId, title: "PRD Beta" });
+      await createPrd(db, { projectId, title: "PRD Alpha" });
+      await createPrd(db, { projectId, title: "PRD Beta" });
 
       const output = await captureStdout(async () => {
         await listCommand.run({ args: {} });
@@ -422,7 +395,7 @@ describe("CLI commands", () => {
     });
 
     it("prd create emits a success envelope with item", async () => {
-      const { prdCommand } = await import("#/cli/commands/prd");
+      const { prdCommand } = await import("#/modules/prds/command");
       const createCommand = await getSubCommand(prdCommand, "create");
 
       const output = await captureStdout(async () => {
@@ -438,17 +411,19 @@ describe("CLI commands", () => {
     });
 
     it("prd show emits not_found error envelope for missing PRD", async () => {
-      const { prdCommand } = await import("#/cli/commands/prd");
+      const { prdCommand } = await import("#/modules/prds/command");
       const showCommand = await getSubCommand(prdCommand, "show");
 
-      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as never);
 
       const output = await captureStdout(async () => {
-        await expect(
-          showCommand.run({ args: { prdId: "NONEXISTENT" } }),
-        ).rejects.toThrow("process.exit:1");
+        await expect(showCommand.run({ args: { prdId: "NONEXISTENT" } })).rejects.toThrow(
+          "process.exit:1",
+        );
       });
 
       const parsed = JSON.parse(output.trim());
@@ -459,11 +434,11 @@ describe("CLI commands", () => {
     });
 
     it("task list emits success envelope with items and parsed dependsOn arrays", async () => {
-      const { taskCommand } = await import("#/cli/commands/task");
+      const { taskCommand } = await import("#/modules/tasks/command");
       const listCmd = await getSubCommand(taskCommand, "list");
 
-      const prd = await createPrd(db, { projectId, workspaceId, title: "JSON PRD" });
-      await commitPrd(db, prd.id);
+      const prd = await createPrd(db, { projectId, title: "JSON PRD" });
+      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
 
       const dep = await createTask(db, {
         prdId: prd.id,
@@ -498,16 +473,16 @@ describe("CLI commands", () => {
     });
 
     it("task add emits success envelope with the created task", async () => {
-      const { taskCommand } = await import("#/cli/commands/task");
+      const { taskCommand } = await import("#/modules/tasks/command");
       const addCmd = await getSubCommand(taskCommand, "add");
 
-      const prd = await createPrd(db, { projectId, workspaceId, title: "JSON PRD" });
-      await commitPrd(db, prd.id);
+      const prd = await createPrd(db, { projectId, title: "JSON PRD" });
+      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
 
       const output = await captureStdout(async () => {
         await addCmd.run({
           args: {
-            prd: prd.id,
+            prdId: prd.id,
             title: "JSON task",
             desc: formatStructuredTaskDescription({
               intent: "Test JSON output.",
@@ -527,7 +502,7 @@ describe("CLI commands", () => {
     });
 
     it("log list emits success envelope with parsed payload objects", async () => {
-      const { logCommand } = await import("#/cli/commands/log");
+      const { logCommand } = await import("#/modules/activity/command");
       const addCmd = await getSubCommand(logCommand, "add");
       const listCmd = await getSubCommand(logCommand, "list");
 
@@ -555,7 +530,7 @@ describe("CLI commands", () => {
     });
 
     it("stdout stays pure JSON with no extra text in JSON mode", async () => {
-      const { prdCommand } = await import("#/cli/commands/prd");
+      const { prdCommand } = await import("#/modules/prds/command");
       const listCommand = await getSubCommand(prdCommand, "list");
 
       const output = await captureStdout(async () => {
@@ -570,9 +545,11 @@ describe("CLI commands", () => {
     });
 
     it("context command emits unsupported error in JSON mode", async () => {
-      const { contextCommand } = await import("#/cli/commands/context");
+      const { contextCommand } = await import("#/modules/context/command");
 
-      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as never);
 
@@ -580,7 +557,7 @@ describe("CLI commands", () => {
         await expect(
           contextCommand.run?.({
             rawArgs: [],
-            args: { _: [], mode: undefined as never, prdTarget: undefined as never },
+            args: { mode: undefined, prdTarget: undefined } as any,
             cmd: contextCommand,
           }),
         ).rejects.toThrow("process.exit:1");
@@ -596,7 +573,7 @@ describe("CLI commands", () => {
 
   describe("project commands", () => {
     it("project show displays project details", async () => {
-      const { projectCommand } = await import("#/cli/commands/project");
+      const { projectCommand } = await import("#/modules/projects/command");
       const showCommand = await getSubCommand(projectCommand, "show");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -609,22 +586,24 @@ describe("CLI commands", () => {
     });
 
     it("project show errors on unknown id", async () => {
-      const { projectCommand } = await import("#/cli/commands/project");
+      const { projectCommand } = await import("#/modules/projects/command");
       const showCommand = await getSubCommand(projectCommand, "show");
 
-      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as never);
 
-      await expect(
-        showCommand.run({ args: { projectId: "nonexistent" } }),
-      ).rejects.toThrow("process.exit:1");
+      await expect(showCommand.run({ args: { projectId: "nonexistent" } })).rejects.toThrow(
+        "process.exit:1",
+      );
 
       exit.mockRestore();
     });
 
     it("project update changes the project name", async () => {
-      const { projectCommand } = await import("#/cli/commands/project");
+      const { projectCommand } = await import("#/modules/projects/command");
       const updateCommand = await getSubCommand(projectCommand, "update");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -636,22 +615,22 @@ describe("CLI commands", () => {
     });
 
     it("project update errors when no changes provided", async () => {
-      const { projectCommand } = await import("#/cli/commands/project");
+      const { projectCommand } = await import("#/modules/projects/command");
       const updateCommand = await getSubCommand(projectCommand, "update");
 
-      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as never);
 
-      await expect(
-        updateCommand.run({ args: { projectId } }),
-      ).rejects.toThrow("process.exit:1");
+      await expect(updateCommand.run({ args: { projectId } })).rejects.toThrow("process.exit:1");
 
       exit.mockRestore();
     });
 
     it("project archive sets status to done", async () => {
-      const { projectCommand } = await import("#/cli/commands/project");
+      const { projectCommand } = await import("#/modules/projects/command");
       const archiveCommand = await getSubCommand(projectCommand, "archive");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -663,20 +642,20 @@ describe("CLI commands", () => {
     });
 
     it("project archive errors if already done", async () => {
-      const { projectCommand } = await import("#/cli/commands/project");
+      const { projectCommand } = await import("#/modules/projects/command");
       const archiveCommand = await getSubCommand(projectCommand, "archive");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
       await archiveCommand.run({ args: { projectId } });
       output.mockRestore();
 
-      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as never);
 
-      await expect(
-        archiveCommand.run({ args: { projectId } }),
-      ).rejects.toThrow("process.exit:1");
+      await expect(archiveCommand.run({ args: { projectId } })).rejects.toThrow("process.exit:1");
 
       exit.mockRestore();
     });
@@ -684,7 +663,7 @@ describe("CLI commands", () => {
 
   describe("workspace commands", () => {
     it("workspace list shows all workspaces", async () => {
-      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const { workspaceCommand } = await import("#/modules/workspaces/command");
       const listCommand = await getSubCommand(workspaceCommand, "list");
 
       const lines: string[] = [];
@@ -697,7 +676,7 @@ describe("CLI commands", () => {
     });
 
     it("workspace show displays workspace details", async () => {
-      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const { workspaceCommand } = await import("#/modules/workspaces/command");
       const showCommand = await getSubCommand(workspaceCommand, "show");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -709,22 +688,24 @@ describe("CLI commands", () => {
     });
 
     it("workspace show errors on unknown id", async () => {
-      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const { workspaceCommand } = await import("#/modules/workspaces/command");
       const showCommand = await getSubCommand(workspaceCommand, "show");
 
-      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as never);
 
-      await expect(
-        showCommand.run({ args: { workspaceId: "nonexistent" } }),
-      ).rejects.toThrow("process.exit:1");
+      await expect(showCommand.run({ args: { workspaceId: "nonexistent" } })).rejects.toThrow(
+        "process.exit:1",
+      );
 
       exit.mockRestore();
     });
 
     it("workspace rename updates the label", async () => {
-      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const { workspaceCommand } = await import("#/modules/workspaces/command");
       const renameCommand = await getSubCommand(workspaceCommand, "rename");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -736,27 +717,33 @@ describe("CLI commands", () => {
     });
 
     it("workspace remove fails when PRDs are linked", async () => {
-      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const { workspaceCommand } = await import("#/modules/workspaces/command");
       const removeCommand = await getSubCommand(workspaceCommand, "remove");
 
-      await createPrd(db, { projectId, workspaceId, title: "linked PRD" });
+      const prd = await createPrd(db, { projectId, title: "linked PRD" });
+      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+      await activatePrd(db, prd.id, workspaceId);
 
-      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as never);
 
-      await expect(
-        removeCommand.run({ args: { workspaceId, force: false } }),
-      ).rejects.toThrow("process.exit:1");
+      await expect(removeCommand.run({ args: { workspaceId, force: false } })).rejects.toThrow(
+        "process.exit:1",
+      );
 
       exit.mockRestore();
     });
 
     it("workspace remove --force cascades linked data", async () => {
-      const { workspaceCommand } = await import("#/cli/commands/workspace");
+      const { workspaceCommand } = await import("#/modules/workspaces/command");
       const removeCommand = await getSubCommand(workspaceCommand, "remove");
 
-      await createPrd(db, { projectId, workspaceId, title: "linked PRD" });
+      const prd = await createPrd(db, { projectId, title: "linked PRD" });
+      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+      await activatePrd(db, prd.id, workspaceId);
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
       await removeCommand.run({ args: { workspaceId, force: true } });
@@ -767,34 +754,67 @@ describe("CLI commands", () => {
     });
   });
 
-  describe("prd archive command", () => {
-    it("archives a committed PRD", async () => {
-      const { prdCommand } = await import("#/cli/commands/prd");
-      const archiveCommand = await getSubCommand(prdCommand, "archive");
+  describe("prd lifecycle commands", () => {
+    it("prd ready marks a draft PRD as ready", async () => {
+      const { prdCommand } = await import("#/modules/prds/command");
+      const readyCommand = await getSubCommand(prdCommand, "ready");
 
-      const prd = await createPrd(db, { projectId, workspaceId, title: "To Archive" });
-      await commitPrd(db, prd.id);
+      const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
-      await archiveCommand.run({ args: { prdId: prd.id } });
+      await readyCommand.run({ args: { prdId: prd.id } });
       output.mockRestore();
 
       const { getPrd } = await import("#/lib/workflow");
       const updated = await getPrd(db, prd.id);
-      expect(updated!.status).toBe("archived");
+      expect(updated!.status).toBe("ready");
     });
 
-    it("prd archive errors on non-existent PRD", async () => {
-      const { prdCommand } = await import("#/cli/commands/prd");
-      const archiveCommand = await getSubCommand(prdCommand, "archive");
+    it("prd done marks an in_progress PRD as done", async () => {
+      const { prdCommand } = await import("#/modules/prds/command");
+      const doneCommand = await getSubCommand(prdCommand, "done");
 
-      const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
+      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+      await activatePrd(db, prd.id, workspaceId);
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await doneCommand.run({ args: { prdId: prd.id } });
+      output.mockRestore();
+
+      const { getPrd } = await import("#/lib/workflow");
+      const updated = await getPrd(db, prd.id);
+      expect(updated!.status).toBe("done");
+    });
+
+    it("prd cancel cancels a draft PRD", async () => {
+      const { prdCommand } = await import("#/modules/prds/command");
+      const cancelCommand = await getSubCommand(prdCommand, "cancel");
+
+      const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await cancelCommand.run({ args: { prdId: prd.id } });
+      output.mockRestore();
+
+      const { getPrd } = await import("#/lib/workflow");
+      const updated = await getPrd(db, prd.id);
+      expect(updated!.status).toBe("canceled");
+    });
+
+    it("prd ready errors for unknown PRD", async () => {
+      const { prdCommand } = await import("#/modules/prds/command");
+      const readyCommand = await getSubCommand(prdCommand, "ready");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as never);
 
-      await expect(
-        archiveCommand.run({ args: { prdId: "nonexistent" } }),
-      ).rejects.toThrow("process.exit:1");
+      await expect(readyCommand.run({ args: { prdId: "NONEXISTENT" } })).rejects.toThrow(
+        "process.exit:1",
+      );
 
       exit.mockRestore();
     });

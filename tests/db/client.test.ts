@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { applyMigrations, openDatabaseWith, resolveMigrationsFolder, type Database } from "#/db/client";
+import {
+  applyMigrations,
+  openDatabaseWith,
+  resolveMigrationsFolder,
+  type Database,
+} from "#/db/client";
 
 type TestMigrationRunner = (db: Database, config: { migrationsFolder: string }) => void;
 type TestDatabaseClient = {
@@ -43,7 +48,9 @@ describe("db client", () => {
     const distDir = createTempDir();
     createMigrationLayout(distDir);
 
-    expect(() => resolveMigrationsFolder(distDir)).toThrow(/Could not find Drizzle migrations folder/);
+    expect(() => resolveMigrationsFolder(distDir)).toThrow(
+      /Could not find Drizzle migrations folder/,
+    );
   });
 
   it("retries retryable migration failures once the competing process finishes", () => {
@@ -114,7 +121,7 @@ describe("db client", () => {
     const result = openDatabaseWith(":memory:", {
       baseDir: distDir,
       databaseFactory,
-      createDbFn: () => ({} as Database),
+      createDbFn: () => ({}) as Database,
       migrateFn: () => {},
       maxAttempts: 2,
       retryDelayMs: 0,
@@ -139,7 +146,7 @@ describe("db client", () => {
             closeCount += 1;
           },
         }),
-        createDbFn: () => ({} as Database),
+        createDbFn: () => ({}) as Database,
         migrateFn: () => {
           throw new Error("syntax error near unexpected token");
         },

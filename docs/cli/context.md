@@ -63,7 +63,7 @@ A targeted PRD must be in `committed` or `in_progress` status and must belong to
 
 If multiple `in_progress` PRDs exist in the same workspace, the command fails with a clear conflict list.
 
-`depot context dev` is a resume-oriented summary, not the complete task spec. Dev agents must run `depot task show <task-id>` before starting a task and again before resuming after an interruption or handoff.
+`depot context dev` is a resume-oriented summary, not the complete task spec. Dev agents must run `depot task show <task-id>` before starting a task and again before resuming after an interruption.
 
 ---
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
 import { createProject, addWorkspace, listProjects } from "#/lib/workflow";
-import { resolveOrCreateWorkspaceForPath } from "#/lib/workspace-bootstrap";
+import { resolveOrCreateWorkspaceForPath } from "#/modules/workspaces/bootstrap";
 
 let db: Database;
 

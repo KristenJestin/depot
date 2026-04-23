@@ -35,7 +35,7 @@ depot prd create --title <title> [--context <text>] [--scope <text>]
 ### Example
 
 ```bash
-depot prd create --title "Core foundation" --context "Need persistent agent state" --scope "Project, PRD, task, log, and handoff flow"
+depot prd create --title "Core foundation" --context "Need persistent agent state" --scope "Project, PRD, task, and log flow"
 ```
 
 ---

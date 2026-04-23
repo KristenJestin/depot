@@ -9,6 +9,8 @@
 - CLI entrypoint: `src/cli/index.ts`
 - Main product context lives in `docs/index.md` and `docs/concepts/index.md`
 - Current and planned work is tracked in `docs/roadmap.md`
+- Feature specs (PRDs) live in `.prds/` as numbered Markdown files
+- Distribution target: npm global install (`bun add -g depot`); Bun is required on the user's machine — no standalone binary, no self-contained bundle
 
 Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain language. Use `docs/roadmap.md` to understand implementation direction, but treat the current codebase as the source of truth for behavior.
 
@@ -20,6 +22,7 @@ Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain l
 - Run typecheck: `bun run typecheck`
 - Run lint: `bun run lint`
 - Run format check: `bun run fmt:check`
+- Fix formatting: `bun run fmt`
 - Run full checks: `bun run check`
 - Build: `bun run build`
 
@@ -33,6 +36,7 @@ Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain l
 - Prefer small, direct changes over broad refactors.
 - Reuse the existing `#/` import alias for source imports when appropriate.
 - Keep CLI behavior deterministic and terminal-friendly.
+- `src/types/text.d.ts` declares `*.md` module types required for `import ... with { type: "text" }` in `contexts.ts`. Do not delete it.
 
 ## Testing And Validation
 
@@ -41,6 +45,7 @@ Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain l
 - Before finishing a code change, run `bun run check` and `bun run build`.
 - If a change is documentation-only, heavy validation can be skipped.
 - Do not finish with failing tests, lint errors, type errors, or build errors unless the user explicitly accepts that state.
+- Do not modify `tests/lib/workflow.test.ts`; it is a fixed contract and must not be changed.
 
 ## Database And Migrations
 

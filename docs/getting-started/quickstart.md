@@ -50,7 +50,7 @@ bun run depot -- init my-project --description "Local agent workflow" --label "m
 ## Create a PRD
 
 ```bash
-bun run depot -- prd create --title "Core CLI foundation" --context "Need durable agent state" --scope "Initial project, PRD, task, log, and handoff flow"
+bun run depot -- prd create --title "Core CLI foundation" --context "Need durable agent state" --scope "Initial project, PRD, task, and log flow"
 ```
 
 ## Commit and activate the PRD
@@ -68,9 +68,9 @@ New tasks must use a structured description with `Intent:`, `Scope:`, and `Non-g
 ```bash
 bun run depot -- task add \
   --prd <prd-id> \
-  --title "Implement handoff output" \
-  --desc $'Intent:\nBuild a readable summary for the active workspace.\n\nScope:\n- Include active PRD and task progress.\n- Include recent activity.\n\nNon-goals:\n- Do not redesign the handoff format.' \
-  --criteria "Handoff includes active PRD\nHandoff includes task progress" \
+  --title "Implement context command" \
+  --desc $'Intent:\nBuild a readable summary for the active workspace.\n\nScope:\n- Include active PRD and task progress.\n- Include recent activity.\n\nNon-goals:\n- Do not redesign the context output format.' \
+  --criteria "Context includes active PRD\nContext includes task progress" \
   --effort m
 ```
 
@@ -83,33 +83,12 @@ bun run depot -- log add note --task <task-id> --payload '{"message":"Started im
 bun run depot -- task done <task-id>
 ```
 
-## Generate a handoff
-
-```bash
-bun run depot -- handoff
-```
-
-The handoff output is designed to be readable in the terminal and easy to paste into a fresh agent session.
-
 ## Render live agent context
 
 ```bash
 bun run depot -- context
 bun run depot -- context prd
 bun run depot -- context dev
-bun run depot -- context review
-```
-
-## Run a review
-
-```bash
-bun run depot -- review start
-bun run depot -- review activate <review-id>
-bun run depot -- context review
-bun run depot -- review findings <review-id> \
-  --findings '[{"title":"Missing validation","severity":"major","description":"Input X is not validated"}]'
-# Human only:
-bun run depot -- review decide <review-id> --decision approved
 ```
 
 ## Install slash commands for OpenCode or Claude Code
@@ -118,7 +97,7 @@ bun run depot -- review decide <review-id> --decision approved
 bun run depot -- install --all
 ```
 
-This writes `depot-prd`, `depot-dev`, and `depot-review` command files that call `depot context <mode>` through the `depot` binary available on your `PATH`.
+This writes `depot-prd` and `depot-dev` command files that call `depot context <mode>` through the `depot` binary available on your `PATH`.
 
 ## Inspect projects and workspaces
 

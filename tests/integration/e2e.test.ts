@@ -1,28 +1,28 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
+import { prds } from "#/db/schema";
 import {
   createProject,
   addWorkspace,
   resolveWorkspace,
   createPrd,
-  commitPrd,
   activatePrd,
-  amendPrd,
   createTask,
   startTask,
   completeTask,
   blockTask,
   skipTask,
   logActivity,
+  listActivity,
   listTasks,
   getPrd,
 } from "#/lib/workflow";
-import { buildHandoff } from "#/lib/handoff";
 
 /**
  * End-to-end integration test: simulates a complete agent workflow
- * from project init through PRD creation, task execution, and handoff.
+ * from project init through PRD creation and task execution.
  */
 describe("end-to-end workflow", () => {
   let db: Database;
@@ -55,19 +55,19 @@ describe("end-to-end workflow", () => {
     // 4. Agent creates a PRD
     const prd = await createPrd(db, {
       projectId: project.id,
-      workspaceId: ws.id,
       title: "Core Foundation",
       context: "Build the initial CLI foundation",
-      scope: "DB, workflow, handoff",
+      scope: "DB, workflow, CLI",
     });
     expect(prd.status).toBe("draft");
 
-    // 5. Agent commits the PRD
-    const committed = await commitPrd(db, prd.id);
-    expect(committed.status).toBe("committed");
+    // 5. Agent marks the PRD ready
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    const readyPrd = (await getPrd(db, prd.id))!;
+    expect(readyPrd.status).toBe("ready");
 
     // 6. Agent activates the PRD
-    const activated = await activatePrd(db, prd.id);
+    const activated = await activatePrd(db, prd.id, ws.id);
     expect(activated.status).toBe("in_progress");
 
     // 7. Agent creates tasks
@@ -88,9 +88,9 @@ describe("end-to-end workflow", () => {
     });
     const t3 = await createTask(db, {
       prdId: prd.id,
-      title: "Build handoff command",
-      description: "Structured plaintext output for agent recovery",
-      doneCriteria: "Handoff output matches spec format",
+      title: "Build context command",
+      description: "Structured plaintext output for agent resume",
+      doneCriteria: "Context output matches spec format",
       effort: "m",
       dependsOn: [t2.id],
     });
@@ -125,14 +125,10 @@ describe("end-to-end workflow", () => {
     // 10. Start task 2
     await startTask(db, t2.id);
 
-    // 11. Generate handoff mid-session
-    const handoff1 = await buildHandoff(db, ws.id);
-    expect(handoff1).toContain("=== DEPOT HANDOFF");
-    expect(handoff1).toContain("depot");
-    expect(handoff1).toContain("Core Foundation");
-    expect(handoff1).toContain("1/3 done");
-    expect(handoff1).toContain("Implement workflow engine"); // current task
-    expect(handoff1).toContain("## Current Task");
+    // 11. Check mid-session state
+    const midTasks = await listTasks(db, prd.id);
+    expect(midTasks.find((t) => t.id === t1.id)!.status).toBe("done");
+    expect(midTasks.find((t) => t.id === t2.id)!.status).toBe("in_progress");
 
     // 12. Complete task 2
     await completeTask(db, t2.id);
@@ -144,45 +140,7 @@ describe("end-to-end workflow", () => {
     // 14. All tasks done
     const finalTasks = await listTasks(db, prd.id);
     expect(finalTasks.every((t) => t.status === "done")).toBe(true);
-
-    // 15. Final handoff
-    const handoff2 = await buildHandoff(db, ws.id);
-    expect(handoff2).toContain("3/3 done");
-  });
-
-  it("handles PRD amend and revision flow", async () => {
-    const project = await createProject(db, { name: "my-project" });
-    const ws = await addWorkspace(db, {
-      projectId: project.id,
-      path: "/home/agent/my-project",
-    });
-
-    // Create and commit a PRD
-    const prd = await createPrd(db, {
-      projectId: project.id,
-      workspaceId: ws.id,
-      title: "Feature X v1",
-      context: "Original plan",
-    });
-    await commitPrd(db, prd.id);
-
-    // Amend creates a new revision
-    const v2 = await amendPrd(db, prd.id, {
-      title: "Feature X v2",
-      context: "Updated plan with new requirements",
-    });
-    expect(v2.revision).toBe(2);
-    expect(v2.parentId).toBe(prd.id);
-    expect(v2.status).toBe("draft");
-
-    // Original is archived
-    const original = await getPrd(db, prd.id);
-    expect(original!.status).toBe("archived");
-
-    // Can commit and activate the new revision
-    await commitPrd(db, v2.id);
-    const activated = await activatePrd(db, v2.id);
-    expect(activated.status).toBe("in_progress");
+    expect(finalTasks).toHaveLength(3);
   });
 
   it("handles task blocking and unblocking flow", async () => {
@@ -193,11 +151,10 @@ describe("end-to-end workflow", () => {
     });
     const prd = await createPrd(db, {
       projectId: project.id,
-      workspaceId: ws.id,
       title: "Feature Y",
     });
-    await commitPrd(db, prd.id);
-    await activatePrd(db, prd.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await activatePrd(db, prd.id, ws.id);
 
     const task = await createTask(db, {
       prdId: prd.id,
@@ -215,10 +172,6 @@ describe("end-to-end workflow", () => {
     // Skip the blocked task
     const skipped = await skipTask(db, task.id, "Decided to defer deployment");
     expect(skipped.status).toBe("skipped");
-
-    // Handoff should show the skipped task properly
-    const handoff = await buildHandoff(db, ws.id);
-    expect(handoff).toContain("DEPOT HANDOFF");
   });
 
   it("handles multiple workspaces for the same project", async () => {
@@ -237,29 +190,27 @@ describe("end-to-end workflow", () => {
     // Each workspace gets its own PRD
     const prd1 = await createPrd(db, {
       projectId: project.id,
-      workspaceId: ws1.id,
       title: "Backend refactor",
     });
     const prd2 = await createPrd(db, {
       projectId: project.id,
-      workspaceId: ws2.id,
       title: "New feature",
     });
 
-    await commitPrd(db, prd1.id);
-    await activatePrd(db, prd1.id);
-    await commitPrd(db, prd2.id);
-    await activatePrd(db, prd2.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
+    const activated1 = await activatePrd(db, prd1.id, ws1.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    const activated2 = await activatePrd(db, prd2.id, ws2.id);
 
-    // Handoff for ws1 shows prd1
-    const h1 = await buildHandoff(db, ws1.id);
-    expect(h1).toContain("Backend refactor");
-    expect(h1).not.toContain("New feature");
+    // Each workspace has its own isolated active PRD
+    expect(activated1.workspaceId).toBe(ws1.id);
+    expect(activated2.workspaceId).toBe(ws2.id);
 
-    // Handoff for ws2 shows prd2
-    const h2 = await buildHandoff(db, ws2.id);
-    expect(h2).toContain("New feature");
-    expect(h2).not.toContain("Backend refactor");
+    // Each workspace has its own active PRD
+    const ws1Tasks = await listTasks(db, prd1.id);
+    const ws2Tasks = await listTasks(db, prd2.id);
+    expect(ws1Tasks).toHaveLength(0);
+    expect(ws2Tasks).toHaveLength(0);
   });
 
   it("keeps recent activity ordered from oldest to newest within the latest window", async () => {
@@ -278,11 +229,20 @@ describe("end-to-end workflow", () => {
       });
     }
 
-    const handoff = await buildHandoff(db, ws.id);
-    expect(handoff).toContain("Note 2");
-    expect(handoff).toContain("Note 11");
-    expect(handoff).not.toMatch(/\bNote 1\b/);
-    expect(handoff.indexOf("Note 2")).toBeLessThan(handoff.indexOf("Note 11"));
+    // Verify that only the last 10 entries are returned and in order
+    const activity = await listActivity(db, {
+      projectId: project.id,
+      workspaceId: ws.id,
+      limit: 10,
+    });
+    expect(activity).toHaveLength(10);
+    // Notes 2–11 should be present, Note 0 and 1 should not
+    const messages = activity.map((a) => (JSON.parse(a.payload) as { message: string }).message);
+    expect(messages).not.toContain("Note 0");
+    expect(messages).not.toContain("Note 1");
+    expect(messages).toContain("Note 2");
+    expect(messages).toContain("Note 11");
+    expect(messages.indexOf("Note 2")).toBeLessThan(messages.indexOf("Note 11"));
   });
 
   it("rejects a second active PRD in the same workspace", async () => {
@@ -294,19 +254,19 @@ describe("end-to-end workflow", () => {
 
     const prd1 = await createPrd(db, {
       projectId: project.id,
-      workspaceId: ws.id,
       title: "First PRD",
     });
     const prd2 = await createPrd(db, {
       projectId: project.id,
-      workspaceId: ws.id,
       title: "Second PRD",
     });
 
-    await commitPrd(db, prd1.id);
-    await commitPrd(db, prd2.id);
-    await activatePrd(db, prd1.id);
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    await activatePrd(db, prd1.id, ws.id);
 
-    await expect(activatePrd(db, prd2.id)).rejects.toThrow(/workspace already has active prd/i);
+    await expect(activatePrd(db, prd2.id, ws.id)).rejects.toThrow(
+      /workspace already has active prd/i,
+    );
   });
 });

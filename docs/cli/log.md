@@ -14,11 +14,7 @@ Current supported event types are:
 - `prd_committed`
 - `prd_activated`
 - `prd_amended`
-- `review_started`
-- `review_findings_recorded`
-- `review_decision_recorded`
 - `note`
-- `handoff`
 - `error`
 
 ---
@@ -44,8 +40,7 @@ depot log add <event-type> [--task <task-id>] [--prd <prd-id>] [--payload <json>
 
 ```bash
 depot log add note --payload '{"message":"Session started"}'
-depot log add task_started --task <task-id> --payload '{"title":"Implement handoff"}'
-depot log add handoff --payload '{"next":"Review the active PRD","context":"Handoff after task 3"}'
+depot log add task_started --task <task-id> --payload '{"title":"Implement CLI command"}'
 depot log add error --payload '{"message":"Workspace resolution failed"}'
 ```
 

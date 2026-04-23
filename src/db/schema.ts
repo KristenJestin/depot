@@ -1,149 +1,156 @@
 import { defineRelations } from "drizzle-orm";
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
-  VALID_PROJECT_STATUSES,
+  VALID_EFFORTS,
   VALID_PRD_STATUSES,
+  VALID_PROJECT_STATUSES,
   VALID_TASK_DESCRIPTION_FORMATS,
   VALID_TASK_STATUSES,
-  VALID_EFFORTS,
-  VALID_REVIEW_STATUSES,
-  VALID_REVIEW_MODES,
-  VALID_REVIEW_DECISIONS,
-} from "#/lib/validator";
+} from "#/shared/validator";
+import { generateId } from "#/shared/utils";
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 
 export const projects = sqliteTable("projects", {
-  id: text("id").primaryKey(), // ULID
-  name: text("name").notNull(),
-  description: text("description"),
-  status: text("status", { enum: VALID_PROJECT_STATUSES })
+  id: text().primaryKey(),
+  name: text().notNull(),
+  description: text(),
+  status: text({ enum: VALID_PROJECT_STATUSES }).notNull().default("active"),
+  createdAt: integer({ mode: "timestamp_ms" })
     .notNull()
-    .default("active"),
-  createdAt: text("created_at")
+    .$defaultFn(() => new Date()),
+  updatedAt: integer({ mode: "timestamp_ms" })
     .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-  updatedAt: text("updated_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
+    .$defaultFn(() => new Date())
+    .$onUpdateFn(() => new Date()),
 });
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
 
-export const workspaces = sqliteTable("workspaces", {
-  id: text("id").primaryKey(), // ULID
-  projectId: text("project_id")
-    .notNull()
-    .references(() => projects.id),
-  path: text("path").notNull().unique(), // canonical absolute path
-  label: text("label"), // optional human label
-  createdAt: text("created_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-  updatedAt: text("updated_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-});
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text().primaryKey(),
+    projectId: text()
+      .notNull()
+      .references(() => projects.id),
+    path: text().notNull().unique(), // canonical absolute path
+    label: text(), // optional human label
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [index("workspaces_project_id_idx").on(table.projectId)],
+);
 
 // ── PRDs ──────────────────────────────────────────────────────────────────────
 
-export const prds = sqliteTable("prds", {
-  id: text("id").primaryKey(), // ULID
-  projectId: text("project_id")
-    .notNull()
-    .references(() => projects.id),
-  workspaceId: text("workspace_id")
-    .notNull()
-    .references(() => workspaces.id),
-  parentId: text("parent_id"), // set when created via `prd amend`
-  revision: integer("revision").notNull().default(1),
-  title: text("title").notNull(),
-  context: text("context"), // why this PRD exists
-  scope: text("scope"), // what is included and excluded
-  status: text("status", { enum: VALID_PRD_STATUSES })
-    .notNull()
-    .default("draft"),
-  createdAt: text("created_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-  committedAt: text("committed_at"),
-  activatedAt: text("activated_at"),
-});
+export const prds = sqliteTable(
+  "prds",
+  {
+    id: text().primaryKey(),
+    projectId: text()
+      .notNull()
+      .references(() => projects.id),
+    workspaceId: text().references(() => workspaces.id), // set at activation, null until then
+    parentId: text().references((): AnySQLiteColumn => prds.id), // set when created via `prd fork`
+    revision: integer().notNull().default(1),
+    title: text().notNull(),
+    context: text(), // why this PRD exists
+    scope: text(), // what is included and excluded
+    status: text({ enum: VALID_PRD_STATUSES }).notNull().default("draft"),
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdateFn(() => new Date()),
+    readyAt: integer({ mode: "timestamp_ms" }),
+    activatedAt: integer({ mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("prds_project_id_idx").on(table.projectId),
+    index("prds_workspace_id_idx").on(table.workspaceId),
+    index("prds_parent_id_idx").on(table.parentId),
+  ],
+);
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
-export const tasks = sqliteTable("tasks", {
-  id: text("id").primaryKey(), // ULID
-  prdId: text("prd_id")
-    .notNull()
-    .references(() => prds.id),
-  position: integer("position").notNull(),
-  title: text("title").notNull(),
-  description: text("description").notNull(),
-  descriptionFormat: text("description_format", { enum: VALID_TASK_DESCRIPTION_FORMATS })
-    .notNull()
-    .default("legacy"),
-  doneCriteria: text("done_criteria").notNull(), // textual, non-empty
-  dependsOn: text("depends_on").notNull().default("[]"), // JSON array of task ids
-  effort: text("effort", { enum: VALID_EFFORTS }).notNull(),
-  status: text("status", { enum: VALID_TASK_STATUSES })
-    .notNull()
-    .default("pending"),
-  blockedReason: text("blocked_reason"), // required when status = blocked
-  skipReason: text("skip_reason"), // required when status = skipped
-  createdAt: text("created_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-  startedAt: text("started_at"),
-  completedAt: text("completed_at"),
-});
-
-// ── Reviews ───────────────────────────────────────────────────────────────────
-
-export const reviews = sqliteTable("reviews", {
-  id: text("id").primaryKey(), // ULID
-  prdId: text("prd_id")
-    .notNull()
-    .references(() => prds.id),
-  prdRevision: integer("prd_revision").notNull(),
-  status: text("status", { enum: VALID_REVIEW_STATUSES })
-    .notNull()
-    .default("pending"),
-  mode: text("mode", { enum: VALID_REVIEW_MODES }).notNull(),
-  userFeedback: text("user_feedback"), // optional free-text from user (assisted mode)
-  findings: text("findings").notNull().default("[]"), // JSON array of finding objects
-  questions: text("questions").notNull().default("[]"), // JSON array of questions asked
-  followupTasks: text("followup_tasks").notNull().default("[]"), // JSON array of suggested follow-up tasks
-  decision: text("decision", { enum: VALID_REVIEW_DECISIONS }),
-  decisionNote: text("decision_note"),
-  createdAt: text("created_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-  completedAt: text("completed_at"),
-});
+export const tasks = sqliteTable(
+  "tasks",
+  {
+    id: text().primaryKey(),
+    prdId: text()
+      .notNull()
+      .references(() => prds.id),
+    position: integer().notNull(),
+    title: text().notNull(),
+    description: text().notNull(),
+    descriptionFormat: text({ enum: VALID_TASK_DESCRIPTION_FORMATS })
+      .notNull()
+      .default("structured_v1"),
+    doneCriteria: text().notNull(), // textual, non-empty
+    dependsOn: text().notNull().default("[]"), // JSON array of task ids
+    effort: text({ enum: VALID_EFFORTS }).notNull(),
+    status: text({ enum: VALID_TASK_STATUSES }).notNull().default("pending"),
+    blockedReason: text(), // required when status = blocked
+    skipReason: text(), // required when status = skipped
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    startedAt: integer({ mode: "timestamp_ms" }),
+    completedAt: integer({ mode: "timestamp_ms" }),
+  },
+  (table) => [index("tasks_prd_id_idx").on(table.prdId)],
+);
 
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
-export const activityLog = sqliteTable("activity_log", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  projectId: text("project_id")
-    .notNull()
-    .references(() => projects.id),
-  workspaceId: text("workspace_id").references(() => workspaces.id),
-  prdId: text("prd_id").references(() => prds.id),
-  taskId: text("task_id").references(() => tasks.id),
-  reviewId: text("review_id").references(() => reviews.id),
-  eventType: text("event_type").notNull(),
-  payload: text("payload").notNull().default("{}"), // JSON
-  createdAt: text("created_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-});
+export const activityLog = sqliteTable(
+  "activity_log",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => generateId()),
+    projectId: text()
+      .notNull()
+      .references(() => projects.id),
+    workspaceId: text().references(() => workspaces.id),
+    prdId: text().references(() => prds.id),
+    taskId: text().references(() => tasks.id),
+    eventType: text().notNull(),
+    payload: text().notNull().default("{}"), // JSON
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("activity_log_project_id_idx").on(table.projectId),
+    index("activity_log_workspace_id_idx").on(table.workspaceId),
+    index("activity_log_prd_id_idx").on(table.prdId),
+    index("activity_log_task_id_idx").on(table.taskId),
+  ],
+);
+
+// ── Row types ─────────────────────────────────────────────────────────────────
+
+export type ProjectRow = typeof projects.$inferSelect;
+export type WorkspaceRow = typeof workspaces.$inferSelect;
+export type PrdRow = typeof prds.$inferSelect;
+export type TaskRow = typeof tasks.$inferSelect;
+export type ActivityRow = typeof activityLog.$inferSelect;
 
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const relations = defineRelations(
-  { projects, workspaces, prds, tasks, reviews, activityLog },
+  { projects, workspaces, prds, tasks, activityLog },
   (r) => ({
     projects: {
       workspaces: r.many.workspaces({
@@ -191,10 +198,6 @@ export const relations = defineRelations(
         from: r.prds.id,
         to: r.tasks.prdId,
       }),
-      reviews: r.many.reviews({
-        from: r.prds.id,
-        to: r.reviews.prdId,
-      }),
       activityLogs: r.many.activityLog({
         from: r.prds.id,
         to: r.activityLog.prdId,
@@ -208,16 +211,6 @@ export const relations = defineRelations(
       activityLogs: r.many.activityLog({
         from: r.tasks.id,
         to: r.activityLog.taskId,
-      }),
-    },
-    reviews: {
-      prd: r.one.prds({
-        from: r.reviews.prdId,
-        to: r.prds.id,
-      }),
-      activityLogs: r.many.activityLog({
-        from: r.reviews.id,
-        to: r.activityLog.reviewId,
       }),
     },
     activityLog: {
@@ -236,10 +229,6 @@ export const relations = defineRelations(
       task: r.one.tasks({
         from: r.activityLog.taskId,
         to: r.tasks.id,
-      }),
-      review: r.one.reviews({
-        from: r.activityLog.reviewId,
-        to: r.reviews.id,
       }),
     },
   }),

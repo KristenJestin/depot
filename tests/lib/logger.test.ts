@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { setDebug, isDebug, log } from "#/lib/logger";
+import { setDebug, isDebug, log } from "#/shared/logger";
 
 describe("logger", () => {
   beforeEach(() => {
