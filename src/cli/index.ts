@@ -1,13 +1,14 @@
 import { runMain } from "citty";
 import { Schema } from "effect";
-import { initCommand, projectCommand } from "#/modules/projects/command";
-import { prdCommand } from "#/modules/prds/command";
-import { taskCommand } from "#/modules/tasks/command";
-import { logCommand } from "#/modules/activity/command";
-import { contextCommand } from "#/modules/context/command";
-import { installCommand } from "#/modules/install/command";
-import { workspaceCommand } from "#/modules/workspaces/command";
-import { reviewCommand } from "#/modules/reviews/command";
+import { initCommand, projectCommand } from "./commands/projects";
+import { prdCommand } from "./commands/prds";
+import { taskCommand } from "./commands/tasks";
+import { logCommand } from "./commands/activity";
+import { contextCommand } from "./commands/context";
+import { installCommand } from "./commands/install";
+import { workspaceCommand } from "./commands/workspaces";
+import { reviewCommand } from "./commands/reviews";
+import { serveCommand } from "./commands/serve";
 import { command } from "#/cli/command";
 import { setDebug, setJsonMode } from "#/shared/logger";
 import pkg from "../../package.json";
@@ -50,6 +51,7 @@ const main = command({
     context: contextCommand,
     install: installCommand,
     review: reviewCommand,
+    serve: serveCommand,
   },
 });
 

@@ -102,7 +102,7 @@ describe("CLI commands", () => {
   });
 
   it("task add requires full PRD IDs and full dependency IDs", async () => {
-    const { taskCommand } = await import("#/modules/tasks/command");
+    const { taskCommand } = await import("#/cli/commands/tasks");
     const addCommand = await getSubCommand(taskCommand, "add");
 
     const prd = await createPrd(db, {
@@ -147,7 +147,7 @@ describe("CLI commands", () => {
   });
 
   it("task add stores structured task descriptions explicitly", async () => {
-    const { taskCommand } = await import("#/modules/tasks/command");
+    const { taskCommand } = await import("#/cli/commands/tasks");
     const addCommand = await getSubCommand(taskCommand, "add");
 
     const prd = await createPrd(db, {
@@ -181,7 +181,7 @@ describe("CLI commands", () => {
   });
 
   it("task list requires full PRD IDs", async () => {
-    const { taskCommand } = await import("#/modules/tasks/command");
+    const { taskCommand } = await import("#/cli/commands/tasks");
     const listCommand = await getSubCommand(taskCommand, "list");
 
     const prd = await createPrd(db, {
@@ -212,7 +212,7 @@ describe("CLI commands", () => {
   });
 
   it("task list prints full task IDs", async () => {
-    const { taskCommand } = await import("#/modules/tasks/command");
+    const { taskCommand } = await import("#/cli/commands/tasks");
     const listCommand = await getSubCommand(taskCommand, "list");
 
     const prd = await createPrd(db, {
@@ -254,7 +254,7 @@ describe("CLI commands", () => {
   });
 
   it("log add requires full PRD and task IDs", async () => {
-    const { logCommand } = await import("#/modules/activity/command");
+    const { logCommand } = await import("#/cli/commands/activity");
     const addCommand = await getSubCommand(logCommand, "add");
 
     const prd = await createPrd(db, {
@@ -289,7 +289,7 @@ describe("CLI commands", () => {
   });
 
   it("log add accepts PowerShell-mangled payload objects", async () => {
-    const { logCommand } = await import("#/modules/activity/command");
+    const { logCommand } = await import("#/cli/commands/activity");
     const addCommand = await getSubCommand(logCommand, "add");
 
     const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -309,7 +309,7 @@ describe("CLI commands", () => {
   });
 
   it("task show renders structured task descriptions section by section", async () => {
-    const { taskCommand } = await import("#/modules/tasks/command");
+    const { taskCommand } = await import("#/cli/commands/tasks");
     const showCommand = await getSubCommand(taskCommand, "show");
 
     const prd = await createPrd(db, {
@@ -349,7 +349,7 @@ describe("CLI commands", () => {
   });
 
   it("context mode renders only the requested mode", async () => {
-    const { contextCommand } = await import("#/modules/context/command");
+    const { contextCommand } = await import("#/cli/commands/context");
     const prd = await createPrd(db, {
       projectId,
       title: "CLI PRD",
@@ -380,7 +380,7 @@ describe("CLI commands", () => {
     });
 
     it("prd list emits a success envelope with items array", async () => {
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const listCommand = await getSubCommand(prdCommand, "list");
 
       await createPrd(db, { projectId, title: "PRD Alpha" });
@@ -398,7 +398,7 @@ describe("CLI commands", () => {
     });
 
     it("prd create emits a success envelope with item", async () => {
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const createCommand = await getSubCommand(prdCommand, "create");
 
       const output = await captureStdout(async () => {
@@ -414,7 +414,7 @@ describe("CLI commands", () => {
     });
 
     it("prd show emits not_found error envelope for missing PRD", async () => {
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const showCommand = await getSubCommand(prdCommand, "show");
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
@@ -437,7 +437,7 @@ describe("CLI commands", () => {
     });
 
     it("task list emits success envelope with items and parsed dependsOn arrays", async () => {
-      const { taskCommand } = await import("#/modules/tasks/command");
+      const { taskCommand } = await import("#/cli/commands/tasks");
       const listCmd = await getSubCommand(taskCommand, "list");
 
       const prd = await createPrd(db, { projectId, title: "JSON PRD" });
@@ -476,7 +476,7 @@ describe("CLI commands", () => {
     });
 
     it("task add emits success envelope with the created task", async () => {
-      const { taskCommand } = await import("#/modules/tasks/command");
+      const { taskCommand } = await import("#/cli/commands/tasks");
       const addCmd = await getSubCommand(taskCommand, "add");
 
       const prd = await createPrd(db, { projectId, title: "JSON PRD" });
@@ -505,7 +505,7 @@ describe("CLI commands", () => {
     });
 
     it("log list emits success envelope with parsed payload objects", async () => {
-      const { logCommand } = await import("#/modules/activity/command");
+      const { logCommand } = await import("#/cli/commands/activity");
       const addCmd = await getSubCommand(logCommand, "add");
       const listCmd = await getSubCommand(logCommand, "list");
 
@@ -533,7 +533,7 @@ describe("CLI commands", () => {
     });
 
     it("stdout stays pure JSON with no extra text in JSON mode", async () => {
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const listCommand = await getSubCommand(prdCommand, "list");
 
       const output = await captureStdout(async () => {
@@ -548,7 +548,7 @@ describe("CLI commands", () => {
     });
 
     it("context command emits unsupported error in JSON mode", async () => {
-      const { contextCommand } = await import("#/modules/context/command");
+      const { contextCommand } = await import("#/cli/commands/context");
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
         code?: string | number | null,
@@ -576,7 +576,7 @@ describe("CLI commands", () => {
 
   describe("project commands", () => {
     it("project show displays project details", async () => {
-      const { projectCommand } = await import("#/modules/projects/command");
+      const { projectCommand } = await import("#/cli/commands/projects");
       const showCommand = await getSubCommand(projectCommand, "show");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -589,7 +589,7 @@ describe("CLI commands", () => {
     });
 
     it("project show errors on unknown id", async () => {
-      const { projectCommand } = await import("#/modules/projects/command");
+      const { projectCommand } = await import("#/cli/commands/projects");
       const showCommand = await getSubCommand(projectCommand, "show");
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
@@ -606,7 +606,7 @@ describe("CLI commands", () => {
     });
 
     it("project update changes the project name", async () => {
-      const { projectCommand } = await import("#/modules/projects/command");
+      const { projectCommand } = await import("#/cli/commands/projects");
       const updateCommand = await getSubCommand(projectCommand, "update");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -618,7 +618,7 @@ describe("CLI commands", () => {
     });
 
     it("project update errors when no changes provided", async () => {
-      const { projectCommand } = await import("#/modules/projects/command");
+      const { projectCommand } = await import("#/cli/commands/projects");
       const updateCommand = await getSubCommand(projectCommand, "update");
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
@@ -633,7 +633,7 @@ describe("CLI commands", () => {
     });
 
     it("project archive sets status to done", async () => {
-      const { projectCommand } = await import("#/modules/projects/command");
+      const { projectCommand } = await import("#/cli/commands/projects");
       const archiveCommand = await getSubCommand(projectCommand, "archive");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -645,7 +645,7 @@ describe("CLI commands", () => {
     });
 
     it("project archive errors if already done", async () => {
-      const { projectCommand } = await import("#/modules/projects/command");
+      const { projectCommand } = await import("#/cli/commands/projects");
       const archiveCommand = await getSubCommand(projectCommand, "archive");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -666,7 +666,7 @@ describe("CLI commands", () => {
 
   describe("workspace commands", () => {
     it("workspace list shows all workspaces", async () => {
-      const { workspaceCommand } = await import("#/modules/workspaces/command");
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
       const listCommand = await getSubCommand(workspaceCommand, "list");
 
       const lines: string[] = [];
@@ -679,7 +679,7 @@ describe("CLI commands", () => {
     });
 
     it("workspace show displays workspace details", async () => {
-      const { workspaceCommand } = await import("#/modules/workspaces/command");
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
       const showCommand = await getSubCommand(workspaceCommand, "show");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -691,7 +691,7 @@ describe("CLI commands", () => {
     });
 
     it("workspace show errors on unknown id", async () => {
-      const { workspaceCommand } = await import("#/modules/workspaces/command");
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
       const showCommand = await getSubCommand(workspaceCommand, "show");
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
@@ -708,7 +708,7 @@ describe("CLI commands", () => {
     });
 
     it("workspace rename updates the label", async () => {
-      const { workspaceCommand } = await import("#/modules/workspaces/command");
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
       const renameCommand = await getSubCommand(workspaceCommand, "rename");
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -720,7 +720,7 @@ describe("CLI commands", () => {
     });
 
     it("workspace remove fails when PRDs are linked", async () => {
-      const { workspaceCommand } = await import("#/modules/workspaces/command");
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
       const removeCommand = await getSubCommand(workspaceCommand, "remove");
 
       const prd = await createPrd(db, { projectId, title: "linked PRD" });
@@ -741,7 +741,7 @@ describe("CLI commands", () => {
     });
 
     it("workspace remove --force cascades linked data", async () => {
-      const { workspaceCommand } = await import("#/modules/workspaces/command");
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
       const removeCommand = await getSubCommand(workspaceCommand, "remove");
 
       const prd = await createPrd(db, { projectId, title: "linked PRD" });
@@ -759,7 +759,7 @@ describe("CLI commands", () => {
 
   describe("prd lifecycle commands", () => {
     it("prd ready marks a draft PRD as ready", async () => {
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const readyCommand = await getSubCommand(prdCommand, "ready");
 
       const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
@@ -774,7 +774,7 @@ describe("CLI commands", () => {
     });
 
     it("prd done marks an in_progress PRD as done", async () => {
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const doneCommand = await getSubCommand(prdCommand, "done");
 
       const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
@@ -791,7 +791,7 @@ describe("CLI commands", () => {
     });
 
     it("prd cancel cancels a draft PRD", async () => {
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const cancelCommand = await getSubCommand(prdCommand, "cancel");
 
       const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
@@ -806,7 +806,7 @@ describe("CLI commands", () => {
     });
 
     it("prd ready errors for unknown PRD", async () => {
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const readyCommand = await getSubCommand(prdCommand, "ready");
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
@@ -842,7 +842,7 @@ describe("CLI commands", () => {
 
     it("loads a PRD with tasks from a file (draft)", async () => {
       setJsonMode(true);
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const loadCommand = await getSubCommand(prdCommand, "load");
 
       const payload = {
@@ -884,7 +884,7 @@ describe("CLI commands", () => {
 
     it("loads a PRD and marks it ready when ready:true", async () => {
       setJsonMode(true);
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const loadCommand = await getSubCommand(prdCommand, "load");
 
       const payload = {
@@ -907,7 +907,7 @@ describe("CLI commands", () => {
 
     it("rejects invalid JSON", async () => {
       setJsonMode(true);
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const loadCommand = await getSubCommand(prdCommand, "load");
 
       writeFileSync(tmpFile, "not json {{");
@@ -932,7 +932,7 @@ describe("CLI commands", () => {
 
     it("rejects out-of-bound dependsOn index", async () => {
       setJsonMode(true);
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const loadCommand = await getSubCommand(prdCommand, "load");
 
       const payload = {
@@ -964,7 +964,7 @@ describe("CLI commands", () => {
 
     it("rejects forward reference in dependsOn", async () => {
       setJsonMode(true);
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const loadCommand = await getSubCommand(prdCommand, "load");
 
       const payload = {
@@ -997,7 +997,7 @@ describe("CLI commands", () => {
 
     it("rejects PRD with no tasks", async () => {
       setJsonMode(true);
-      const { prdCommand } = await import("#/modules/prds/command");
+      const { prdCommand } = await import("#/cli/commands/prds");
       const loadCommand = await getSubCommand(prdCommand, "load");
 
       const payload = { title: "Empty PRD", ready: false, tasks: [] };

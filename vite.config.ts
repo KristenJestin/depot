@@ -1,6 +1,10 @@
 import { defineConfig } from "vite-plus";
 import path from "node:path";
 import { cpSync } from "node:fs";
+import devServer from "@hono/vite-dev-server";
+import nodeAdapter from "@hono/vite-dev-server/node";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 function rawMdPlugin() {
   return {
@@ -16,7 +20,19 @@ function rawMdPlugin() {
 }
 
 export default defineConfig({
-  plugins: [rawMdPlugin()],
+  root: path.resolve(import.meta.dirname, "src/web"),
+
+  plugins: [
+    tailwindcss(),
+    react(),
+    devServer({ entry: "api.ts", adapter: nodeAdapter }),
+    rawMdPlugin(),
+  ],
+
+  build: {
+    outDir: path.resolve(import.meta.dirname, "dist/web"),
+    emptyOutDir: true,
+  },
 
   resolve: {
     alias: {
@@ -29,6 +45,8 @@ export default defineConfig({
     environment: "node",
     env: { NO_COLOR: "1" },
     testTimeout: 10000,
+    root: path.resolve(import.meta.dirname),
+    include: ["tests/**/*.test.ts"],
   },
 
   lint: {

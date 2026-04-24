@@ -8,6 +8,8 @@
     "skipLibCheck": true,
     "outDir": "dist",
     "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "paths": {
       "#/*": ["./src/*"]
