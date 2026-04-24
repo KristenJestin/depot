@@ -1,0 +1,1082 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live Session — depot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-sans: "Geist", sans-serif;
+        --font-mono: "Geist Mono", monospace;
+        --color-background: var(--background);
+        --color-foreground: var(--foreground);
+        --color-card: var(--card);
+        --color-card-foreground: var(--card-foreground);
+        --color-popover: var(--popover);
+        --color-popover-foreground: var(--popover-foreground);
+        --color-primary: var(--primary);
+        --color-primary-foreground: var(--primary-foreground);
+        --color-secondary: var(--secondary);
+        --color-secondary-foreground: var(--secondary-foreground);
+        --color-muted: var(--muted);
+        --color-muted-foreground: var(--muted-foreground);
+        --color-accent: var(--accent);
+        --color-accent-foreground: var(--accent-foreground);
+        --color-destructive: var(--destructive);
+        --color-border: var(--border);
+        --color-input: var(--input);
+        --color-ring: var(--ring);
+        --color-chart-1: var(--chart-1);
+        --color-chart-2: var(--chart-2);
+        --color-chart-3: var(--chart-3);
+        --color-chart-4: var(--chart-4);
+        --color-chart-5: var(--chart-5);
+        --color-sidebar: var(--sidebar);
+        --color-sidebar-foreground: var(--sidebar-foreground);
+        --color-sidebar-primary: var(--sidebar-primary);
+        --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+        --color-sidebar-accent: var(--sidebar-accent);
+        --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+        --color-sidebar-border: var(--sidebar-border);
+        --color-sidebar-ring: var(--sidebar-ring);
+        --radius-sm: calc(var(--radius) - 4px);
+        --radius-md: calc(var(--radius) - 2px);
+        --radius-lg: var(--radius);
+        --radius-xl: calc(var(--radius) + 4px);
+      }
+
+      :root {
+        --radius: 0.5rem;
+        --background: oklch(0.14 0.004 260);
+        --card: oklch(0.18 0.004 260);
+        --muted: oklch(0.2 0.004 260);
+        --secondary: oklch(0.22 0.008 260);
+        --accent: oklch(0.24 0.008 260);
+        --input: oklch(0.26 0.008 260);
+        --border: oklch(0.24 0.004 260);
+        --foreground: oklch(0.93 0.005 260);
+        --card-foreground: oklch(0.93 0.005 260);
+        --secondary-foreground: oklch(0.85 0.008 260);
+        --muted-foreground: oklch(0.55 0.01 260);
+        --accent-foreground: oklch(0.93 0.005 260);
+        --popover: oklch(0.18 0.004 260);
+        --popover-foreground: oklch(0.93 0.005 260);
+        --primary: oklch(0.65 0.27 288);
+        --primary-foreground: oklch(0.98 0 0);
+        --ring: oklch(0.65 0.27 288);
+        --destructive: oklch(0.55 0.22 25);
+        --chart-1: oklch(0.65 0.27 288);
+        --chart-2: oklch(0.68 0.16 165);
+        --chart-3: oklch(0.72 0.17 75);
+        --chart-4: oklch(0.65 0.18 330);
+        --chart-5: oklch(0.7 0.16 145);
+        --sidebar: oklch(0.11 0.004 260);
+        --sidebar-foreground: oklch(0.6 0.008 260);
+        --sidebar-accent: oklch(0.17 0.008 260);
+        --sidebar-accent-foreground: oklch(0.93 0.005 260);
+        --sidebar-border: oklch(0.2 0.004 260);
+        --sidebar-primary: oklch(0.65 0.27 288);
+        --sidebar-primary-foreground: oklch(0.98 0 0);
+        --sidebar-ring: oklch(0.65 0.27 288);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
+        font-family: "Geist", sans-serif;
+        background: var(--background);
+        color: var(--foreground);
+        font-size: 13px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 2px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--muted-foreground);
+      }
+
+      @keyframes oc-ping {
+        75%,
+        100% {
+          transform: scale(2.5);
+          opacity: 0;
+        }
+      }
+      @keyframes oc-blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0;
+        }
+      }
+      @keyframes cursor-blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+      }
+
+      .live-dot {
+        position: relative;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .live-dot-ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        animation: oc-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+      }
+
+      .status-sq {
+        width: 7px;
+        height: 7px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font-size: 11px;
+        font-weight: 600;
+        padding: 4px 10px;
+        border-radius: 5px;
+        border: none;
+        cursor: pointer;
+        font-family: "Geist", sans-serif;
+        transition: opacity 0.15s;
+      }
+      .btn-primary:hover {
+        opacity: 0.85;
+      }
+
+      .slabel {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        font-weight: 500;
+        letter-spacing: 0.01em;
+        padding: 4px 12px;
+        margin-bottom: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      .row:hover {
+        background: rgba(255, 255, 255, 0.044);
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.1s;
+        color: var(--sidebar-foreground);
+        border: none;
+        background: transparent;
+        width: 100%;
+        text-align: left;
+        font-family: "Geist", sans-serif;
+      }
+      .nav-item:hover {
+        background: rgba(255, 255, 255, 0.044);
+      }
+      .nav-item.active {
+        background: rgba(255, 255, 255, 0.072);
+        color: var(--sidebar-accent-foreground);
+      }
+
+      .kv-row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 4px 12px;
+        font-size: 12px;
+      }
+      .kv-key {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        min-width: 72px;
+        flex-shrink: 0;
+      }
+      .kv-val {
+        color: var(--foreground);
+        font-size: 12px;
+      }
+
+      .log-line {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 3px 0;
+        font-family: "Geist Mono", monospace;
+        font-size: 11.5px;
+        line-height: 1.5;
+        border-bottom: 1px solid color-mix(in oklch, var(--border) 30%, transparent);
+      }
+      .log-line:last-child {
+        border-bottom: none;
+      }
+
+      .log-prefix {
+        font-size: 10px;
+        flex-shrink: 0;
+        width: 14px;
+        margin-top: 1px;
+        text-align: center;
+      }
+
+      .cursor-blink {
+        display: inline-block;
+        width: 7px;
+        height: 13px;
+        background: var(--primary);
+        opacity: 0.8;
+        vertical-align: text-bottom;
+        border-radius: 1px;
+        animation: cursor-blink 1s step-end infinite;
+      }
+
+      .thin-bar {
+        height: 2px;
+        background: var(--border);
+        border-radius: 1px;
+        overflow: hidden;
+      }
+      .thin-bar-fill {
+        height: 100%;
+        border-radius: 1px;
+        background: var(--primary);
+        transition: width 1s ease;
+      }
+
+      .task-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-family: "Geist Mono", monospace;
+        font-size: 10px;
+        padding: 2px 7px;
+        border-radius: 4px;
+        background: var(--secondary);
+        border: 1px solid var(--border);
+        color: var(--muted-foreground);
+      }
+
+      [x-cloak] {
+        display: none !important;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/motion@latest/dist/motion.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@marcreichel/alpine-auto-animate@latest/dist/alpine-auto-animate.min.js"
+      defer
+    ></script>
+    <script>
+      document.addEventListener("alpine:init", () => {
+        Alpine.store("mockupStep", {
+          current: "A",
+          steps: [],
+          go(key) {
+            this.current = key;
+            if (typeof Motion !== "undefined")
+              Motion.animate(
+                "#mockup-root",
+                { opacity: [0.6, 1], y: [6, 0] },
+                { duration: 0.2, easing: "ease-out" },
+              );
+          },
+        });
+      });
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.11/dist/cdn.min.js"></script>
+  </head>
+  <body>
+    <div
+      id="mockup-root"
+      style="display: flex; height: 100vh; overflow: hidden"
+      x-data="{
+        init() {
+          $store.mockupStep.steps = [
+            { key: 'A', label: 'A. Active' },
+            { key: 'B', label: 'B. Idle' },
+          ];
+          $store.mockupStep.current = 'A';
+          this.$nextTick(() => {
+            if (typeof Motion !== 'undefined') {
+              Motion.animate('.ani', { opacity: [0, 1], y: [10, 0] }, { delay: Motion.stagger(0.04), duration: 0.35, easing: 'ease-out' });
+            }
+          });
+        },
+        get session() { return sessions[$store.mockupStep.current]; },
+        get isActive() { return $store.mockupStep.current === 'A'; },
+        get taskPct() {
+          const s = this.session;
+          if (!s) return 0;
+          return Math.round((s.taskIndex / s.totalTasks) * 100);
+        }
+      }"
+      x-cloak
+    >
+      <!-- SIDEBAR -->
+      <aside
+        style="
+          width: 220px;
+          background: var(--sidebar);
+          border-right: 1px solid var(--sidebar-border);
+          display: flex;
+          flex-direction: column;
+          height: 100vh;
+          overflow: hidden;
+          flex-shrink: 0;
+        "
+      >
+        <!-- Logo -->
+        <div class="ani" style="padding: 12px 12px 8px 12px">
+          <div style="display: flex; align-items: center; gap: 8px">
+            <div
+              style="
+                width: 22px;
+                height: 22px;
+                border-radius: 6px;
+                background: linear-gradient(135deg, oklch(0.65 0.27 288), oklch(0.75 0.22 280));
+                flex-shrink: 0;
+              "
+            ></div>
+            <div>
+              <div
+                style="
+                  font-size: 13px;
+                  font-weight: 600;
+                  color: var(--sidebar-accent-foreground);
+                  line-height: 1.2;
+                "
+              >
+                depot
+              </div>
+              <div style="font-size: 10px; color: oklch(0.35 0.006 260); line-height: 1.2">
+                serve
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Nav -->
+        <nav style="padding: 4px 8px; flex: 1; overflow-y: auto">
+          <div class="ani" style="margin-bottom: 2px">
+            <button class="nav-item">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <rect x="2" y="2" width="5" height="5" rx="1" />
+                <rect x="9" y="2" width="5" height="5" rx="1" />
+                <rect x="2" y="9" width="5" height="5" rx="1" />
+                <rect x="9" y="9" width="5" height="5" rx="1" />
+              </svg>
+              Overview
+            </button>
+          </div>
+          <div class="ani" style="margin-bottom: 2px">
+            <button class="nav-item">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <rect x="2" y="2" width="12" height="3" rx="1" />
+                <rect x="2" y="7" width="9" height="2" rx="1" />
+                <rect x="2" y="11" width="11" height="2" rx="1" />
+              </svg>
+              PRD Detail
+            </button>
+          </div>
+          <div class="ani" style="margin-bottom: 2px">
+            <button class="nav-item active">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <circle cx="8" cy="8" r="6" />
+                <path d="M8 5v3l2 2" />
+              </svg>
+              Live Session
+            </button>
+          </div>
+          <div class="ani" style="margin-bottom: 2px">
+            <button class="nav-item">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <path d="M2 12V6l6-3 6 3v6l-6 3-6-3z" />
+              </svg>
+              Activity
+            </button>
+          </div>
+        </nav>
+
+        <!-- Separator -->
+        <div style="height: 1px; background: var(--sidebar-border); margin: 4px 0"></div>
+
+        <!-- Workspaces -->
+        <div style="padding: 4px 8px 8px 8px">
+          <div class="slabel" style="padding: 4px 4px">Workspaces</div>
+          <div class="row ani" style="padding: 5px 4px">
+            <div class="live-dot" style="background: #4ade80">
+              <div class="live-dot-ring" style="background: #4ade80; opacity: 0.4"></div>
+            </div>
+            <span
+              style="
+                font-size: 12px;
+                color: var(--sidebar-foreground);
+                font-family: &quot;Geist Mono&quot;, monospace;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              "
+              >~/projects/my-app</span
+            >
+          </div>
+        </div>
+
+        <!-- Version -->
+        <div style="padding: 6px 12px 10px 12px; border-top: 1px solid var(--sidebar-border)">
+          <span
+            style="
+              font-family: &quot;Geist Mono&quot;, monospace;
+              font-size: 10px;
+              color: oklch(0.35 0.006 260);
+            "
+            >v0.1.0 · serve</span
+          >
+        </div>
+      </aside>
+
+      <!-- MAIN -->
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden">
+
+        <!-- TopBar -->
+        <header
+          class="ani"
+          style="
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+          "
+        >
+          <div style="display: flex; align-items: center; gap: 8px">
+            <span style="font-size: 12px; color: oklch(0.35 0.006 260)">Session /</span>
+            <!-- Active state header -->
+            <template x-if="isActive">
+              <div style="display: flex; align-items: center; gap: 8px">
+                <span
+                  style="
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: var(--foreground);
+                    max-width: 480px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                  "
+                  x-text="session.prd"
+                ></span>
+                <span
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                    font-family: 'Geist Mono', monospace;
+                    font-size: 10px;
+                    letter-spacing: 0.04em;
+                    font-weight: 500;
+                    padding: 1px 7px;
+                    border-radius: 4px;
+                    color: var(--primary);
+                    background: oklch(0.65 0.27 288 / 0.12);
+                  "
+                >
+                  <span class="live-dot" style="background: var(--primary)">
+                    <span class="live-dot-ring" style="background: var(--primary); opacity: 0.5"></span>
+                  </span>
+                  running
+                </span>
+              </div>
+            </template>
+            <template x-if="!isActive">
+              <span style="font-size: 13px; color: var(--muted-foreground)">No active session</span>
+            </template>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 12px">
+            <template x-if="isActive">
+              <div style="display: flex; align-items: center; gap: 10px">
+                <span
+                  style="
+                    font-family: 'Geist Mono', monospace;
+                    font-size: 11px;
+                    color: var(--muted-foreground);
+                  "
+                  x-text="'task ' + session.taskIndex + ' / ' + session.totalTasks"
+                ></span>
+                <button
+                  style="
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 4px 10px;
+                    border-radius: 5px;
+                    border: 1px solid var(--border);
+                    background: var(--secondary);
+                    color: var(--muted-foreground);
+                    cursor: pointer;
+                    font-family: 'Geist', sans-serif;
+                  "
+                >
+                  Pause
+                </button>
+                <button
+                  style="
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 4px 10px;
+                    border-radius: 5px;
+                    border: 1px solid oklch(0.55 0.22 25 / 0.4);
+                    background: oklch(0.55 0.22 25 / 0.1);
+                    color: var(--destructive);
+                    cursor: pointer;
+                    font-family: 'Geist', sans-serif;
+                  "
+                >
+                  Stop
+                </button>
+              </div>
+            </template>
+          </div>
+        </header>
+
+        <!-- Content area -->
+        <div style="flex: 1; display: flex; overflow: hidden">
+
+          <!-- Active session content -->
+          <template x-if="isActive">
+            <div style="flex: 1; display: flex; overflow: hidden">
+
+              <!-- LEFT: Session log (main) -->
+              <div
+                style="
+                  flex: 1;
+                  display: flex;
+                  flex-direction: column;
+                  overflow: hidden;
+                  border-right: 1px solid var(--border);
+                "
+              >
+                <!-- Task progress bar header -->
+                <div
+                  class="ani"
+                  style="
+                    padding: 10px 20px 10px 20px;
+                    border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+                    flex-shrink: 0;
+                  "
+                >
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px">
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <span
+                        style="
+                          font-size: 11px;
+                          font-weight: 500;
+                          color: var(--muted-foreground);
+                        "
+                      >Current task</span>
+                      <span class="task-chip">
+                        #<span x-text="session.taskIndex"></span>
+                        of
+                        <span x-text="session.totalTasks"></span>
+                      </span>
+                    </div>
+                    <span
+                      style="
+                        font-family: 'Geist Mono', monospace;
+                        font-size: 10px;
+                        color: var(--muted-foreground);
+                      "
+                      x-text="taskPct + '%'"
+                    ></span>
+                  </div>
+                  <div class="thin-bar" style="margin-bottom: 8px">
+                    <div class="thin-bar-fill" :style="{ width: taskPct + '%' }"></div>
+                  </div>
+                  <div
+                    style="
+                      font-size: 13px;
+                      font-weight: 500;
+                      color: var(--foreground);
+                    "
+                    x-text="session.currentTask"
+                  ></div>
+                </div>
+
+                <!-- Log area label -->
+                <div style="padding: 8px 20px 4px 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between">
+                  <span class="slabel" style="padding: 0">Output</span>
+                  <span
+                    style="
+                      font-family: 'Geist Mono', monospace;
+                      font-size: 10px;
+                      color: oklch(0.35 0.006 260);
+                    "
+                    x-text="session.output.length + ' lines'"
+                  ></span>
+                </div>
+
+                <!-- Terminal log -->
+                <div
+                  style="
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: 6px 20px 16px 20px;
+                    background: oklch(0.115 0.004 260);
+                  "
+                >
+                  <template x-for="(line, idx) in session.output" :key="idx">
+                    <div class="log-line">
+                      <!-- prefix icon -->
+                      <span
+                        class="log-prefix"
+                        :style="{
+                          color:
+                            line.type === 'success' ? 'var(--chart-5)' :
+                            line.type === 'code'    ? 'var(--primary)' :
+                            line.type === 'error'   ? 'var(--destructive)' :
+                                                      'oklch(0.35 0.006 260)'
+                        }"
+                        x-text="
+                          line.type === 'success' ? '✓' :
+                          line.type === 'code'    ? '›' :
+                          line.type === 'error'   ? '✗' :
+                                                    '·'
+                        "
+                      ></span>
+                      <!-- text -->
+                      <span
+                        :style="{
+                          color:
+                            line.type === 'success' ? 'var(--chart-5)' :
+                            line.type === 'code'    ? 'var(--foreground)' :
+                            line.type === 'error'   ? 'var(--destructive)' :
+                                                      'var(--muted-foreground)',
+                          'font-weight': line.type === 'code' ? '500' : '400',
+                          'word-break': 'break-all'
+                        }"
+                        x-text="line.text"
+                      ></span>
+                    </div>
+                  </template>
+                  <!-- blinking cursor on last line -->
+                  <div class="log-line" style="border-bottom: none; padding-top: 4px">
+                    <span class="log-prefix" style="color: oklch(0.35 0.006 260)">·</span>
+                    <span class="cursor-blink"></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- RIGHT: Session metadata panel -->
+              <div
+                style="
+                  width: 280px;
+                  flex-shrink: 0;
+                  overflow-y: auto;
+                  display: flex;
+                  flex-direction: column;
+                "
+              >
+                <div class="ani" style="padding: 10px 0 8px 0">
+                  <div class="slabel">Session</div>
+
+                  <div class="kv-row">
+                    <span class="kv-key">Status</span>
+                    <span style="display: flex; align-items: center; gap: 5px; font-size: 12px">
+                      <span class="live-dot" style="background: var(--primary)">
+                        <span class="live-dot-ring" style="background: var(--primary); opacity: 0.5"></span>
+                      </span>
+                      <span style="color: var(--primary); font-family: 'Geist Mono', monospace; font-size: 11px" x-text="session.status"></span>
+                    </span>
+                  </div>
+
+                  <div class="kv-row">
+                    <span class="kv-key">Model</span>
+                    <span
+                      class="kv-val"
+                      style="font-family: 'Geist Mono', monospace; font-size: 11px"
+                      x-text="session.model"
+                    ></span>
+                  </div>
+
+                  <div class="kv-row">
+                    <span class="kv-key">Started</span>
+                    <span class="kv-val" x-text="session.startedAt"></span>
+                  </div>
+
+                  <div class="kv-row">
+                    <span class="kv-key">Workspace</span>
+                    <span
+                      class="kv-val"
+                      style="font-family: 'Geist Mono', monospace; font-size: 11px; word-break: break-all"
+                      x-text="session.workspace"
+                    ></span>
+                  </div>
+                </div>
+
+                <!-- Divider -->
+                <div
+                  style="
+                    height: 1px;
+                    background: color-mix(in oklch, var(--border) 60%, transparent);
+                    margin: 4px 0;
+                  "
+                ></div>
+
+                <!-- PRD info -->
+                <div class="ani" style="padding: 8px 0 8px 0">
+                  <div class="slabel">PRD</div>
+                  <div style="padding: 4px 12px 8px 12px">
+                    <p
+                      style="
+                        font-size: 12px;
+                        color: var(--foreground);
+                        line-height: 1.5;
+                        opacity: 0.85;
+                      "
+                      x-text="session.prd"
+                    ></p>
+                  </div>
+                </div>
+
+                <!-- Divider -->
+                <div
+                  style="
+                    height: 1px;
+                    background: color-mix(in oklch, var(--border) 60%, transparent);
+                    margin: 4px 0;
+                  "
+                ></div>
+
+                <!-- Task progress breakdown -->
+                <div class="ani" style="padding: 8px 0 8px 0">
+                  <div class="slabel">Tasks</div>
+                  <div style="padding: 4px 12px 8px 12px">
+                    <!-- mini task list indicators -->
+                    <div style="display: flex; gap: 3px; margin-bottom: 8px">
+                      <template x-for="i in session.totalTasks" :key="i">
+                        <div
+                          :style="{
+                            'height': '4px',
+                            'flex': '1',
+                            'border-radius': '2px',
+                            'background':
+                              i < session.taskIndex   ? 'var(--chart-5)' :
+                              i === session.taskIndex ? 'var(--primary)' :
+                                                        'var(--border)'
+                          }"
+                        ></div>
+                      </template>
+                    </div>
+                    <div style="font-size: 11px; color: var(--muted-foreground)">
+                      <span x-text="session.taskIndex - 1"></span> done ·
+                      <span style="color: var(--primary)" x-text="'#' + session.taskIndex + ' active'"></span> ·
+                      <span x-text="session.totalTasks - session.taskIndex"></span> remaining
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Divider -->
+                <div
+                  style="
+                    height: 1px;
+                    background: color-mix(in oklch, var(--border) 60%, transparent);
+                    margin: 4px 0;
+                  "
+                ></div>
+
+                <!-- Recent files touched -->
+                <div class="ani" style="padding: 8px 0 8px 0">
+                  <div class="slabel">Files touched</div>
+                  <div style="padding: 2px 12px 4px 12px">
+                    <template x-for="(line, idx) in session.output.filter(l => l.type === 'code')" :key="idx">
+                      <div
+                        style="
+                          display: flex;
+                          align-items: center;
+                          gap: 6px;
+                          padding: 3px 0;
+                          border-bottom: 1px solid color-mix(in oklch, var(--border) 30%, transparent);
+                        "
+                      >
+                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="oklch(0.35 0.006 260)" stroke-width="1.5">
+                          <rect x="3" y="1" width="8" height="14" rx="1" />
+                          <path d="M6 5h4M6 8h4M6 11h2" />
+                        </svg>
+                        <span
+                          style="
+                            font-family: 'Geist Mono', monospace;
+                            font-size: 10px;
+                            color: var(--foreground);
+                            opacity: 0.7;
+                            white-space: nowrap;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                          "
+                          x-text="line.text"
+                        ></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </template>
+
+          <!-- IDLE state -->
+          <template x-if="!isActive">
+            <div
+              style="
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 16px;
+              "
+            >
+              <div
+                style="
+                  width: 48px;
+                  height: 48px;
+                  border-radius: 12px;
+                  background: var(--secondary);
+                  border: 1px solid var(--border);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                "
+              >
+                <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="oklch(0.35 0.006 260)" stroke-width="1.5">
+                  <circle cx="8" cy="8" r="6" />
+                  <path d="M8 5v3l2 2" />
+                </svg>
+              </div>
+              <div style="text-align: center">
+                <div style="font-size: 14px; font-weight: 600; color: var(--foreground); margin-bottom: 4px">
+                  No active session
+                </div>
+                <div style="font-size: 12px; color: var(--muted-foreground); max-width: 280px; line-height: 1.6">
+                  Start a session by selecting a PRD and running the agent on a workspace.
+                </div>
+              </div>
+              <button
+                style="
+                  font-size: 12px;
+                  font-weight: 600;
+                  padding: 7px 16px;
+                  border-radius: 6px;
+                  border: 1px solid var(--border);
+                  background: var(--secondary);
+                  color: var(--foreground);
+                  cursor: pointer;
+                  font-family: 'Geist', sans-serif;
+                  margin-top: 4px;
+                "
+              >
+                New session
+              </button>
+              <!-- Recent sessions hint -->
+              <div
+                style="
+                  margin-top: 24px;
+                  background: var(--card);
+                  border: 1px solid var(--border);
+                  border-radius: 8px;
+                  padding: 12px 16px;
+                  width: 360px;
+                "
+              >
+                <div style="font-size: 11px; color: var(--muted-foreground); font-weight: 500; margin-bottom: 8px; letter-spacing: 0.01em">
+                  RECENT SESSIONS
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    padding: 6px 0;
+                    border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+                  "
+                >
+                  <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--chart-5); flex-shrink: 0"></div>
+                  <div style="flex: 1; min-width: 0">
+                    <div style="font-size: 12px; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">
+                      Implement streaming context output
+                    </div>
+                    <div style="font-size: 10px; font-family: 'Geist Mono', monospace; color: var(--muted-foreground); margin-top: 1px">
+                      ~/projects/my-app · 2 hours ago · done
+                    </div>
+                  </div>
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    padding: 6px 0;
+                  "
+                >
+                  <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--destructive); flex-shrink: 0"></div>
+                  <div style="flex: 1; min-width: 0">
+                    <div style="font-size: 12px; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">
+                      Add TTY detection and graceful fallback
+                    </div>
+                    <div style="font-size: 10px; font-family: 'Geist Mono', monospace; color: var(--muted-foreground); margin-top: 1px">
+                      ~/projects/my-app · yesterday · error
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Switcher pill -->
+    <div
+      x-data
+      x-show="$store.mockupStep.steps.length > 1"
+      style="
+        position: fixed;
+        bottom: 1.25rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #ffffff;
+        border-radius: 9999px;
+        padding: 0.25rem;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
+        display: flex;
+        gap: 4px;
+      "
+    >
+      <template x-for="step in $store.mockupStep.steps" :key="step.key">
+        <button
+          @click="$store.mockupStep.go(step.key)"
+          :style="$store.mockupStep.current === step.key ? 'background:#0f172a;color:#ffffff;' : 'background:transparent;color:#64748b;'"
+          style="
+            padding: 0.375rem 0.875rem;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 9999px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+          "
+          x-text="step.label"
+        ></button>
+      </template>
+    </div>
+
+    <script>
+      const sessions = {
+        A: {
+          status: "running",
+          prd: "Implement streaming context output for the dev orchestrator",
+          currentTask: "Integrate streaming in orchestrator loop",
+          taskIndex: 4,
+          totalTasks: 7,
+          workspace: "~/projects/my-app",
+          startedAt: "14 minutes ago",
+          model: "claude-sonnet-4-5",
+          output: [
+            { type: "info",    text: "Session started" },
+            { type: "info",    text: "Reading task #4: Integrate streaming in orchestrator loop" },
+            { type: "code",    text: "src/orchestrator.ts" },
+            { type: "info",    text: "Replacing buffered writes with NodeStreamRenderer..." },
+            { type: "code",    text: "src/renderer/node-stream.ts" },
+            { type: "success", text: "File written successfully" },
+            { type: "code",    text: "src/orchestrator.ts" },
+            { type: "success", text: "File written successfully" },
+            { type: "info",    text: "Running tests..." },
+            { type: "success", text: "42 tests passed" },
+            { type: "info",    text: "Waiting for next instruction..." },
+          ],
+        },
+        B: null,
+      };
+    </script>
+  </body>
+</html>

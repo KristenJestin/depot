@@ -25,9 +25,22 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     react(),
-    devServer({ entry: "api.ts", adapter: nodeAdapter }),
+    devServer({
+      entry: "api/index.ts",
+      adapter: nodeAdapter,
+      exclude: [/^(?!\/api\/).*/],
+    }),
     rawMdPlugin(),
   ],
+
+  server: {
+    // Ensure node:sqlite is not bundled by Vite SSR — it is a native Node/Bun built-in
+    // that must be required at runtime, not resolved through Vite's module graph.
+  },
+
+  ssr: {
+    external: ["node:sqlite"],
+  },
 
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/web"),
@@ -46,7 +59,8 @@ export default defineConfig({
     env: { NO_COLOR: "1" },
     testTimeout: 10000,
     root: path.resolve(import.meta.dirname),
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
+    setupFiles: ["tests/web/setup.ts"],
   },
 
   lint: {

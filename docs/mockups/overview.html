@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Overview — depot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-sans: "Geist", sans-serif;
+        --font-mono: "Geist Mono", monospace;
+        --color-background: var(--background);
+        --color-foreground: var(--foreground);
+        --color-card: var(--card);
+        --color-card-foreground: var(--card-foreground);
+        --color-popover: var(--popover);
+        --color-popover-foreground: var(--popover-foreground);
+        --color-primary: var(--primary);
+        --color-primary-foreground: var(--primary-foreground);
+        --color-secondary: var(--secondary);
+        --color-secondary-foreground: var(--secondary-foreground);
+        --color-muted: var(--muted);
+        --color-muted-foreground: var(--muted-foreground);
+        --color-accent: var(--accent);
+        --color-accent-foreground: var(--accent-foreground);
+        --color-destructive: var(--destructive);
+        --color-border: var(--border);
+        --color-input: var(--input);
+        --color-ring: var(--ring);
+        --color-chart-1: var(--chart-1);
+        --color-chart-2: var(--chart-2);
+        --color-chart-3: var(--chart-3);
+        --color-chart-4: var(--chart-4);
+        --color-chart-5: var(--chart-5);
+        --color-sidebar: var(--sidebar);
+        --color-sidebar-foreground: var(--sidebar-foreground);
+        --color-sidebar-primary: var(--sidebar-primary);
+        --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+        --color-sidebar-accent: var(--sidebar-accent);
+        --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+        --color-sidebar-border: var(--sidebar-border);
+        --color-sidebar-ring: var(--sidebar-ring);
+        --radius-sm: calc(var(--radius) - 4px);
+        --radius-md: calc(var(--radius) - 2px);
+        --radius-lg: var(--radius);
+        --radius-xl: calc(var(--radius) + 4px);
+      }
+
+      :root {
+        --radius: 0.5rem;
+        --background: oklch(0.14 0.004 260);
+        --card: oklch(0.18 0.004 260);
+        --muted: oklch(0.2 0.004 260);
+        --secondary: oklch(0.22 0.008 260);
+        --accent: oklch(0.24 0.008 260);
+        --input: oklch(0.26 0.008 260);
+        --border: oklch(0.24 0.004 260);
+        --foreground: oklch(0.93 0.005 260);
+        --card-foreground: oklch(0.93 0.005 260);
+        --secondary-foreground: oklch(0.85 0.008 260);
+        --muted-foreground: oklch(0.55 0.01 260);
+        --accent-foreground: oklch(0.93 0.005 260);
+        --popover: oklch(0.18 0.004 260);
+        --popover-foreground: oklch(0.93 0.005 260);
+        --primary: oklch(0.65 0.27 288);
+        --primary-foreground: oklch(0.98 0 0);
+        --ring: oklch(0.65 0.27 288);
+        --destructive: oklch(0.55 0.22 25);
+        --chart-1: oklch(0.65 0.27 288);
+        --chart-2: oklch(0.68 0.16 165);
+        --chart-3: oklch(0.72 0.17 75);
+        --chart-4: oklch(0.65 0.18 330);
+        --chart-5: oklch(0.7 0.16 145);
+        --sidebar: oklch(0.11 0.004 260);
+        --sidebar-foreground: oklch(0.6 0.008 260);
+        --sidebar-accent: oklch(0.17 0.008 260);
+        --sidebar-accent-foreground: oklch(0.93 0.005 260);
+        --sidebar-border: oklch(0.2 0.004 260);
+        --sidebar-primary: oklch(0.65 0.27 288);
+        --sidebar-primary-foreground: oklch(0.98 0 0);
+        --sidebar-ring: oklch(0.65 0.27 288);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
+        font-family: "Geist", sans-serif;
+        background: var(--background);
+        color: var(--foreground);
+        font-size: 13px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 2px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--muted-foreground);
+      }
+
+      @keyframes oc-ping {
+        75%,
+        100% {
+          transform: scale(2.5);
+          opacity: 0;
+        }
+      }
+      @keyframes oc-blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0;
+        }
+      }
+
+      .live-dot {
+        position: relative;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .live-dot-ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        animation: oc-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+      }
+
+      .status-sq {
+        width: 7px;
+        height: 7px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font-size: 11px;
+        font-weight: 600;
+        padding: 4px 10px;
+        border-radius: 5px;
+        border: none;
+        cursor: pointer;
+        font-family: "Geist", sans-serif;
+        transition: opacity 0.15s;
+      }
+      .btn-primary:hover {
+        opacity: 0.85;
+      }
+
+      .thin-bar {
+        height: 2px;
+        background: var(--border);
+        border-radius: 1px;
+        overflow: hidden;
+      }
+      .thin-bar-fill {
+        height: 100%;
+        border-radius: 1px;
+        background: var(--primary);
+        transition: width 1s ease;
+      }
+
+      .slabel {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        font-weight: 500;
+        letter-spacing: 0.01em;
+        padding: 4px 12px;
+        margin-bottom: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      .row:hover {
+        background: rgba(255, 255, 255, 0.044);
+      }
+      .row.selected {
+        background: rgba(255, 255, 255, 0.072);
+      }
+
+      .status-badge {
+        font-family: "Geist Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        padding: 1px 7px;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.1s;
+        color: var(--sidebar-foreground);
+        border: none;
+        background: transparent;
+        width: 100%;
+        text-align: left;
+        font-family: "Geist", sans-serif;
+      }
+      .nav-item:hover {
+        background: rgba(255, 255, 255, 0.044);
+      }
+      .nav-item.active {
+        background: rgba(255, 255, 255, 0.072);
+        color: var(--sidebar-accent-foreground);
+      }
+
+      .prd-row {
+        display: grid;
+        grid-template-columns: 1fr 110px 100px 90px;
+        align-items: center;
+        gap: 16px;
+        padding: 9px 20px;
+        border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      .prd-row:hover {
+        background: rgba(255, 255, 255, 0.032);
+      }
+      .prd-row:last-child {
+        border-bottom: none;
+      }
+
+      [x-cloak] {
+        display: none !important;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/motion@latest/dist/motion.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@marcreichel/alpine-auto-animate@latest/dist/alpine-auto-animate.min.js"
+      defer
+    ></script>
+    <script>
+      document.addEventListener("alpine:init", () => {
+        Alpine.store("mockupStep", {
+          current: "A",
+          steps: [],
+          go(key) {
+            this.current = key;
+            if (typeof Motion !== "undefined")
+              Motion.animate(
+                "#mockup-root",
+                { opacity: [0.6, 1], y: [6, 0] },
+                { duration: 0.2, easing: "ease-out" },
+              );
+          },
+        });
+      });
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.11/dist/cdn.min.js"></script>
+  </head>
+  <body>
+    <div
+      id="mockup-root"
+      style="display: flex; height: 100vh; overflow: hidden"
+      x-data="{
+        init() {
+          $store.mockupStep.steps = [
+            { key: 'A', label: 'A. With PRDs' },
+            { key: 'B', label: 'B. Empty' },
+          ];
+          $store.mockupStep.current = 'A';
+          this.$nextTick(() => {
+            if (typeof Motion !== 'undefined') {
+              Motion.animate('.ani', { opacity: [0, 1], y: [10, 0] }, { delay: Motion.stagger(0.04), duration: 0.35, easing: 'ease-out' });
+            }
+          });
+        },
+        get prds() { return $store.mockupStep.current === 'A' ? prdsA : []; },
+        statusColor(s) {
+          if (s === 'in_progress') return 'color:var(--primary);background:oklch(0.65 0.27 288 / 0.12);';
+          if (s === 'done') return 'color:var(--chart-5);background:oklch(0.7 0.16 145 / 0.12);';
+          if (s === 'ready') return 'color:var(--chart-3);background:oklch(0.72 0.17 75 / 0.12);';
+          if (s === 'draft') return 'color:var(--muted-foreground);background:var(--secondary);';
+          return 'color:var(--muted-foreground);background:var(--secondary);';
+        },
+        progressPct(p) {
+          return p.totalTasks > 0 ? Math.round(p.doneTasks / p.totalTasks * 100) : 0;
+        }
+      }"
+      x-cloak
+    >
+      <!-- SIDEBAR -->
+      <aside
+        style="
+          width: 220px;
+          background: var(--sidebar);
+          border-right: 1px solid var(--sidebar-border);
+          display: flex;
+          flex-direction: column;
+          height: 100vh;
+          overflow: hidden;
+          flex-shrink: 0;
+        "
+      >
+        <!-- Logo -->
+        <div class="ani" style="padding: 12px 12px 8px 12px">
+          <div style="display: flex; align-items: center; gap: 8px">
+            <div
+              style="
+                width: 22px;
+                height: 22px;
+                border-radius: 6px;
+                background: linear-gradient(135deg, oklch(0.65 0.27 288), oklch(0.75 0.22 280));
+                flex-shrink: 0;
+              "
+            ></div>
+            <div>
+              <div
+                style="
+                  font-size: 13px;
+                  font-weight: 600;
+                  color: var(--sidebar-accent-foreground);
+                  line-height: 1.2;
+                "
+              >
+                depot
+              </div>
+              <div style="font-size: 10px; color: oklch(0.35 0.006 260); line-height: 1.2">
+                serve
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Nav -->
+        <nav style="padding: 4px 8px; flex: 1; overflow-y: auto">
+          <div class="ani" style="margin-bottom: 2px">
+            <button class="nav-item active">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <rect x="2" y="2" width="5" height="5" rx="1" />
+                <rect x="9" y="2" width="5" height="5" rx="1" />
+                <rect x="2" y="9" width="5" height="5" rx="1" />
+                <rect x="9" y="9" width="5" height="5" rx="1" />
+              </svg>
+              Overview
+            </button>
+          </div>
+          <div class="ani" style="margin-bottom: 2px">
+            <button class="nav-item">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <rect x="2" y="2" width="12" height="3" rx="1" />
+                <rect x="2" y="7" width="9" height="2" rx="1" />
+                <rect x="2" y="11" width="11" height="2" rx="1" />
+              </svg>
+              PRD Detail
+            </button>
+          </div>
+          <div class="ani" style="margin-bottom: 2px">
+            <button class="nav-item">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <circle cx="8" cy="8" r="6" />
+                <path d="M8 5v3l2 2" />
+              </svg>
+              Live Session
+            </button>
+          </div>
+          <div class="ani" style="margin-bottom: 2px">
+            <button class="nav-item">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <path d="M2 12V6l6-3 6 3v6l-6 3-6-3z" />
+              </svg>
+              Activity
+            </button>
+          </div>
+        </nav>
+
+        <!-- Separator -->
+        <div style="height: 1px; background: var(--sidebar-border); margin: 4px 0"></div>
+
+        <!-- Workspaces -->
+        <div style="padding: 4px 8px 8px 8px">
+          <div class="slabel" style="padding: 4px 4px">Workspaces</div>
+          <div class="row ani" style="padding: 5px 4px">
+            <div class="live-dot" style="background: #4ade80">
+              <div class="live-dot-ring" style="background: #4ade80; opacity: 0.4"></div>
+            </div>
+            <span
+              style="
+                font-size: 12px;
+                color: var(--sidebar-foreground);
+                font-family: 'Geist Mono', monospace;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              "
+              >~/projects/my-app</span
+            >
+          </div>
+        </div>
+
+        <!-- Version -->
+        <div style="padding: 6px 12px 10px 12px; border-top: 1px solid var(--sidebar-border)">
+          <span
+            style="
+              font-family: 'Geist Mono', monospace;
+              font-size: 10px;
+              color: oklch(0.35 0.006 260);
+            "
+            >v0.1.0 · serve</span
+          >
+        </div>
+      </aside>
+
+      <!-- MAIN -->
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden">
+        <!-- TopBar -->
+        <header
+          class="ani"
+          style="
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+          "
+        >
+          <div style="display: flex; align-items: center; gap: 8px">
+            <span style="font-size: 13px; font-weight: 600; color: var(--foreground)">PRDs</span>
+            <span
+              style="
+                font-family: 'Geist Mono', monospace;
+                font-size: 11px;
+                color: oklch(0.35 0.006 260);
+              "
+              x-text="prds.length > 0 ? '· ' + prds.length : ''"
+            ></span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <button class="btn-primary">New PRD</button>
+          </div>
+        </header>
+
+        <!-- Table header -->
+        <div
+          class="ani"
+          style="
+            display: grid;
+            grid-template-columns: 1fr 110px 100px 90px;
+            gap: 16px;
+            padding: 6px 20px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+          "
+        >
+          <span style="font-size: 10px; font-weight: 500; color: oklch(0.35 0.006 260); letter-spacing: 0.06em; text-transform: uppercase;">Title</span>
+          <span style="font-size: 10px; font-weight: 500; color: oklch(0.35 0.006 260); letter-spacing: 0.06em; text-transform: uppercase;">Status</span>
+          <span style="font-size: 10px; font-weight: 500; color: oklch(0.35 0.006 260); letter-spacing: 0.06em; text-transform: uppercase;">Progress</span>
+          <span style="font-size: 10px; font-weight: 500; color: oklch(0.35 0.006 260); letter-spacing: 0.06em; text-transform: uppercase;">Updated</span>
+        </div>
+
+        <!-- PRD List -->
+        <div style="flex: 1; overflow-y: auto">
+          <!-- State A: list -->
+          <template x-if="prds.length > 0">
+            <div x-auto-animate>
+              <template x-for="prd in prds" :key="prd.id">
+                <div class="prd-row ani">
+                  <!-- Title -->
+                  <div style="display: flex; align-items: center; gap: 10px; min-width: 0">
+                    <!-- status square indicator -->
+                    <span
+                      class="status-sq"
+                      :style="
+                        prd.status === 'done'        ? 'background:var(--chart-5);' :
+                        prd.status === 'in_progress' ? 'background:var(--primary);box-shadow:0 0 0 2px oklch(0.65 0.27 288 / 0.2);' :
+                        prd.status === 'ready'       ? 'background:var(--chart-3);' :
+                        'background:transparent;border:1px solid var(--border);'
+                      "
+                    ></span>
+                    <span
+                      style="
+                        font-size: 13px;
+                        color: var(--foreground);
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        line-height: 1.3;
+                      "
+                      x-text="prd.title"
+                    ></span>
+                  </div>
+
+                  <!-- Status badge -->
+                  <div>
+                    <template x-if="prd.status === 'in_progress'">
+                      <span
+                        class="status-badge"
+                        style="display: inline-flex; align-items: center; gap: 5px; color: var(--primary); background: oklch(0.65 0.27 288 / 0.12);"
+                      >
+                        <span class="live-dot" style="background: var(--primary); width: 5px; height: 5px;">
+                          <span class="live-dot-ring" style="background: var(--primary); opacity: 0.5"></span>
+                        </span>
+                        in_progress
+                      </span>
+                    </template>
+                    <template x-if="prd.status === 'done'">
+                      <span class="status-badge" style="color: var(--chart-5); background: oklch(0.7 0.16 145 / 0.12);">done</span>
+                    </template>
+                    <template x-if="prd.status === 'ready'">
+                      <span class="status-badge" style="color: var(--chart-3); background: oklch(0.72 0.17 75 / 0.12);">ready</span>
+                    </template>
+                    <template x-if="prd.status === 'draft'">
+                      <span class="status-badge" style="color: var(--muted-foreground); background: var(--secondary);">draft</span>
+                    </template>
+                  </div>
+
+                  <!-- Progress -->
+                  <div>
+                    <template x-if="prd.totalTasks > 0">
+                      <div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px">
+                          <span
+                            style="font-family: 'Geist Mono', monospace; font-size: 10px; color: var(--muted-foreground);"
+                            x-text="prd.doneTasks + '/' + prd.totalTasks"
+                          ></span>
+                          <span
+                            style="font-family: 'Geist Mono', monospace; font-size: 10px; color: oklch(0.35 0.006 260);"
+                            x-text="progressPct(prd) + '%'"
+                          ></span>
+                        </div>
+                        <div class="thin-bar" style="width: 80px">
+                          <div
+                            class="thin-bar-fill"
+                            :style="{ 'width': progressPct(prd) + '%', 'background': prd.status === 'done' ? 'var(--chart-5)' : 'var(--primary)' }"
+                          ></div>
+                        </div>
+                      </div>
+                    </template>
+                    <template x-if="prd.totalTasks === 0">
+                      <span style="font-family: 'Geist Mono', monospace; font-size: 10px; color: oklch(0.3 0.004 260);">—</span>
+                    </template>
+                  </div>
+
+                  <!-- Updated at -->
+                  <span
+                    style="font-size: 11px; color: oklch(0.4 0.006 260); white-space: nowrap;"
+                    x-text="prd.updatedAt"
+                  ></span>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- State B: empty -->
+          <template x-if="prds.length === 0">
+            <div
+              style="
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                gap: 12px;
+                padding: 48px 24px;
+              "
+            >
+              <div
+                style="
+                  width: 40px;
+                  height: 40px;
+                  border-radius: 10px;
+                  background: var(--secondary);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                "
+              >
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="var(--muted-foreground)" stroke-width="1.5">
+                  <rect x="2" y="2" width="12" height="3" rx="1" />
+                  <rect x="2" y="7" width="9" height="2" rx="1" />
+                  <rect x="2" y="11" width="11" height="2" rx="1" />
+                </svg>
+              </div>
+              <div style="text-align: center">
+                <div style="font-size: 13px; font-weight: 500; color: var(--foreground); margin-bottom: 4px">No PRDs yet</div>
+                <div style="font-size: 12px; color: var(--muted-foreground); line-height: 1.5; max-width: 280px;">
+                  PRDs are feature specs that track AI agent work on your project. Create one to get started.
+                </div>
+              </div>
+              <button class="btn-primary" style="margin-top: 4px">New PRD</button>
+            </div>
+          </template>
+        </div>
+
+        <!-- Footer stats (only in state A) -->
+        <template x-if="prds.length > 0">
+          <div
+            class="ani"
+            style="
+              border-top: 1px solid var(--border);
+              padding: 6px 20px;
+              display: flex;
+              align-items: center;
+              gap: 20px;
+              flex-shrink: 0;
+            "
+          >
+            <template x-for="s in ['in_progress','ready','draft','done']" :key="s">
+              <div style="display: flex; align-items: center; gap: 6px">
+                <span
+                  style="font-family: 'Geist Mono', monospace; font-size: 11px;"
+                  :style="
+                    s === 'in_progress' ? 'color:var(--primary);' :
+                    s === 'done'        ? 'color:var(--chart-5);' :
+                    s === 'ready'       ? 'color:var(--chart-3);' :
+                    'color:var(--muted-foreground);'
+                  "
+                  x-text="prds.filter(p => p.status === s).length"
+                ></span>
+                <span style="font-size: 10px; color: oklch(0.35 0.006 260);" x-text="s"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Switcher flottant -->
+    <div
+      x-data
+      x-show="$store.mockupStep.steps.length > 1"
+      style="
+        position: fixed;
+        bottom: 1.25rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #ffffff;
+        border-radius: 9999px;
+        padding: 0.25rem;
+        box-shadow:
+          0 8px 30px rgba(0, 0, 0, 0.12),
+          0 2px 8px rgba(0, 0, 0, 0.08);
+        display: flex;
+        gap: 4px;
+      "
+    >
+      <template x-for="step in $store.mockupStep.steps" :key="step.key">
+        <button
+          @click="$store.mockupStep.go(step.key)"
+          :style="$store.mockupStep.current === step.key ? 'background:#0f172a;color:#ffffff;' : 'background:transparent;color:#64748b;'"
+          style="
+            padding: 0.375rem 0.875rem;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 9999px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+          "
+          x-text="step.label"
+        ></button>
+      </template>
+    </div>
+
+    <script>
+      const prdsA = [
+        { id: 'prd-1', title: 'Implement streaming context output for the dev orchestrator', status: 'in_progress', doneTasks: 3, totalTasks: 7, updatedAt: '2 hours ago' },
+        { id: 'prd-2', title: 'Add PRD archival command', status: 'draft', doneTasks: 0, totalTasks: 0, updatedAt: '1 day ago' },
+        { id: 'prd-3', title: 'Web UI foundations', status: 'done', doneTasks: 9, totalTasks: 9, updatedAt: '3 days ago' },
+        { id: 'prd-4', title: 'Implement review system for completed PRDs', status: 'ready', doneTasks: 0, totalTasks: 5, updatedAt: '4 days ago' },
+        { id: 'prd-5', title: 'CLI onboarding flow for new workspaces', status: 'draft', doneTasks: 0, totalTasks: 0, updatedAt: '1 week ago' },
+      ];
+    </script>
+  </body>
+</html>

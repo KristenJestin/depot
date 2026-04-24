@@ -14,6 +14,7 @@ export const contextCommand = command({
     prdTarget: {
       schema: Schema.String,
       positional: true,
+      default: "",
       description: "PRD ID or title to target (dev/coder/auditor mode)",
     },
     review: {

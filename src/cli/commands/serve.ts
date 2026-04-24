@@ -4,33 +4,9 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { command } from "#/cli/command";
-import { openDatabase, defaultDepotDir, defaultDbPath } from "#/db/client";
-import { normalizeWorkspacePath } from "#/shared/utils";
+import { defaultDepotDir } from "#/db/client";
 import fs from "node:fs/promises";
-import api, { type Variables } from "#/web/api";
-
-async function resolveCurrentWorkspaceId(
-  db: ReturnType<typeof openDatabase>["db"],
-): Promise<string | null> {
-  try {
-    const cwd = normalizeWorkspacePath(process.cwd());
-    const rows = await db.query.workspaces.findMany();
-    let bestMatch: (typeof rows)[number] | null = null;
-    let bestLen = 0;
-    for (const ws of rows) {
-      const wsPath = normalizeWorkspacePath(ws.path);
-      if (cwd === wsPath || cwd.startsWith(wsPath + "/")) {
-        if (wsPath.length > bestLen) {
-          bestLen = wsPath.length;
-          bestMatch = ws;
-        }
-      }
-    }
-    return bestMatch?.id ?? null;
-  } catch {
-    return null;
-  }
-}
+import api from "#/web/api";
 
 export const serveCommand = command({
   meta: { name: "serve", description: "Start the Depot web server" },
@@ -51,16 +27,7 @@ export const serveCommand = command({
     const depotDir = defaultDepotDir();
     await fs.mkdir(depotDir, { recursive: true });
 
-    const { db } = openDatabase(defaultDbPath());
-    const currentWorkspaceId = await resolveCurrentWorkspaceId(db);
-
-    const server = new Hono<{ Variables: Variables }>();
-
-    server.use("*", async (c, next) => {
-      c.set("db", db);
-      c.set("currentWorkspaceId", currentWorkspaceId);
-      await next();
-    });
+    const server = new Hono();
 
     server.route("/", api);
 

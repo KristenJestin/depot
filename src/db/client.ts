@@ -162,5 +162,8 @@ export function defaultDepotDir(): string {
  * Resolve the default database path: `~/.depot/depot.db`.
  */
 export function defaultDbPath(): string {
+  if (process.env["DB_PATH"]) {
+    return process.env["DB_PATH"];
+  }
   return `${defaultDepotDir()}/depot.db`;
 }
