@@ -2,38 +2,45 @@
 
 `depot` is built around a small, explicit model for tracking agent work locally.
 
+The core idea is not just to store tasks in SQLite. It is to make the moving parts of agent execution explicit enough that a later session, another agent, or a human reviewer can pick up the work without reconstructing state from chat history.
+
 ## Projects
 
-A project is the top-level container for work.
+A project is the top-level container.
 
-A project stores:
+Each project stores:
 
-- a stable ULID
+- a stable text ID generated as a monotonic ULID
 - a name
 - an optional description
 - a status: `active`, `paused`, or `done`
 
-Projects are listed globally with `depot project list`. The current CLI can create a project indirectly through `depot init` or manage them directly with `depot project show`, `depot project update`, and `depot project archive`.
+Projects are created indirectly through `depot init` or managed directly with `depot project list`, `depot project show`, `depot project update`, and `depot project archive`.
 
 ## Workspaces
 
 A workspace binds a project to a canonical absolute path on disk.
 
-This is how `depot` knows which project you mean when you run commands from a directory. Workspace resolution uses longest-prefix matching on canonical absolute paths, so commands work from nested directories inside a registered workspace.
+This is how `depot` knows which project you mean when you run workspace-aware commands from a directory. Resolution uses longest-prefix matching on canonical paths, so a command launched from any nested subdirectory still resolves to the correct workspace.
 
 Important properties:
 
-- a workspace belongs to one project
+- a workspace belongs to exactly one project
 - workspace paths are unique across the database
-- a workspace can have an optional human label
+- a workspace may have an optional human label
+- path normalization uses forward slashes, and lowercases paths on Windows
 
-If the current directory does not resolve to a workspace, most workspace-aware commands exit and ask you to run `depot init` first. `depot context` is the exception: it silently creates a project and workspace for the current path before rendering context.
+If the current directory does not resolve to a workspace, most workspace-aware commands exit and ask you to run `depot init` first.
 
-Workspaces can be managed with `depot workspace list`, `depot workspace show`, `depot workspace rename`, and `depot workspace remove`.
+`depot context` is the main exception: it uses auto-create mode and silently creates a project plus workspace for the current path before rendering context.
+
+The CLI exposes `depot workspace list`, `depot workspace show`, `depot workspace rename`, and `depot workspace remove`.
 
 ## PRDs
 
-A PRD belongs to a project and a workspace. It captures why work exists and what is in scope.
+A PRD belongs to a project. It captures why a body of work exists and what is in scope.
+
+Before activation, a PRD belongs only to the project. Its `workspaceId` remains `null` until `depot prd activate` attaches it to the current workspace.
 
 The lifecycle is:
 
@@ -43,33 +50,49 @@ The lifecycle is:
 - `done`
 - `canceled`
 
-Allowed transitions:
+The validator allows these status transitions:
 
-- `draft → ready`
-- `ready → in_progress`
-- `ready → draft` (fork: creates a new revision)
-- `in_progress → done`
-- `in_progress → canceled`
+- `draft -> ready`
+- `draft -> canceled`
+- `ready -> in_progress`
+- `ready -> canceled`
+- `in_progress -> done`
+- `in_progress -> canceled`
 
 Key behaviors:
 
 - `depot prd create` creates a draft PRD.
-- `depot prd ready` marks a draft PRD as ready for execution.
-- `depot prd activate` marks a ready PRD as in_progress.
+- `depot prd ready` marks a draft PRD as ready.
+- `depot prd activate` moves a ready PRD to `in_progress` and attaches it to the current workspace.
+- only one PRD can be `in_progress` in a workspace at a time
 
-### Versioning
+### Revisioning
 
-Each PRD has a `rootId` that points to the original v1 (itself if it is v1). This allows querying an entire family with a single `WHERE root_id = ?`.
+PRDs are revisioned as families.
 
-```
-v1 : rootId = v1.id, parentId = null, revision = 1
+Each PRD row stores:
+
+- `rootId`: the original revision in the family
+- `parentId`: the immediate prior revision
+- `revision`: the revision number
+
+The shape is:
+
+```text
+v1 : rootId = v1.id, parentId = null,  revision = 1
 v2 : rootId = v1.id, parentId = v1.id, revision = 2
 v3 : rootId = v1.id, parentId = v2.id, revision = 3
 ```
 
-When a `ready` PRD is forked, the original stays `ready` and a new `draft` revision is created with `parentId` pointing to it. The PRD listing shows only the latest revision of each family.
+Forking is explicit. `depot prd fork <prd-id>` creates a new `draft` revision from a `ready` PRD. The original revision stays `ready`; the fork becomes the new editable branch of the family.
 
-Only one PRD can be `in_progress` in a workspace at a time.
+`depot prd list` shows only the latest revision of each family, not every historical row.
+
+### Batch PRD Loading
+
+`depot prd load` creates a PRD and all of its tasks in one SQLite transaction.
+
+The JSON format uses `dependsOn` as zero-based task indexes inside the same document. Only backward references are allowed, so task 4 may depend on task 1, but task 1 may not depend on task 4.
 
 ## Tasks
 
@@ -78,21 +101,21 @@ Tasks belong to a PRD and represent concrete execution units.
 Each task includes:
 
 - a title
-- a description (required, must use `structured_v1` format for new tasks)
-- required `done_criteria`
+- a description
+- required `doneCriteria`
 - an effort estimate: `xs`, `s`, `m`, `l`, or `xl`
-- an ordered position within the PRD
-- optional task dependencies (comma-separated task IDs)
-- an optional `review_id` linking the task to a review
-- an optional `severity`: `critical`, `major`, `minor`, or `info` (relevant when `review_id` is set)
+- an ordered `position` within the PRD
+- optional task dependencies stored as a JSON array of task IDs
+- an optional `reviewId` when the task is a review finding
+- an optional `severity` when the task belongs to a review
 
-The `structured_v1` description format requires three sections:
+New task descriptions are normalized to the `structured_v1` shape:
 
-- `Intent:` — why this task exists
-- `Scope:` — what the dev agent should change or verify
-- `Non-goals:` — what should not be pulled into this task
+- `Intent:` why this task exists now
+- `Scope:` what should change or be verified
+- `Non-goals:` what should not be pulled into the task
 
-Older legacy freeform task descriptions remain readable without a required retrofit.
+Older freeform descriptions remain readable. `depot task show` renders both structured and plain descriptions in a human-readable format.
 
 The task lifecycle is:
 
@@ -102,52 +125,51 @@ The task lifecycle is:
 - `done`
 - `skipped`
 
-Allowed transitions:
+Allowed transitions are:
 
-- `pending → in_progress`
-- `pending → skipped`
-- `in_progress → done`
-- `in_progress → blocked`
-- `blocked → in_progress`
-- `blocked → skipped`
+- `pending -> in_progress`
+- `pending -> skipped`
+- `in_progress -> done`
+- `in_progress -> blocked`
+- `blocked -> in_progress`
+- `blocked -> skipped`
 
 Important behaviors:
 
-- a task must have non-empty `done_criteria`
+- `doneCriteria` must be non-empty
 - a task must be started before it can be completed
-- a task can only be completed when all dependency tasks are already `done`
-- blocking and skipping a task both require an explicit reason
+- a task can only be completed when all dependency tasks are already `done` or `skipped`
+- blocking and skipping both require an explicit reason
+- review findings are stored in the same `tasks` table as regular execution tasks
 
 ## Reviews
 
-A review belongs to a PRD and tracks the audit and human sign-off loop for completed work.
+A review belongs to a PRD and models the feedback loop around implementation.
 
-Reviews are created by the auditor sub-agent or the orchestrator. The review lifecycle is:
+The lifecycle is:
 
-- `draft` — created, findings being collected (protects against crash mid-audit)
-- `in_progress` — tasks created, coder sub-agent working on them
-- `done` — all review tasks completed
+- `draft`
+- `in_progress`
+- `done`
 
 Two review types exist:
 
-- `agent` — created by the auditor sub-agent after an autonomous code review
-- `human` — created by the orchestrator after the human provides feedback
+- `agent`
+- `human`
 
-A review's findings are stored as tasks with `review_id` set and an optional `severity` (`critical`, `major`, `minor`, `info`). There are no separate JSON blobs for findings.
+Findings are not stored as separate blobs. They are stored as tasks with `reviewId` set and, optionally, a severity of `critical`, `major`, `minor`, or `info`.
 
-`user_feedback` (free text) is preserved on the review record for context.
+Important behaviors:
 
-Review commands:
+- `depot review start` creates a review in `draft`
+- adding the first review task automatically moves the review to `in_progress`
+- `depot review done` can close either an `in_progress` review or an empty `draft` review
 
-- `depot review start <prd-id> --type <human|agent>` — create a review
-- `depot review task add <review-id> --title ... --description ...` — add a finding task
-- `depot review done <review-id>` — mark the review done
-- `depot review list [prd-id]` — list reviews
-- `depot review show <review-id>` — inspect a review
+The schema also includes a `userFeedback` field for human context, but the CLI does not yet expose a direct write path for it.
 
 ## Activity Log
 
-The activity log stores structured events tied to the current project and optionally to a workspace, PRD, task, or review.
+The activity log stores structured events tied to the current project and, optionally, a workspace, PRD, or task.
 
 Current event types are:
 
@@ -156,38 +178,59 @@ Current event types are:
 - `task_done`
 - `task_blocked`
 - `task_skipped`
-- `prd_ready`
 - `prd_activated`
+- `prd_ready`
 - `prd_done`
+- `prd_canceled`
+- `prd_forked`
 - `note`
 - `error`
 
-Each log entry includes a JSON payload. The CLI accepts standard JSON and also supports a looser object-like syntax for convenience.
+Each entry stores a JSON payload. `depot log add` accepts strict JSON and a looser object-like syntax, which makes shell-escaped payloads easier to work with.
 
 ## Contexts
 
 `depot context` renders live agent context for the current workspace.
 
-Current modes are:
+The available modes are:
 
-- `prd` — product framing: PRD chain, Q&A, embedded PRD agent instructions. Accepts an optional PRD ID to continue an existing draft or fork a ready PRD.
-- `dev` — orchestrator: launches the coder and auditor sub-agents, manages the review loop, requests human validation.
-- `coder <prd-id> [--review <review-id>]` — implementation sub-agent: works the PRD tasks, or the tasks from a specific review when `--review` is given.
-- `auditor <prd-id>` — audit sub-agent: reviews completed work and records findings as review tasks.
+- `prd`
+- `dev`
+- `coder`
+- `auditor`
 
-`depot context` without a mode prints an index with those four modes, a short dynamic status for each, and the exact command to render the detailed mode.
+Without a mode, `depot context` prints an index with a short usage line, dynamic status, and the exact command to load each detailed mode.
 
-`depot context dev` also accepts an optional second positional argument to target a specific PRD by full ID or case-insensitive title substring.
+Modes:
 
-## Local-first behavior
+- `prd` packages product-framing state and the embedded PRD-agent instructions
+- `dev` packages orchestrator state for the active or targeted PRD
+- `coder <prd-id> [--review <review-id>]` packages implementation work for a coder agent
+- `auditor <prd-id>` packages completed work and prior review state for an auditor agent
 
-`depot` uses a local SQLite database at `~/.depot/depot.db` by default. The CLI applies pending Drizzle migrations automatically when the database is opened.
+These contexts are rendered views. They summarize and package state, but they do not themselves advance task or PRD lifecycle steps.
 
-In the published npm package, the supported packaged migration layout is `dist/migrations/`.
+## Web Interface
 
-This keeps the workflow:
+`depot serve` exposes the same SQLite data through a small web UI.
 
-- local
-- deterministic
-- terminal-friendly
-- independent of a web service
+The web layer currently provides:
+
+- a PRD list view at `/`
+- a PRD detail view at `/prds/:id`
+- a small Hono API under `/api`
+
+The web UI is read-only. It is a view over the same local database used by the CLI.
+
+## Local-First Storage
+
+By default, `depot` stores its database at `~/.depot/depot.db`.
+
+Important runtime behaviors:
+
+- the depot directory is created automatically when needed
+- SQLite migrations are applied automatically on open
+- the database path can be overridden with `DB_PATH`
+- there is no remote service dependency in the current architecture
+
+That keeps the workflow local, deterministic, terminal-friendly, and inspectable.

@@ -1,215 +1,242 @@
-# JSON Output Contract (v1)
+# JSON Output Contract
 
-Pass `--json` before any subcommand to switch depot to machine-readable mode:
+Pass `--json` before the command to switch supported commands to machine-readable output:
 
-```
+```bash
 depot --json <command> [args]
 ```
 
-All output goes to **stdout**. Nothing else is written to stdout when `--json` is active.
-Debug output and internal logs continue to go to **stderr**.
+All depot-owned JSON envelopes are written to stdout. Debug output stays on stderr.
 
----
-
-## Success envelope
+## Success Envelope
 
 ```json
 { "kind": "success", "payload": { ... } }
 ```
 
-- Single-item results use `payload.item`.
-- List results use `payload.items` (may be an empty array).
-- Mutations return the final persisted state in `payload.item`.
+Payload conventions:
 
-## Error envelope
+- single-item reads and mutations usually use `payload.item`
+- list commands use `payload.items`
+- a few compound operations return named fields such as `project`, `workspace`, `prd`, or `tasks`
+
+## Error Envelope
 
 ```json
 { "kind": "error", "error": { "code": "<code>", "message": "<human text>" } }
 ```
 
-Exit code is **1** on all errors. Known error codes:
+All explicit `output.error(...)` paths exit with code `1`.
 
-| Code                  | Meaning                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `not_found`           | The requested resource does not exist                                          |
-| `no_workspace`        | No workspace registered for the current path                                   |
-| `no_active_prd`       | No in-progress PRD in the current workspace                                    |
-| `invalid_description` | Task description does not use `structured_v1` format                           |
-| `validation_error`    | Argument validation failed                                                     |
-| `validation`          | Inline validation failure in a command (e.g. assisted review without feedback) |
-| `no_changes`          | No update fields provided to `project update`                                  |
-| `already_done`        | Project is already archived                                                    |
-| `linked_data`         | Workspace cannot be removed because it has linked PRDs (use `--force`)         |
-| `unsupported`         | The command does not support `--json` in v1                                    |
+Common command-level error codes include:
 
----
+| Code                 | Meaning                                                         |
+| -------------------- | --------------------------------------------------------------- |
+| `validation_error`   | argument validation failed                                      |
+| `not_found`          | requested entity does not exist                                 |
+| `no_workspace`       | no workspace matched the current path                           |
+| `no_active_prd`      | no active PRD is available for the requested operation          |
+| `no_changes`         | no update fields were supplied                                  |
+| `already_done`       | archive or done action was requested for something already done |
+| `linked_data`        | workspace removal is blocked by linked PRDs                     |
+| `invalid_payload`    | log payload could not be parsed                                 |
+| `file_read_error`    | `prd load` could not read the requested file                    |
+| `invalid_depends_on` | a `prd load` document used invalid task index references        |
+| `unsupported`        | the command does not support JSON output                        |
+| `render_error`       | context rendering failed                                        |
+| `install_error`      | install target resolution failed                                |
+| `db_error`           | database initialization or lookup failed                        |
 
-## Supported commands
+## Field Serialization Notes
 
-### `init`
+- `Date` values are serialized as ISO strings
+- `task.dependsOn` is returned as a parsed JSON array, not a raw string
+- `activity.payload` is returned as a parsed object, not a raw string
+
+## Command Shapes
+
+### Init
+
+`depot --json init ...`
 
 ```json
 { "kind": "success", "payload": { "project": { ... }, "workspace": { ... } } }
 ```
 
-### `project list`
+### Project Commands
+
+`project list`
 
 ```json
-{ "kind": "success", "payload": { "items": [ { "id", "name", "status", "description", "createdAt", "updatedAt" } ] } }
+{ "kind": "success", "payload": { "items": [ ... ] } }
 ```
 
-### `project show`
-
-```json
-{ "kind": "success", "payload": { "item": { "id", "name", "status", "description", "createdAt", "updatedAt" } } }
-```
-
-### `project update` / `project archive`
+`project show`, `project update`, `project archive`
 
 ```json
 { "kind": "success", "payload": { "item": { ... } } }
 ```
 
-Returns the final project state after the mutation.
+### Workspace Commands
 
-### `workspace list`
+`workspace list`
 
 ```json
-{ "kind": "success", "payload": { "items": [ { "id", "projectId", "path", "label", "createdAt", "updatedAt" } ] } }
+{ "kind": "success", "payload": { "items": [ ... ] } }
 ```
 
-### `workspace show`
+`workspace show`
 
 ```json
 { "kind": "success", "payload": { "item": { ... }, "project": { ... } } }
 ```
 
-### `workspace rename`
+`workspace rename`
 
 ```json
 { "kind": "success", "payload": { "item": { ... } } }
 ```
 
-### `workspace remove`
+`workspace remove`
 
 ```json
 { "kind": "success", "payload": { "removed": "<workspace-id>" } }
 ```
 
-### `prd create`
+### PRD Commands
 
-```json
-{ "kind": "success", "payload": { "item": { "id", "title", "status", "revision", "context", "scope", "parentId", "projectId", "workspaceId", "createdAt", "committedAt", "activatedAt" } } }
-```
-
-### `prd show`
-
-```json
-{ "kind": "success", "payload": { "item": { "id", "title", "status", "revision", "context", "scope", "parentId", "createdAt", "committedAt", "activatedAt" } } }
-```
-
-### `prd list`
-
-```json
-{ "kind": "success", "payload": { "items": [ { ... } ] } }
-```
-
-### `prd commit` / `prd activate` / `prd amend` / `prd archive`
+`prd create`, `prd show`, `prd activate`, `prd ready`, `prd done`, `prd cancel`, `prd fork`
 
 ```json
 { "kind": "success", "payload": { "item": { ... } } }
 ```
 
-Returns the final PRD state after the mutation.
-
-### `task add`
+`prd list`
 
 ```json
-{ "kind": "success", "payload": { "item": { "id", "title", "status", "position", "effort", "dependsOn": [], "description", "descriptionFormat", "doneCriteria", "prdId", "createdAt", "startedAt", "completedAt", "blockedReason", "skipReason" } } }
+{ "kind": "success", "payload": { "items": [ ... ] } }
 ```
 
-`dependsOn` is a parsed string array, not a raw JSON string.
-
-### `task list`
+`prd load`
 
 ```json
-{ "kind": "success", "payload": { "items": [ { ... } ] } }
+{ "kind": "success", "payload": { "prd": { ... }, "tasks": [ ... ] } }
 ```
 
-### `task show`
+### Task Commands
+
+`task add`, `task show`, `task start`, `task done`, `task block`, `task skip`
 
 ```json
 { "kind": "success", "payload": { "item": { ... } } }
 ```
 
-### `task start` / `task done` / `task block` / `task skip`
+`task list`
+
+```json
+{ "kind": "success", "payload": { "items": [ ... ] } }
+```
+
+Representative task shape:
+
+```json
+{
+  "kind": "success",
+  "payload": {
+    "item": {
+      "id": "01...",
+      "prdId": "01...",
+      "title": "Implement context command",
+      "status": "pending",
+      "position": 1,
+      "effort": "m",
+      "dependsOn": [],
+      "description": "Intent:\n...",
+      "descriptionFormat": "structured_v1",
+      "doneCriteria": "...",
+      "blockedReason": null,
+      "skipReason": null,
+      "createdAt": "2026-04-26T10:00:00.000Z"
+    }
+  }
+}
+```
+
+### Review Commands
+
+`review start`, `review task add`, `review done`
 
 ```json
 { "kind": "success", "payload": { "item": { ... } } }
 ```
 
-Returns the final task state after the mutation.
-
-### `log add`
+`review list`
 
 ```json
-{ "kind": "success", "payload": { "item": { "id", "eventType", "payload": { ... }, "projectId", "workspaceId", "prdId", "taskId", "reviewId", "createdAt" } } }
+{ "kind": "success", "payload": { "items": [ ... ] } }
 ```
 
-`payload` is a parsed object.
-
-### `log list`
+`review show`
 
 ```json
-{ "kind": "success", "payload": { "items": [ { ..., "payload": { ... } } ] } }
+{ "kind": "success", "payload": { "item": { ... }, "tasks": [ ... ] } }
 ```
 
-### `review start`
+### Log Commands
 
-```json
-{ "kind": "success", "payload": { "item": { "id", "prdId", "prdRevision", "status", "mode", "userFeedback", "findings", "questions", "followupTasks", "decision", "decisionNote", "createdAt", "completedAt" } } }
-```
-
-### `review activate`
+`log add`
 
 ```json
 { "kind": "success", "payload": { "item": { ... } } }
 ```
 
-### `review show`
+`log list`
 
 ```json
-{ "kind": "success", "payload": { "item": { ... } } }
+{ "kind": "success", "payload": { "items": [ ... ] } }
 ```
 
-### `review list`
+Representative log item shape:
 
 ```json
-{ "kind": "success", "payload": { "items": [ { ... } ] } }
+{
+  "kind": "success",
+  "payload": {
+    "item": {
+      "id": "01...",
+      "eventType": "note",
+      "projectId": "01...",
+      "workspaceId": "01...",
+      "prdId": null,
+      "taskId": null,
+      "payload": {
+        "message": "Started implementation"
+      },
+      "createdAt": "2026-04-26T10:00:00.000Z"
+    }
+  }
+}
 ```
 
-### `review findings`
+### Install Command
+
+`install`
 
 ```json
-{ "kind": "success", "payload": { "item": { ... } } }
+{
+  "kind": "success",
+  "payload": {
+    "items": [
+      { "target": "opencode", "mode": "prd", "filePath": "..." },
+      { "target": "opencode", "mode": "dev", "filePath": "..." }
+    ]
+  }
+}
 ```
 
-Returns the updated review state.
+## Not Included
 
-### `review decide`
-
-```json
-{ "kind": "success", "payload": { "item": { ... } } }
-```
-
-Returns the completed review with the recorded decision.
-
----
-
-## Excluded from v1
-
-- `context` — returns `{ "kind": "error", "error": { "code": "unsupported", ... } }`
-- `install` — not part of the machine-consumer surface
-- Streaming output
-- Published JSON Schema files
-- A versioned stability contract independent of depot releases
+- `context` explicitly rejects JSON mode with `unsupported`
+- `serve` is not part of the JSON contract
+- parser-level help output or argument errors that occur before depot's command handler runs may not be wrapped in the depot envelope
+- there are no published JSON Schema files for these payloads yet

@@ -1,67 +1,94 @@
 # Architecture Overview
 
-This page describes the current implementation shape of `depot`.
+This page describes the current implementation of `depot`.
 
 ## Stack
 
-- Runtime: Bun
-- Language: TypeScript with `strict` mode
+- Source toolchain: Bun + TypeScript
+- Runtime target for the bundled CLI: Node `>=25`
 - CLI framework: `citty`
-- Database: SQLite via `bun:sqlite`
+- Effects and service wiring: `effect`
+- Database: SQLite through `node:sqlite`
 - ORM and migrations: Drizzle ORM + Drizzle Kit
-- Validation: Zod
-- ID generation: ULID via `ulid`
+- Validation: `effect/Schema`
+- ID generation: monotonic ULIDs via `ulid`
+- HTTP layer: Hono
+- Web UI: React 19, TanStack Router, TanStack Query, Tailwind CSS 4
+- Packaging: `vite-plus` with `vp pack` for the CLI bundle and `vp build` for the web app
 
-## Repository layout
+## Repository Layout
 
-```
+```text
 src/
   cli/
-    index.ts           # CLI entrypoint, defines main command and subcommands
-    command.ts         # defineValidatedCommand helper (citty + Zod integration)
-    output.ts          # JSON envelope helpers (outputSuccess, outputError)
-    runtime.ts         # getDb, resolveCurrentWorkspace
+    index.ts                # top-level CLI entrypoint
+    command.ts              # citty wrapper with Effect/Schema validation
+    output.ts               # JSON success/error helpers
+    runtime.ts              # shared db/runtime helpers and workspace resolution
     commands/
-      project.ts       # init, project list/show/update/archive
-      workspace.ts     # workspace list/show/rename/remove
-      prd.ts           # prd create/show/list/commit/activate/amend/archive
-      task.ts          # task add/list/show/start/done/block/skip
-      log.ts           # log add/list
-      context.ts       # context [prd|dev]
-      install.ts       # install
-  lib/
-    workflow.ts        # All workflow logic and state transitions
-    validator.ts       # Valid enums and transition tables
-    schemas.ts         # Zod field schemas and validateArgs helper
-    agent-context.ts   # renderContextIndex and renderContextMode
-    agent-install.ts   # resolveInstallTargets and buildInstallWrites
-    contexts.ts        # Embedded template registry (prd.md, dev.md)
-    task-spec.ts       # structured_v1 description parsing and formatting
-    workspace-bootstrap.ts # resolveOrCreateWorkspaceForPath
-    logger.ts          # log helper, debug flag, json mode flag
-    ids.ts             # generateId (ULID)
-    paths.ts           # normalizeWorkspacePath
+      projects.ts
+      workspaces.ts
+      prds.ts
+      tasks.ts
+      reviews.ts
+      activity.ts
+      context.ts
+      install.ts
+      serve.ts
+
+  modules/
+    projects/domain.ts      # project operations
+    workspaces/domain.ts    # workspace operations and path resolution
+    workspaces/bootstrap.ts # auto-create path used by `context`
+    prds/domain.ts          # PRD lifecycle and batch loading
+    tasks/domain.ts         # task lifecycle and dependency checks
+    tasks/spec.ts           # structured task description parsing and formatting
+    reviews/domain.ts       # review lifecycle and review tasks
+    activity/domain.ts      # activity writes, reads, summaries
+    activity/status.ts      # workspace status snapshot used by context rendering
+    context/
+      index.ts              # embedded template registry
+      render.ts             # context renderers
+      templates/*.md        # embedded agent instructions
+    install/agent.ts        # slash-command file generation
+
   db/
-    schema.ts          # Drizzle schema (source of truth)
-    client.ts          # openDatabase, applyMigrations, defaultDbPath
-    migrations/        # Generated migration SQL files
-  context/
-    prd.md             # Embedded PRD agent instructions
-    dev.md             # Embedded dev agent instructions
-  types/
-    text.d.ts          # TypeScript declaration for .md with { type: "text" }
+    client.ts               # sqlite open + migration application
+    schema.ts               # source of truth for the schema
+    migrations/             # generated drizzle migrations
+
+  services/
+    database.ts             # Effect runtime and Db service
+
+  shared/
+    validator.ts            # enums and lifecycle transition tables
+    schemas.ts              # field schemas and activity payload schemas
+    utils.ts                # ids, paths, formatting helpers
+    logger.ts               # stdout/stderr and debug/json mode flags
+    db.ts
+    errors.ts
+
+  lib/
+    workflow.ts             # async shim over the Effect domain modules
+    json.ts                 # JSON/schema parsing helpers
+
+  web/
+    api/                    # Hono API routes
+    routes/                 # TanStack Router route files
+    components/             # web UI components
+    lib/                    # query client, RPC client, formatters
+    styles/
 
 tests/
-  cli/                 # CLI command integration tests
-  lib/                 # Unit tests for lib modules
-  db/                  # Database client and migration tests
-  integration/         # End-to-end tests
-  helpers/             # Shared test utilities
+  cli/
+  lib/
+  web/
+  helpers/
 ```
 
-The CLI entrypoint is `src/cli/index.ts`.
+`src/cli/index.ts` is the user-facing CLI entrypoint. `src/index.ts` simply imports it for the bundle.
 
-## Local database model
+## Database Lifecycle
 
 The default database path is:
 
@@ -69,73 +96,154 @@ The default database path is:
 ~/.depot/depot.db
 ```
 
+You can override that with `DB_PATH`.
+
 When `depot` opens the database, it:
 
 - creates `~/.depot/` if needed
-- opens SQLite in WAL mode with a 5-second busy timeout
+- opens SQLite with WAL mode enabled
+- sets a 5-second busy timeout
 - enables foreign keys
-- applies pending Drizzle migrations automatically with retry logic for `SQLITE_BUSY` errors
+- applies pending Drizzle migrations automatically
+- retries selected migration/open races such as `SQLITE_BUSY`
 
-`src/db/schema.ts` is the source of truth for the schema. Generated migrations live under `src/db/migrations/` in source and are published under `dist/migrations/` in the npm package.
+`src/db/schema.ts` is the source of truth. Generated migrations live in `src/db/migrations/`. The CLI build copies them to `dist/migrations/`.
 
-## Schema summary
+## Schema Summary
 
-| Table          | Primary key            | Purpose                                                           |
-| -------------- | ---------------------- | ----------------------------------------------------------------- |
-| `projects`     | ULID                   | Top-level project container                                       |
-| `workspaces`   | ULID                   | Path binding, unique per canonical path                           |
-| `prds`         | ULID                   | PRD lifecycle, supports revision chaining via `parent_id`         |
-| `tasks`        | ULID                   | Execution units inside a PRD                                      |
-| `reviews`      | ULID                   | Review objects attached to a PRD revision                         |
-| `activity_log` | auto-increment integer | Structured event log, linked to project/workspace/prd/task/review |
+| Table          | Primary key | Purpose                                 |
+| -------------- | ----------- | --------------------------------------- |
+| `projects`     | text ULID   | top-level project container             |
+| `workspaces`   | text ULID   | canonical path binding for a project    |
+| `prds`         | text ULID   | PRDs plus revision-family metadata      |
+| `reviews`      | text ULID   | human or agent review records for a PRD |
+| `tasks`        | text ULID   | execution tasks and review findings     |
+| `activity_log` | text ULID   | structured activity events              |
 
-All timestamps are stored as ISO 8601 strings. IDs are ULIDs.
+SQLite stores timestamps as `integer` values in `timestamp_ms` mode. Drizzle materializes them as JavaScript `Date` objects, and JSON output serializes them as ISO strings.
 
-## Workflow engine
+## Command Layer
 
-Most business rules live in `src/lib/workflow.ts`.
+`src/cli/command.ts` is the thin wrapper around `citty`.
 
-That module owns:
+It provides three important behaviors:
+
+- argument validation through `effect/Schema`
+- a shared output API for text and JSON modes
+- optional workspace resolution or workspace auto-creation per command
+
+The command files under `src/cli/commands/` stay intentionally small. They validate inputs, resolve the current workspace when needed, and delegate to domain functions.
+
+## Domain Layer
+
+The actual business rules live in `src/modules/*/domain.ts`.
+
+That layer owns:
 
 - project CRUD and status updates
-- workspace registration, resolution (longest-prefix matching), label updates, and removal
-- PRD lifecycle operations (create, commit, activate, archive, amend)
-- task creation and status transitions (with dependency enforcement)
-- review CRUD (create, start, record findings, record decision)
-- activity log writes and reads
-- `buildWorkspaceStatus` — builds a consistent snapshot used by context rendering
-- `findNextRecommendedTask` — finds the next pending task with all dependencies satisfied
-- `summarizeActivityPayload` — produces a human-readable one-line summary for any event type
+- workspace registration, label updates, removal, and longest-prefix resolution
+- PRD lifecycle transitions and family forking
+- task creation, dependency checks, and lifecycle transitions
+- review creation, auto-start-on-first-finding behavior, and completion
+- activity payload validation and storage
 
-This keeps command files thin. Commands resolve context, validate input, and delegate to workflow functions that enforce state rules.
+Transition rules are centralized in `src/shared/validator.ts`.
 
-## Workspace resolution
+`src/lib/workflow.ts` is not the primary business-logic home. It is a compatibility shim that re-exposes the Effect domain functions to callers that still pass a raw database handle, notably the context renderers and some tests.
+
+## Workspace Resolution
 
 Many commands are workspace-aware rather than purely global.
 
-The resolution rule is longest-prefix matching on canonical absolute paths. On Windows, paths are normalized to lowercase forward-slash form before comparison. This ensures commands run from any nested subdirectory resolve to the correct workspace.
+Resolution uses longest-prefix matching on canonical absolute paths. On Windows, paths are normalized to lowercase forward-slash form before comparison.
 
-`depot context` uses `autoCreate: true`, which silently creates a project and workspace for the current directory if none exists. All other workspace-aware commands require an existing workspace.
+That means a workspace registered at:
 
-## Agent contexts and install flow
+```text
+D:/Projects/depot
+```
 
-`src/lib/agent-context.ts` renders the `prd` and `dev` context modes. The embedded instruction templates (`src/context/*.md`) are imported at build time as text strings, so the binary is self-contained at runtime.
+also resolves commands launched from nested paths such as:
 
-`src/lib/agent-install.ts` generates slash-command files for OpenCode and Claude Code. Those files do not embed static snapshots; they call `depot context <mode>` at runtime through native shell injection. On Windows the generated shell is `powershell`; on all other platforms it is `bash`.
+```text
+D:/Projects/depot/src/web/routes
+```
 
-## Output contracts
+`depot context` uses `autoCreate: true`. Other workspace-aware commands require a pre-existing workspace.
 
-The `--json` global flag switches all output to machine-readable mode. In JSON mode, `outputSuccess` emits `{ "kind": "success", "payload": ... }` to stdout, and `outputError` emits `{ "kind": "error", "error": { "code": ..., "message": ... } }` before exiting with code 1. In text mode, `outputError` writes to stderr. See `docs/json-output.md` for the full contract.
+## Context Rendering
 
-## Command validation
+The context system is split into two parts:
 
-`src/cli/command.ts` wraps citty's `defineCommand` with a Zod-validated variant. The schema is applied in both `setup` and `run` hooks. Validation failures print each issue and exit with code 1 (or emit a JSON error envelope in JSON mode).
+- embedded templates in `src/modules/context/templates/*.md`
+- renderers in `src/modules/context/render.ts`
 
-## Current design bias
+The templates are imported as text at build time. The bundle does not read template files from disk at runtime.
 
-The implementation today is intentionally:
+The renderer builds context documents from live database state, including PRD summaries, tasks, activity history, review findings, and embedded agent instructions.
+
+## Install Flow
+
+`src/modules/install/agent.ts` generates slash-command files for OpenCode and Claude Code.
+
+Those files do not embed snapshots. They shell out to `depot context prd` or `depot context dev` at invocation time, so the loaded context always reflects the current database state.
+
+On Windows the generated shell is `powershell`. On other platforms it is `bash`.
+
+## Web Interface
+
+`depot serve` starts a Hono server and exposes two layers:
+
+- an API mounted under `/api`
+- static assets served from `dist/web`
+
+API routes:
+
+- `GET /api/ping`
+- `GET /api/context`
+- `GET /api/prds`
+- `GET /api/prds/:id`
+
+Web routes:
+
+- `/` lists PRDs
+- `/prds/:id` shows PRD details, tasks, and the latest review findings
+
+The frontend is a small read-only UI for now. `bun run build` builds the CLI bundle, while `bun run build:web` builds the static web assets that `serve` expects.
+
+## Build And Packaging
+
+Build outputs are split:
+
+- `bun run build` produces `dist/index.mjs` and `dist/migrations/`
+- `bun run build:web` produces `dist/web/`
+
+`vite.config.ts` also contains a raw-text plugin that turns `.md` and `.sql` files into string imports during build, which is how the embedded context templates work.
+
+## Output Contract
+
+The `--json` flag switches supported commands to machine-readable output.
+
+`outputSuccess` writes:
+
+```json
+{ "kind": "success", "payload": { ... } }
+```
+
+`outputError` writes:
+
+```json
+{ "kind": "error", "error": { "code": "...", "message": "..." } }
+```
+
+See `docs/json-output.md` for command-level shapes and exclusions.
+
+## Design Bias
+
+The implementation is intentionally:
 
 - local-first
-- machine-assisted but human-readable
-- deterministic in command behavior
-- centered on explicit state transitions rather than implicit chat memory
+- explicit about state transitions
+- thin at the command edge and strict in the domain layer
+- human-readable in text mode and machine-readable where JSON mode is supported
+- organized so the CLI, the context system, and the web UI all sit on the same stored state

@@ -1,114 +1,154 @@
 # Quickstart
 
-This guide gets you from source checkout to a working `depot` project.
+This guide gets you from a source checkout to a working `depot` workspace.
+
+The examples below use `depot` as if the binary is already on your `PATH`. In a local checkout, the most reliable path is to build the bundle and run `node dist/index.mjs` instead.
 
 ## Requirements
 
-- Bun `>=1.0`
+- Bun for install, build, and contributor workflows
+- Node `>=25` to run the built CLI bundle
 
-## Install dependencies
+## Install And Build
 
 ```bash
 bun install
+bun run build
+node dist/index.mjs --help
 ```
 
-## Run the CLI locally
+If you want to follow the examples exactly from a checkout, replace each `depot` invocation with `node dist/index.mjs`.
 
-```bash
-bun run depot -- --help
-```
-
-## Global flags
+## Global Flags
 
 ```bash
 depot [--debug] [--json] <command>
 ```
 
-- `--debug` enables verbose debug output to stderr
-- `--json` switches all output to machine-readable JSON (see `../json-output.md`)
+- `--debug` enables verbose debug output on stderr
+- `--json` switches supported commands to machine-readable output on stdout
 
-## Initialize a project
+See `../json-output.md` for the JSON contract.
 
-From the repository or workspace you want to track:
+## Initialize A Project And Workspace
 
-```bash
-bun run depot -- init
-```
-
-By default, `depot`:
-
-- uses the current folder name as the project name
-- links the current directory as a workspace
-- stores its SQLite database at `~/.depot/depot.db`
-
-You can also provide explicit values:
+From the repository or directory you want to track:
 
 ```bash
-bun run depot -- init my-project --description "Local agent workflow" --label "main workspace"
+depot init my-project --label "main workspace"
 ```
 
-## Create a PRD
+A few details are worth knowing:
+
+- the CLI currently requires an explicit project name
+- `--path` defaults to the current working directory
+- the database defaults to `~/.depot/depot.db`
+
+You can also give the project a description or point at a different path:
 
 ```bash
-bun run depot -- prd create --title "Core CLI foundation" --context "Need durable agent state" --scope "Initial project, PRD, task, and log flow"
+depot init my-project --description "Local agent workflow" --path ../other-repo
 ```
 
-## Commit and activate the PRD
+## Create And Activate A PRD
 
 ```bash
-bun run depot -- prd list
-bun run depot -- prd commit <prd-id>
-bun run depot -- prd activate <prd-id>
+depot prd create --title "Core CLI foundation" --context "Need durable agent state" --scope "Project, PRD, task, review, and log flow"
+depot prd list
+depot prd ready <prd-id>
+depot prd activate <prd-id>
 ```
 
-## Add a task
+`depot prd list` shows the latest revision of each PRD family for the current project.
 
-New tasks must use a structured description with `Intent:`, `Scope:`, and `Non-goals:` sections:
+## Add A Task
+
+The `task add` command currently uses camelCase flag names, most notably `--prdId`.
+
+At minimum, your description should follow this structure:
+
+```text
+Intent:
+Render a live workspace summary.
+
+Scope:
+- Include the active PRD.
+- Include recent activity.
+
+Non-goals:
+- Do not redesign the output format.
+```
+
+Then create the task:
 
 ```bash
-bun run depot -- task add \
-  --prd <prd-id> \
-  --title "Implement context command" \
-  --desc $'Intent:\nBuild a readable summary for the active workspace.\n\nScope:\n- Include active PRD and task progress.\n- Include recent activity.\n\nNon-goals:\n- Do not redesign the context output format.' \
-  --criteria "Context includes active PRD\nContext includes task progress" \
-  --effort m
+depot task add --prdId <prd-id> --title "Implement context command" --desc "<structured description>" --criteria "Context renders the active PRD\nContext renders recent activity" --effort m
 ```
 
-## Work the task
+If you prefer to create a PRD and all of its tasks in one shot, use `depot prd load` with a JSON document.
+
+## Work The Task
 
 ```bash
-bun run depot -- task list
-bun run depot -- task start <task-id>
-bun run depot -- log add note --task <task-id> --payload '{"message":"Started implementation"}'
-bun run depot -- task done <task-id>
+depot task show <task-id>
+depot task start <task-id>
+depot log add note --task <task-id> --payload '{"message":"Started implementation"}'
+depot task done <task-id>
 ```
 
-## Render live agent context
+`depot task show` is the detailed spec view. `depot context dev` is only a summary.
+
+## Run The Review Loop
 
 ```bash
-bun run depot -- context
-bun run depot -- context prd
-bun run depot -- context dev
+depot review start <prd-id> --type agent
+depot review task add <review-id> --title "Missing edge-case handling" --description "Handle the empty-state branch explicitly." --doneCriteria "Empty-state behavior is covered" --severity major
+depot review done <review-id>
 ```
 
-## Install slash commands for OpenCode or Claude Code
+Adding the first review task automatically moves the review from `draft` to `in_progress`.
+
+## Render Live Agent Context
 
 ```bash
-bun run depot -- install --all
+depot context
+depot context prd
+depot context dev
+depot context coder <prd-id>
+depot context auditor <prd-id>
 ```
 
-This writes `depot-prd` and `depot-dev` command files that call `depot context <mode>` through the `depot` binary available on your `PATH`.
+`depot context` turns stored workflow state into agent-ready prompts.
 
-## Inspect projects and workspaces
+## Install Slash Commands
 
 ```bash
-bun run depot -- project list
-bun run depot -- project show <project-id>
-bun run depot -- workspace list
-bun run depot -- workspace show <workspace-id>
+depot install --all
 ```
 
-## Next steps
+This writes `depot-prd.md` and `depot-dev.md` command files for supported agents. Those files call `depot context <mode>` at runtime, so they always load fresh state.
 
-- Read `../concepts/index.md` to understand the data model.
-- Use the `../cli/` pages for command details and examples.
+## Start The Web UI
+
+```bash
+bun run build:web
+depot serve --port 4242
+```
+
+The `serve` command expects built frontend assets in `dist/web`. From a source checkout, `bun run build` builds the CLI bundle, while `bun run build:web` builds the frontend.
+
+## Inspect Stored State
+
+```bash
+depot project list
+depot project show <project-id>
+depot workspace list
+depot workspace show <workspace-id>
+depot log list --workspace
+```
+
+## Next Steps
+
+- Read `../concepts/index.md` for the full model and lifecycle rules.
+- Use the `../cli/` pages for command-specific details.
+- Read `../architecture/overview.md` if you are changing the implementation.

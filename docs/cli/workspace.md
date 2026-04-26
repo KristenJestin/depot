@@ -12,13 +12,9 @@ List all registered workspaces.
 depot workspace list
 ```
 
-### Output
-
-Each line includes the workspace ID, canonical path, optional label, and the linked project ID.
+Each line includes the workspace ID, canonical path, optional label, and linked project ID.
 
 If no workspaces exist, the CLI tells you to run `depot init` first.
-
----
 
 ## `depot workspace show`
 
@@ -30,11 +26,7 @@ Show full details for a workspace.
 depot workspace show <workspace-id>
 ```
 
-### Output
-
-Prints aligned key-value fields: ID, Path, Label, Project (name and ID), Created, Updated.
-
----
+Prints aligned key-value fields for ID, Path, Label, Project, Created, and Updated.
 
 ## `depot workspace rename`
 
@@ -48,8 +40,6 @@ depot workspace rename <workspace-id> --label <label>
 
 `--label` is required.
 
----
-
 ## `depot workspace remove`
 
 Remove a workspace from the database.
@@ -62,6 +52,8 @@ depot workspace remove <workspace-id> [--force]
 
 ### Notes
 
-- Without `--force`, the command is blocked if the workspace has linked PRDs.
-- With `--force`, the workspace is removed along with all linked PRDs, tasks, reviews, and activity log entries that belong to it.
-- Activity log entries scoped only to the workspace (not to a specific PRD or task) are also removed.
+- without `--force`, removal is blocked if the workspace has linked PRDs
+- with `--force`, depot removes the workspace and deletes PRDs, tasks, and activity records linked through that workspace
+- workspace-scoped activity rows are also removed
+
+Use `--force` with care. The operation is intentionally destructive.

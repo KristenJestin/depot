@@ -26,6 +26,7 @@
   --primary-foreground: oklch(0.98 0 0);
   --ring: oklch(0.65 0.27 288);
   --destructive: oklch(0.55 0.22 25);
+  --warning: oklch(0.72 0.17 75);
 
   --chart-1: oklch(0.65 0.27 288); /* purple  — in_progress */
   --chart-2: oklch(0.68 0.16 165); /* teal    — amélioration */
@@ -43,12 +44,21 @@
   --sidebar-ring: oklch(0.65 0.27 288);
 
   --radius: 0.5rem;
+
+  --sidebar-width: 13.75rem; /* 220px */
 }
 
 @theme inline {
   --font-sans: "Inter Variable", sans-serif;
   --font-display: "Space Grotesk Variable", sans-serif;
   --font-mono: ui-monospace, monospace;
+
+  /* Slide-in animation for panels */
+  --animate-slide-in-right: slideInRight 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* Extra-small text — below text-xs (12px) */
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 1rem;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -65,6 +75,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -148,4 +159,17 @@
     opacity: var(--dot-min-opacity, 0.08);
     transform: scale(0.85);
   }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.depot-logo-gradient {
+  background-image: linear-gradient(135deg, oklch(0.65 0.27 288), oklch(0.75 0.22 280));
 }

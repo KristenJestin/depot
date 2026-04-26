@@ -1,36 +1,37 @@
 # Roadmap
 
-This roadmap reflects the current direction of `depot` without redefining the behavior already implemented in the codebase.
+This roadmap describes the direction implied by the current codebase. It does not replace the code as the source of truth.
 
 ## Now
 
-- Improve CLI output consistency and readability across commands.
-- Expand command coverage around projects, logging, and workspace-aware status inspection.
-- Tighten validation rules and mechanical workflow guarantees.
-- Keep the local SQLite workflow robust and predictable.
+- bring the source runner, bundled CLI, and help output into line
+- make the `serve` path more predictable by tightening how web assets are built and packaged
+- keep the local SQLite workflow robust, migration-safe, and deterministic
+- improve command-level consistency across text output, JSON output, and error handling
+- close obvious lifecycle edge cases around destructive operations and linked records
 
 ## Next
 
-- Add richer project and workspace management beyond the current `init` and `project list` flow.
-- Improve PRD authoring and revision workflows while keeping transitions explicit.
-- Add more structured output contracts, especially for machine-oriented consumers.
-- Expand observability around stalled work, broken dependencies, and incomplete execution state.
-- Clarify installation and packaging paths beyond source-based Bun usage.
+- improve PRD authoring ergonomics, especially around structured task descriptions and batch loading
+- expand project and workspace browsing beyond the current CRUD baseline
+- deepen review and handoff workflows around the `dev`, `coder`, and `auditor` contexts
+- extend the web UI beyond the current read-only PRD list and PRD detail views
+- add better visibility into blocked work, dependency bottlenecks, and stale execution state
 
 ## Later
 
-- Explore a broader context command that bundles the right state for a given mode.
-- Add stronger operational tooling such as diagnostics, snapshots, and read-only views.
-- Revisit distribution as compiled binaries and multi-platform artifacts.
-- Explore more advanced workflow patterns such as richer review loops and multi-agent coordination.
-- Reassess portability, backup, and import or export stories for long-lived project state.
+- add richer import, export, backup, and snapshot flows for long-lived project state
+- expand the web UI from read-only inspection toward broader workflow visibility
+- explore stronger multi-agent coordination patterns on top of the same local model
+- add more diagnostics and recovery tooling for broken or partially-complete state
+- revisit broader distribution and packaging options once the runtime story is stable
 
-## Themes carried forward
+## Themes
 
-The roadmap continues to prioritize the same core themes already present in earlier planning:
+The same themes continue to drive the project:
 
-- better task and PRD execution workflows
-- clearer CLI UX and output contracts
-- stronger reliability around storage, migrations, and recovery
-- better documentation and onboarding
-- room for future observability and distribution improvements
+- local-first state instead of chat-only memory
+- explicit transitions instead of implicit workflow guesses
+- terminal-first execution with machine-readable escape hatches
+- a single data model shared by CLI, context rendering, and web views
+- small, inspectable primitives that can support richer orchestration later

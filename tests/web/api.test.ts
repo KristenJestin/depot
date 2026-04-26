@@ -1,10 +1,21 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { createTestDb } from "../helpers/db";
-import { createApp } from "#/web/api";
+import { describe, it, expect, beforeAll, vi } from "vitest";
+import type { Database } from "#/db/client";
 import { projects, prds } from "#/db/schema";
+import { createTestDb } from "../helpers/db";
+
+vi.mock("#/services/database", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#/services/database")>();
+  return { ...actual, getDb: vi.fn<() => Promise<Database>>() };
+});
+
+import { getDb } from "#/services/database";
+import app from "#/web/api";
 
 const { db } = createTestDb();
-const app = createApp(db);
+
+beforeAll(() => {
+  vi.mocked(getDb).mockResolvedValue(db);
+});
 
 describe("web api", () => {
   it("GET /api/ping returns 200 { ok: true }", async () => {
@@ -59,6 +70,20 @@ describe("web api", () => {
       const body = await res.json();
       expect(body.prds[0].id).toBe("prd-2");
       expect(body.prds[1].id).toBe("prd-1");
+    });
+  });
+
+  describe("GET /api/prds/:id", () => {
+    it("retourne 404 pour un id inconnu", async () => {
+      const res = await app.request("/api/prds/nonexistent");
+      expect(res.status).toBe(404);
+    });
+
+    it("retourne le PRD avec ses tasks et review", async () => {
+      const res = await app.request("/api/prds/prd-1");
+      const body = await res.json();
+      expect(body.prd.id).toBe("prd-1");
+      expect(Array.isArray(body.tasks)).toBe(true);
     });
   });
 });

@@ -1,23 +1,23 @@
 # Log Commands
 
-The activity log records structured execution events for the current workspace.
+The activity log records structured execution events for the current project and, optionally, the current workspace.
 
-## Event types
+## Event Types
 
-Current supported event types are:
+Supported event types are:
 
 - `session_start`
 - `task_started`
 - `task_done`
 - `task_blocked`
 - `task_skipped`
-- `prd_committed`
 - `prd_activated`
-- `prd_amended`
+- `prd_ready`
+- `prd_done`
+- `prd_canceled`
+- `prd_forked`
 - `note`
 - `error`
-
----
 
 ## `depot log add`
 
@@ -31,10 +31,11 @@ depot log add <event-type> [--task <task-id>] [--prd <prd-id>] [--payload <json>
 
 ### Notes
 
-- `--task` and `--prd` require full IDs and must belong to the current workspace.
-- `--payload` defaults to `{}`.
-- Payload must resolve to a JSON object.
-- The CLI accepts both strict JSON and a looser object-like format (unquoted keys, single-quoted strings, bare values).
+- `--task` and `--prd` require full IDs when provided
+- they are validated against the current project and workspace context
+- `--payload` defaults to `{}`
+- payload must resolve to a JSON object
+- the CLI accepts strict JSON and a looser object-like syntax
 
 ### Examples
 
@@ -44,24 +45,20 @@ depot log add task_started --task <task-id> --payload '{"title":"Implement CLI c
 depot log add error --payload '{"message":"Workspace resolution failed"}'
 ```
 
----
-
 ## `depot log list`
 
-List recent activity for the current project.
+List recent activity.
 
 ### Usage
 
 ```bash
-depot log list [--last <count>]
+depot log list [--last <count>] [--workspace]
 ```
 
-`--last` defaults to 20. Must be a positive integer.
+### Notes
 
-### Example
-
-```bash
-depot log list --last 10
-```
+- `--last` defaults to `20`
+- `--workspace` restricts results to the current workspace
+- without `--workspace`, the command shows activity for the whole current project
 
 Each output line includes the timestamp, event type, and a short summary derived from the stored payload.

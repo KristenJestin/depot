@@ -2,7 +2,7 @@
 
 Tasks are the execution units inside a PRD.
 
-## Status model
+## Status Model
 
 Current task statuses are:
 
@@ -12,16 +12,14 @@ Current task statuses are:
 - `done`
 - `skipped`
 
-Allowed transitions:
+Allowed transitions are:
 
-- `pending → in_progress`
-- `pending → skipped`
-- `in_progress → done`
-- `in_progress → blocked`
-- `blocked → in_progress`
-- `blocked → skipped`
-
----
+- `pending -> in_progress`
+- `pending -> skipped`
+- `in_progress -> done`
+- `in_progress -> blocked`
+- `blocked -> in_progress`
+- `blocked -> skipped`
 
 ## `depot task add`
 
@@ -30,28 +28,35 @@ Add a new task to a PRD.
 ### Usage
 
 ```bash
-depot task add --prd <prd-id> --title <title> --desc <text> --criteria <text> --effort <xs|s|m|l|xl> [--depends <task-id,task-id>]
+depot task add --prdId <prd-id> --title <title> --desc <text> --criteria <text> --effort <xs|s|m|l|xl> [--depends <task-id,task-id>]
 ```
 
 ### Rules
 
-- `--desc` is required and must use the `structured_v1` format with `Intent:`, `Scope:`, and `Non-goals:` sections.
-- `--criteria` is required and must not be empty.
-- `--effort` must be one of `xs`, `s`, `m`, `l`, `xl`.
-- `--depends` accepts comma-separated full task IDs. Each dependency is verified to exist before the task is created.
+- `--prdId` is required
+- `--desc` is required
+- `--criteria` is required and must not be empty
+- `--effort` must be one of `xs`, `s`, `m`, `l`, `xl`
+- `--depends` accepts comma-separated full task IDs
+- each dependency is verified before the task is created
 
-### Example
+### Description format
 
-```bash
-depot task add \
-  --prd <prd-id> \
-  --title "Add context command" \
-  --desc $'Intent:\nBuild the live context renderer for active workspaces.\n\nScope:\n- Include the active PRD and recent workspace activity.\n\nNon-goals:\n- Do not redesign the context output format.' \
-  --criteria "Includes active PRD\nIncludes recent activity" \
-  --effort m
+New tasks are normalized toward the structured format:
+
+```text
+Intent:
+Why this task exists.
+
+Scope:
+- What should change.
+- What should be verified.
+
+Non-goals:
+- What should not be pulled in.
 ```
 
----
+Even if you pass a plain description, depot currently stores it as `structured_v1`. Writing the structure explicitly keeps the task readable in both the CLI and the web UI.
 
 ## `depot task list`
 
@@ -63,13 +68,9 @@ List tasks for a PRD.
 depot task list [prd-id]
 ```
 
-If no PRD ID is provided, `depot` looks for the active (`in_progress`) PRD in the current workspace and errors if none is found.
+If no PRD ID is provided, depot looks for the active `in_progress` PRD in the current workspace.
 
-### Output
-
-Each line includes the task ID, position, title, status, effort, and dependency IDs if any.
-
----
+Each line includes task ID, position, title, status, effort, and dependency IDs when present.
 
 ## `depot task show`
 
@@ -81,15 +82,11 @@ Show detailed task fields.
 depot task show <task-id>
 ```
 
-### Output
+Prints aligned fields for ID, Title, Status, Position, Effort, Format, Depends On, Blocked, Skipped, Created, Started, and Completed.
 
-Prints aligned key-value fields: ID, Title, Status, Position, Effort, Format, Depends On, Blocked reason, Skip reason, Created, Started, Completed.
+Structured descriptions are rendered section by section. Criteria are always shown as a list.
 
-Structured descriptions (`structured_v1`) are rendered section-by-section with `Intent:`, `Scope:`, and `Non-goals:` labels. Legacy freeform descriptions render as a plain `Description:` block. Done criteria always renders as a `Criteria:` list.
-
-Dev agents must run `depot task show` before starting a task and before resuming after an interruption or handoff. `depot context dev` is only a summary view.
-
----
+This is the detailed spec view an agent should read before starting or resuming work.
 
 ## `depot task start`
 
@@ -101,9 +98,7 @@ Start a pending task.
 depot task start <task-id>
 ```
 
-Moves the task from `pending` to `in_progress` and sets `startedAt`.
-
----
+Moves the task to `in_progress` and sets `startedAt`.
 
 ## `depot task done`
 
@@ -119,10 +114,7 @@ Completion requires:
 
 - the task to already be `in_progress`
 - `startedAt` to be set
-- `done_criteria` to be non-empty
-- all dependency tasks to already be `done`
-
----
+- all dependency tasks to already be `done` or `skipped`
 
 ## `depot task block`
 
@@ -134,9 +126,7 @@ Block an in-progress task with an explicit reason.
 depot task block <task-id> <reason>
 ```
 
-`reason` is a required positional argument.
-
----
+`reason` is required.
 
 ## `depot task skip`
 
@@ -148,4 +138,4 @@ Skip a pending or blocked task with an explicit reason.
 depot task skip <task-id> <reason>
 ```
 
-`reason` is a required positional argument.
+`reason` is required.

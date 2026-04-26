@@ -1,52 +1,64 @@
 # depot
 
-`depot` is a Bun-based CLI for managing agent work as structured project state.
+`depot` is a local-first CLI and small web UI for managing agent work as durable project state.
 
-It gives local, durable structure to work that would otherwise live in chat history: projects, workspaces, PRDs, tasks, reviews, and activity logs. The CLI is designed for terminal-first execution and local ownership, with a SQLite database stored on the machine running the agent.
+It turns the parts of agent execution that usually disappear into chat history into explicit records in a local SQLite database: projects, workspaces, PRDs, tasks, reviews, and activity events. The CLI is the primary interface. The web UI served by `depot serve` is a read-only view of the same data.
 
 ## Why depot exists
 
-Coding agents are good at executing work, but weak at preserving context across sessions. When a chat resets or a different agent takes over, the current state of the work is often scattered across prompts, markdown notes, and half-finished branches.
+Agents are good at moving work forward, but weak at preserving clean state across sessions.
 
-`depot` turns that implicit state into explicit data:
+Once a conversation resets, the state of the work is often split across:
 
-- Projects group related work.
-- Workspaces bind projects to local directories.
-- PRDs capture why a body of work exists and what it should do.
-- Tasks make execution concrete and ordered.
-- Reviews close the feedback loop between execution and human sign-off.
-- Activity logs record what happened and why.
-- Handoffs summarize the current state so the next session can resume quickly.
+- prompts
+- local notes
+- branches
+- half-complete PRDs
+- untracked review feedback
 
-## What it does today
+`depot` turns that into explicit, queryable structure:
 
-The current CLI supports:
+- Projects group work at the top level.
+- Workspaces bind projects to canonical paths on disk.
+- PRDs define why a body of work exists and what it should cover.
+- Tasks make execution ordered, dependency-aware, and inspectable.
+- Reviews capture findings and the follow-up loop.
+- Activity logs record what happened while the work was moving.
+- Context commands package that state for orchestrator, coder, and auditor agents.
 
-- Initializing a project from a local directory with `depot init`
-- Managing projects with `depot project ...`
-- Managing workspaces with `depot workspace ...`
-- Managing PRDs with `depot prd ...`
-- Managing tasks with `depot task ...`
-- Running structured reviews with `depot review ...`
-- Recording activity with `depot log ...`
-- Rendering live agent context with `depot context`
-- Installing live slash commands with `depot install`
+## What Depot Does Today
 
-## Core ideas
+Today, the application supports:
 
-`depot` is organized around a small number of stable concepts:
+- initializing and reusing project or workspace state with `depot init`
+- managing projects with `depot project ...`
+- managing workspaces with `depot workspace ...`
+- creating, revising, loading, activating, and closing PRDs with `depot prd ...`
+- creating and executing dependency-aware tasks with `depot task ...`
+- running human or agent review loops with `depot review ...`
+- recording structured activity with `depot log ...`
+- rendering live agent context with `depot context`
+- installing slash-command files for OpenCode and Claude Code with `depot install`
+- serving a small web UI and JSON API with `depot serve`
+
+## Core Model
+
+`depot` is built around a small number of persistent concepts:
 
 - A project is the top-level container.
-- A workspace links a project to a canonical absolute path on disk.
-- A PRD belongs to a workspace and moves through `draft`, `committed`, `in_progress`, and `archived`.
-- A task belongs to a PRD and moves through `pending`, `in_progress`, `blocked`, `done`, and `skipped`.
-- A review belongs to a PRD revision and moves through `pending`, `in_progress`, and `completed`.
-- The activity log stores structured events tied to the current project and optionally a workspace, PRD, task, or review.
+- A workspace links a project to a canonical absolute path.
+- A PRD belongs to a project, may later be attached to a workspace, and can be revised through a family chain.
+- A task belongs to a PRD and moves through explicit execution states.
+- A review belongs to a PRD and stores findings as tasks.
+- The activity log stores structured events tied to a project and optionally a workspace, PRD, or task.
 
-## Documentation map
+The same database powers the CLI, the context commands, and the web UI.
 
-- Start with `getting-started/quickstart.md` for installation and first use.
-- Read `concepts/index.md` for the mental model.
-- Use the `cli/` pages for command reference by domain.
-- Read `architecture/overview.md` for an implementation-level overview.
-- Check `roadmap.md` for the current product direction.
+## Documentation Map
+
+- Start with `getting-started/quickstart.md` for the fastest path from checkout to first use.
+- Read `concepts/index.md` for the mental model and lifecycle rules.
+- Use the `cli/` pages for command-level reference.
+- Read `architecture/overview.md` for the implementation shape of the app.
+- Read `json-output.md` for the machine-readable output contract.
+- Check `roadmap.md` for the direction implied by the current codebase.

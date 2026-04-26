@@ -1,26 +1,10 @@
-import { Effect, ManagedRuntime } from "effect";
-import type { Database } from "#/db/client";
-import { Db, DbLive } from "#/services/database";
+import { Effect } from "effect";
+import { Db, getDb, getRuntime } from "#/services/database";
 import { log } from "#/shared/logger";
 import { normalizeWorkspacePath } from "#/shared/utils";
 import { resolveWorkspace } from "#/modules/workspaces/domain";
 import { resolveOrCreateWorkspaceForPath } from "#/modules/workspaces/bootstrap";
 import { outputError } from "#/cli/output";
-
-let _runtime: ManagedRuntime.ManagedRuntime<Db, never> | null = null;
-
-function getRuntime(): ManagedRuntime.ManagedRuntime<Db, never> {
-  if (!_runtime) _runtime = ManagedRuntime.make(DbLive);
-  return _runtime;
-}
-
-/**
- * Get the depot database via the shared ManagedRuntime.
- * Creates `~/.depot/` on first call (handled by DbLive layer).
- */
-export async function getDb(): Promise<Database> {
-  return getRuntime().runPromise(Db);
-}
 
 /**
  * Run an Effect that requires the Db service using the shared runtime.

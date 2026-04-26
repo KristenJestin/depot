@@ -5,6 +5,7 @@ import devServer from "@hono/vite-dev-server";
 import nodeAdapter from "@hono/vite-dev-server/node";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
 function rawMdPlugin() {
   return {
@@ -23,6 +24,12 @@ export default defineConfig({
   root: path.resolve(import.meta.dirname, "src/web"),
 
   plugins: [
+    tanstackRouter({
+      routesDirectory: path.resolve(import.meta.dirname, "src/web/routes"),
+      generatedRouteTree: path.resolve(import.meta.dirname, "src/web/routeTree.gen.ts"),
+      quoteStyle: "double",
+      semicolons: true,
+    }),
     tailwindcss(),
     react(),
     devServer({

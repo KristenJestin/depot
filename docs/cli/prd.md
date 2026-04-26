@@ -1,29 +1,31 @@
 # PRD Commands
 
-PRDs define the intent and scope of work for a workspace.
+PRDs define why a body of work exists and what it covers. A PRD attaches to a workspace only when it is activated.
 
-## Status model
+## Status Model
 
 Current PRD statuses are:
 
-- `draft` — in construction via questions agent. Editable freely.
-- `ready` — all questions answered. PRD complete.
-- `in_progress` — execution in progress (dev + automatic review included).
-- `done` — validated by the human. Terminal.
-- `canceled` — canceled. Terminal.
+- `draft`
+- `ready`
+- `in_progress`
+- `done`
+- `canceled`
 
-Allowed transitions:
+Allowed transitions are:
 
-- `draft → ready`
-- `ready → in_progress`
-- `ready → draft` (fork v2, via `depot prd fork`)
-- `in_progress → done`
+- `draft -> ready`
+- `draft -> canceled`
+- `ready -> in_progress`
+- `ready -> canceled`
+- `in_progress -> done`
+- `in_progress -> canceled`
 
----
+Forking is not a direct status transition. It creates a new `draft` revision from a `ready` PRD.
 
 ## `depot prd create`
 
-Create a new draft PRD in the current workspace.
+Create a new draft PRD in the current project's context.
 
 ### Usage
 
@@ -37,8 +39,6 @@ depot prd create --title <title> [--context <text>] [--scope <text>]
 depot prd create --title "Core foundation" --context "Need persistent agent state" --scope "Project, PRD, task, and log flow"
 ```
 
----
-
 ## `depot prd list`
 
 List the latest revision of each PRD family for the current project.
@@ -49,11 +49,7 @@ List the latest revision of each PRD family for the current project.
 depot prd list
 ```
 
-### Output
-
-Each line includes the PRD ID, title, status, and revision number. Only the latest revision per family is shown.
-
----
+Each line includes the PRD ID, title, status, and revision. Only the latest revision per family is shown.
 
 ## `depot prd show`
 
@@ -65,11 +61,7 @@ Show detailed PRD fields.
 depot prd show <prd-id>
 ```
 
-### Output
-
-Prints aligned key-value fields: ID, Title, Status, Revision, Root, Context, Scope, Parent, Created, Ready, Activated.
-
----
+Prints aligned key-value fields for ID, Title, Status, Revision, Root, Context, Scope, Parent, Created, Ready, and Activated.
 
 ## `depot prd ready`
 
@@ -81,13 +73,11 @@ Mark a draft PRD as ready for execution.
 depot prd ready <prd-id>
 ```
 
-Only PRDs in `draft` status can be marked ready.
-
----
+Only `draft` PRDs can be marked ready.
 
 ## `depot prd activate`
 
-Mark a ready PRD as active for execution.
+Activate a ready PRD for execution.
 
 ### Usage
 
@@ -95,13 +85,15 @@ Mark a ready PRD as active for execution.
 depot prd activate <prd-id>
 ```
 
-Only PRDs in `ready` status can be activated. A workspace can only have one `in_progress` PRD at a time.
+Notes:
 
----
+- only `ready` PRDs can be activated
+- activation assigns the PRD to the current workspace
+- a workspace can have only one `in_progress` PRD at a time
 
 ## `depot prd done`
 
-Mark an in_progress PRD as done (after human validation).
+Mark an `in_progress` PRD as done.
 
 ### Usage
 
@@ -109,15 +101,23 @@ Mark an in_progress PRD as done (after human validation).
 depot prd done <prd-id>
 ```
 
-Only PRDs in `in_progress` status can be marked done.
+Only `in_progress` PRDs can be marked done.
 
----
+## `depot prd cancel`
+
+Cancel a PRD.
+
+### Usage
+
+```bash
+depot prd cancel <prd-id>
+```
+
+A PRD may be canceled while it is `draft`, `ready`, or `in_progress`.
 
 ## `depot prd fork`
 
 Fork a ready PRD into a new draft revision.
-
-The original PRD stays in `ready` status (not canceled). The fork creates a new PRD with `revision + 1`, `parentId` pointing to the original, and a shared `rootId` for family queries.
 
 ### Usage
 
@@ -125,16 +125,58 @@ The original PRD stays in `ready` status (not canceled). The fork creates a new 
 depot prd fork <prd-id>
 ```
 
-Only PRDs in `ready` status can be forked.
+The original revision stays `ready`. The fork gets:
 
----
+- a new ID
+- `revision + 1`
+- `parentId` pointing to the original
+- the same `rootId` as the rest of the family
 
-## `depot prd cancel`
+Only `ready` PRDs can be forked.
 
-Cancel a draft, ready, or in_progress PRD.
+## `depot prd load`
+
+Create a PRD with tasks from a JSON document.
 
 ### Usage
 
 ```bash
-depot prd cancel <prd-id>
+depot prd load [--file <path>]
 ```
+
+If `--file` is omitted, the command reads JSON from stdin.
+
+### Expected JSON shape
+
+```json
+{
+  "title": "Build routing",
+  "context": "Need a navigable web UI",
+  "scope": "List and detail routes",
+  "ready": true,
+  "tasks": [
+    {
+      "title": "Add router",
+      "description": "Intent:\nAdd TanStack Router.\n\nScope:\n- Wire routes.\n\nNon-goals:\n- Do not add mutations.",
+      "doneCriteria": "Router boots",
+      "effort": "m",
+      "dependsOn": []
+    },
+    {
+      "title": "Add detail page",
+      "description": "Intent:\nShow PRD detail.\n\nScope:\n- Add route.\n\nNon-goals:\n- Do not add editing.",
+      "doneCriteria": "Detail page renders",
+      "effort": "l",
+      "dependsOn": [0]
+    }
+  ]
+}
+```
+
+### Notes
+
+- `tasks` must contain at least one task
+- `dependsOn` uses zero-based indexes into earlier tasks in the same document
+- only backward references are allowed
+- the full batch is created transactionally
+- when `ready` is true, the created PRD is immediately marked `ready`

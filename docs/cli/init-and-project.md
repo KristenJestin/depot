@@ -1,6 +1,6 @@
-# Init and Project Commands
+# Init And Project Commands
 
-These commands establish project state and inspect known projects.
+These commands create project state and let you inspect or update known projects.
 
 ## `depot init`
 
@@ -9,6 +9,7 @@ Initialize a project and link a local directory as a workspace.
 ### What it does
 
 - resolves the target workspace path
+- checks whether that exact canonical path is already registered
 - reuses an existing project with the same name if one exists
 - otherwise creates a new project
 - links the workspace path to that project
@@ -18,13 +19,12 @@ If the exact workspace path is already registered, `depot` prints the existing p
 ### Usage
 
 ```bash
-depot init [name] [--path <path>] [--description <text>] [--label <text>]
+depot init <name> [--path <path>] [--description <text>] [--label <text>]
 ```
 
 ### Examples
 
 ```bash
-depot init
 depot init my-project
 depot init my-project --description "Agent task tracking"
 depot init my-project --path ../other-repo --label "secondary workspace"
@@ -32,11 +32,9 @@ depot init my-project --path ../other-repo --label "secondary workspace"
 
 ### Notes
 
-- `name` defaults to the current folder name
+- although the implementation can derive a default name, the current CLI help and parser require the positional `name` argument
 - `--path` defaults to the current working directory
-- workspace paths are normalized before storage (forward slashes, lowercase on Windows)
-
----
+- workspace paths are normalized before storage
 
 ## `depot project list`
 
@@ -48,13 +46,9 @@ List all known projects.
 depot project list
 ```
 
-### Output
-
 Each line includes the project ID, name, and status.
 
 If no projects exist yet, the CLI tells you to run `depot init` first.
-
----
 
 ## `depot project show`
 
@@ -66,11 +60,7 @@ Show full details for a project.
 depot project show <project-id>
 ```
 
-### Output
-
-Prints aligned key-value fields: ID, Name, Status, Description, Created, Updated.
-
----
+Prints aligned key-value fields for ID, Name, Status, Description, Created, and Updated.
 
 ## `depot project update`
 
@@ -84,13 +74,11 @@ depot project update <project-id> [--name <name>] [--description <text>] [--stat
 
 ### Valid statuses
 
-`active`, `paused`, `done`
+- `active`
+- `paused`
+- `done`
 
-### Notes
-
-At least one of `--name`, `--description`, or `--status` must be provided. The command errors if no changes are given.
-
----
+At least one of `--name`, `--description`, or `--status` must be provided.
 
 ## `depot project archive`
 
@@ -102,4 +90,6 @@ Set a project's status to `done`.
 depot project archive <project-id>
 ```
 
-Errors if the project is already `done`.
+This is a convenience wrapper around `project update --status done`.
+
+It errors if the project is already `done`.

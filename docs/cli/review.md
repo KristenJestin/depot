@@ -1,21 +1,19 @@
 # Review Commands
 
-`depot review` manages the review loop for completed work in a PRD.
+`depot review` manages the review loop around PRD work.
 
-Reviews are containers of tasks. Findings are tasks with a `review_id` and an optional `severity`.
+Reviews are containers for finding tasks. Findings are stored as tasks with a `reviewId` and an optional severity.
 
-## Status model
+## Status Model
 
-- `draft` — created, tasks not yet added (protection against crash during analysis)
-- `in_progress` — tasks created, coder working on them
-- `done` — all tasks completed
+- `draft`: review created, findings not fully recorded yet
+- `in_progress`: findings exist and follow-up work is active
+- `done`: the review is closed
 
 ## Types
 
-- `agent` — created by the auditor sub-agent after automatic review
-- `human` — created by the orchestrator from human feedback
-
----
+- `agent`: review created by the auditor flow
+- `human`: review created from human feedback
 
 ## `depot review start`
 
@@ -27,38 +25,30 @@ Create a new review for a PRD.
 depot review start <prd-id> --type <human|agent>
 ```
 
-Creates the review in `draft` status. The `--type` flag is required.
-
-### Example
-
-```bash
-depot review start <prd-id> --type agent
-```
-
----
+Creates the review in `draft` status.
 
 ## `depot review task add`
 
-Add a task (finding) to a review.
+Add a task to a review.
 
 ### Usage
 
 ```bash
-depot review task add <review-id> \
-  --title <str> \
-  --description <str> \
-  --done-criteria <str> \
-  [--severity <critical|major|minor|info>]
+depot review task add <review-id> --title <str> --description <str> --doneCriteria <str> [--severity <critical|major|minor|info>]
 ```
+
+### Notes
+
+- adding the first task automatically moves the review from `draft` to `in_progress`
+- review tasks are stored in the main `tasks` table with `reviewId` set
+- the default effort for review tasks is `s` when not otherwise specified in code
 
 ### Severity guide
 
-- `critical` — blocks correctness or safety
-- `major` — significant quality or behavioral issue
-- `minor` — small improvement or cleanup
-- `info` — observation, no action required
-
----
+- `critical`: correctness or safety issue
+- `major`: significant behavioral or quality issue
+- `minor`: smaller defect or cleanup
+- `info`: observation with low urgency
 
 ## `depot review done`
 
@@ -70,9 +60,12 @@ Mark a review as done.
 depot review done <review-id>
 ```
 
-Moves the review from `in_progress` to `done`.
+The transition table allows:
 
----
+- `draft -> done`
+- `in_progress -> done`
+
+That means an empty review can be closed without adding findings.
 
 ## `depot review show`
 
@@ -84,13 +77,9 @@ Show full details for a review.
 depot review show <review-id>
 ```
 
-### Output
+Prints aligned fields for ID, PRD, Type, Status, User Feedback, Created, and Done.
 
-Prints aligned key-value fields: ID, PRD, Type, Status, User Feedback, Created, Done.
-
-Also prints the list of tasks associated with this review (id, title, severity, status).
-
----
+It also prints the tasks associated with the review.
 
 ## `depot review list`
 
@@ -101,7 +90,5 @@ List reviews for a PRD.
 ```bash
 depot review list <prd-id>
 ```
-
-### Output
 
 Each line includes the review ID, type, status, and PRD ID.

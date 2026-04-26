@@ -2,9 +2,11 @@
 
 `depot context` renders live agent context for the current workspace.
 
+It connects stored workflow state to the prompts used by orchestrator, coder, and auditor agents.
+
 ## `depot context`
 
-Without a mode, the command prints an index for the four supported modes:
+Without a mode, the command prints an index for four supported modes:
 
 - `prd`
 - `dev`
@@ -14,18 +16,16 @@ Without a mode, the command prints an index for the four supported modes:
 Each section includes:
 
 - a one-line usage summary
-- a short dynamic status derived from the current workspace state
+- a short dynamic status derived from workspace state
 - the exact detail command
 
 If the current directory does not resolve to a workspace, `depot context` silently creates a project and workspace for the current path before rendering the index.
 
-`depot context` does not support `--json` output. Passing `--json` returns an unsupported error.
-
----
+`depot context` does not support `--json` output. Passing `--json` returns an `unsupported` error.
 
 ## `depot context prd`
 
-Renders the product framing context for the current workspace.
+Render the product-framing context for the current workspace.
 
 ### Usage
 
@@ -33,23 +33,19 @@ Renders the product framing context for the current workspace.
 depot context prd [prd-id]
 ```
 
-If no `prd-id` is provided, renders all active PRDs for the project with the PRD agent instructions.
+If no `prd-id` is provided, the command renders non-terminal PRDs for the project together with the embedded PRD agent instructions.
 
-With `prd-id`:
+If a `prd-id` is provided:
 
-| PRD status              | Behavior                                          |
-| ----------------------- | ------------------------------------------------- |
-| `draft`                 | Displays the PRD and continues Q&A                |
-| `ready`                 | Indicates a fork (v2) will be created for editing |
-| `in_progress` or beyond | CLI errors with an explicit message               |
+- `draft`: continue the editable PRD
+- `ready`: explain that editing should continue in a forked draft revision
+- `in_progress`, `done`, or `canceled`: fail with an explicit error
 
-The revision chain (via `rootId`) is displayed when multiple revisions exist.
-
----
+When multiple revisions exist in the same family, the revision chain is displayed.
 
 ## `depot context dev`
 
-Renders the execution context for the active PRD. Acts as the **orchestrator** entry point.
+Render the orchestrator context for an active or targeted PRD.
 
 ### Usage
 
@@ -57,25 +53,25 @@ Renders the execution context for the active PRD. Acts as the **orchestrator** e
 depot context dev [prd-target]
 ```
 
-`prd-target` is an optional second positional argument. If provided, it is resolved first by exact PRD ID, then by case-insensitive substring match on the title.
+`prd-target` is optional. If provided, it resolves first by exact PRD ID, then by case-insensitive title substring.
 
 ### Output
 
-- active PRD with context and scope
-- progress summary (done/total · in progress · blocked · pending · skipped)
-- current task with spec summary and done criteria
+- active or targeted PRD with context and scope
+- task progress summary
+- in-progress task
 - blocked tasks
-- recent activity (last 10 entries)
+- recent workspace activity
 - next recommended task
-- orchestrator instructions (coder → auditor → human validation loop)
+- embedded orchestrator instructions
 
-If multiple `in_progress` PRDs exist in the same workspace, the command fails with a conflict list.
+If multiple `in_progress` PRDs exist in the same workspace, the command fails with a conflict message.
 
----
+If a specific target is provided, the renderer also checks whether the PRD can be launched in dev mode.
 
 ## `depot context coder`
 
-Renders the implementation context for the coder sub-agent.
+Render the implementation context for the coder sub-agent.
 
 ### Usage
 
@@ -83,16 +79,14 @@ Renders the implementation context for the coder sub-agent.
 depot context coder <prd-id> [--review <review-id>]
 ```
 
-`prd-id` is required. No auto-resolution.
+`prd-id` is required.
 
-- Without `--review`: displays pending PRD tasks.
-- With `--review`: displays pending tasks belonging to that review (with severity).
-
----
+- without `--review`, the command shows pending PRD tasks
+- with `--review`, it shows pending tasks for that review, including severity when present
 
 ## `depot context auditor`
 
-Renders the audit context for the auditor sub-agent.
+Render the audit context for the auditor sub-agent.
 
 ### Usage
 
@@ -100,16 +94,17 @@ Renders the audit context for the auditor sub-agent.
 depot context auditor <prd-id>
 ```
 
-`prd-id` is required. No auto-resolution.
+`prd-id` is required.
 
 ### Output
 
 - PRD with context and scope
-- Done/skipped tasks since last audit
-- Last agent review and its tasks
+- completed and skipped tasks for the PRD
+- the last agent review and its findings
+- embedded auditor instructions
 
----
+## Notes
 
-## Replacement note
-
-`depot context` replaces the old `depot playbook` command surface.
+- the templates used by these contexts are embedded at build time from `src/modules/context/templates/*.md`
+- the command is text-first by design
+- the mode registry contains exactly `prd`, `dev`, `coder`, and `auditor`
