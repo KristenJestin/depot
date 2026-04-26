@@ -1,43 +1,76 @@
 import { Hono } from "hono";
-import { desc } from "drizzle-orm";
 
-import { prds as prdsTable } from "#/db/schema";
+import { getRuntime } from "#/services/database";
+import * as DomainPrds from "#/modules/prds/domain";
+import * as DomainTasks from "#/modules/tasks/domain";
+import * as DomainReviews from "#/modules/reviews/domain";
+import * as DomainActivity from "#/modules/activity/domain";
 import type { Variables } from "./types";
 
 export const prdsRoutes = new Hono<{ Variables: Variables }>()
   .get("/prds", async (c) => {
-    const prds = await c.var.db.select().from(prdsTable).orderBy(desc(prdsTable.updatedAt));
-    return c.json({ prds }, 200);
+    const prdList = await getRuntime().runPromise(DomainPrds.listPrds({ latestOnly: true }));
+    prdList.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+    return c.json({ prds: prdList }, 200);
   })
   .get("/prds/:id", async (c) => {
-    const db = c.var.db;
     const { id } = c.req.param();
 
-    const prd = await db.query.prds.findFirst({
-      where: { id },
-    });
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
     if (!prd) return c.json({ error: "Not found" }, 404);
 
-    const tasks = await db.query.tasks.findMany({
-      where: { prdId: id, reviewId: { isNull: true } },
-      orderBy: (t, { asc }) => [asc(t.position)],
-    });
-
-    const latestReview = await db.query.reviews.findFirst({
-      where: { prdId: id },
-      orderBy: (r, { desc }) => [desc(r.createdAt)],
-    });
-
+    const tasks = await getRuntime().runPromise(DomainTasks.listTasks(id, { prdTasksOnly: true }));
+    const latestReview = await getRuntime().runPromise(DomainReviews.getLatestReview(id));
     const findings = latestReview
-      ? await db.query.tasks.findMany({
-          where: { reviewId: latestReview.id },
-          orderBy: (t, { asc }) => [asc(t.position)],
-        })
+      ? await getRuntime().runPromise(DomainReviews.listReviewTasks(latestReview.id))
       : [];
 
     const review = latestReview
-      ? { type: latestReview.type, status: latestReview.status, findings }
+      ? { id: latestReview.id, type: latestReview.type, status: latestReview.status, findings }
       : null;
 
-    return c.json({ prd, tasks, review }, 200);
+    const revisions = await getRuntime().runPromise(DomainPrds.listPrdFamily(prd.rootId ?? prd.id));
+
+    return c.json({ prd, tasks, review, revisions }, 200);
+  })
+  .get("/prds/:id/tasks/:taskId", async (c) => {
+    const { id, taskId } = c.req.param();
+
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    const task = await getRuntime().runPromise(DomainTasks.getTask(taskId));
+    if (!task || task.prdId !== id) return c.json({ error: "Not found" }, 404);
+
+    const logs = await getRuntime().runPromise(DomainActivity.listActivityForTask(taskId));
+
+    const lines: { text: string; type: "command" | "output" }[] = [];
+    const files: { path: string; added: number; removed: number }[] = [];
+
+    for (const log of logs) {
+      const payload = JSON.parse(log.payload) as Record<string, unknown>;
+      if (log.eventType === "note" && payload.kind === "terminal" && Array.isArray(payload.lines)) {
+        lines.push(...(payload.lines as { text: string; type: "command" | "output" }[]));
+      } else if (log.eventType === "task_done" && Array.isArray(payload.files)) {
+        files.push(...(payload.files as { path: string; added: number; removed: number }[]));
+      }
+    }
+
+    return c.json({ task, prd: { id: prd.id, title: prd.title }, activity: { lines, files } }, 200);
+  })
+  .get("/prds/:id/reviews/:reviewId", async (c) => {
+    const { id, reviewId } = c.req.param();
+
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    const review = await getRuntime().runPromise(DomainReviews.getReview(reviewId));
+    if (!review || review.prdId !== id) return c.json({ error: "Not found" }, 404);
+
+    const findings = await getRuntime().runPromise(DomainReviews.listReviewTasks(reviewId));
+
+    return c.json(
+      { review, prd: { id: prd.id, title: prd.title, status: prd.status }, findings },
+      200,
+    );
   });

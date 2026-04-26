@@ -1,5 +1,12 @@
-export function relativeDate(ms: number | null): string | null {
-  if (!ms) return null;
+export function relativeDate(value: number | string | Date | null | undefined): string | null {
+  if (value == null) return null;
+  const ms =
+    value instanceof Date
+      ? value.getTime()
+      : typeof value === "string"
+        ? new Date(value).getTime()
+        : value;
+  if (!ms || isNaN(ms)) return null;
   const diff = Date.now() - ms;
   const days = Math.floor(diff / 86_400_000);
   if (days === 0) return "today";

@@ -83,9 +83,17 @@ export const getTask = (id: string) =>
     return row ?? null;
   });
 
-export const listTasks = (prdId: string) =>
+export const listTasks = (prdId: string, options: { prdTasksOnly?: boolean } = {}) =>
   Effect.gen(function* () {
     const db = yield* Db;
+    if (options.prdTasksOnly) {
+      return yield* dbQuery(() =>
+        db.query.tasks.findMany({
+          where: { prdId, reviewId: { isNull: true } },
+          orderBy: { position: "asc" },
+        }),
+      );
+    }
     return yield* dbQuery(() =>
       db.query.tasks.findMany({ where: { prdId }, orderBy: { position: "asc" } }),
     );

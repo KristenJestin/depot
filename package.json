@@ -51,7 +51,8 @@
     "release": "npm publish",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "prepare": "playwright install chromium"
+    "prepare": "playwright install chromium",
+    "seed": "bun run scripts/seed.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

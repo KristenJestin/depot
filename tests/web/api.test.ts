@@ -1,20 +1,26 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import { Layer, ManagedRuntime } from "effect";
 import type { Database } from "#/db/client";
 import { projects, prds } from "#/db/schema";
 import { createTestDb } from "../helpers/db";
 
 vi.mock("#/services/database", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#/services/database")>();
-  return { ...actual, getDb: vi.fn<() => Promise<Database>>() };
+  return {
+    ...actual,
+    getDb: vi.fn<() => Promise<Database>>(),
+    getRuntime: vi.fn<() => ManagedRuntime.ManagedRuntime<Db, never>>(),
+  };
 });
 
-import { getDb } from "#/services/database";
+import { getDb, getRuntime, Db } from "#/services/database";
 import app from "#/web/api";
 
 const { db } = createTestDb();
 
 beforeAll(() => {
   vi.mocked(getDb).mockResolvedValue(db);
+  vi.mocked(getRuntime).mockReturnValue(ManagedRuntime.make(Layer.succeed(Db, db)));
 });
 
 describe("web api", () => {

@@ -11,6 +11,9 @@
 import { Route as rootRouteImport } from "./routes/__root";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as PrdsIdRouteImport } from "./routes/prds.$id";
+import { Route as PrdsIdIndexRouteImport } from "./routes/prds.$id.index";
+import { Route as PrdsIdTasksTaskIdRouteImport } from "./routes/prds.$id.tasks.$taskId";
+import { Route as PrdsIdReviewsReviewIdRouteImport } from "./routes/prds.$id.reviews.$reviewId";
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -22,31 +25,69 @@ const PrdsIdRoute = PrdsIdRouteImport.update({
   path: "/prds/$id",
   getParentRoute: () => rootRouteImport,
 } as any);
+const PrdsIdIndexRoute = PrdsIdIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => PrdsIdRoute,
+} as any);
+const PrdsIdTasksTaskIdRoute = PrdsIdTasksTaskIdRouteImport.update({
+  id: "/tasks/$taskId",
+  path: "/tasks/$taskId",
+  getParentRoute: () => PrdsIdRoute,
+} as any);
+const PrdsIdReviewsReviewIdRoute = PrdsIdReviewsReviewIdRouteImport.update({
+  id: "/reviews/$reviewId",
+  path: "/reviews/$reviewId",
+  getParentRoute: () => PrdsIdRoute,
+} as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
-  "/prds/$id": typeof PrdsIdRoute;
+  "/prds/$id": typeof PrdsIdRouteWithChildren;
+  "/prds/$id/": typeof PrdsIdIndexRoute;
+  "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
+  "/prds/$id/tasks/$taskId": typeof PrdsIdTasksTaskIdRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
-  "/prds/$id": typeof PrdsIdRoute;
+  "/prds/$id": typeof PrdsIdIndexRoute;
+  "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
+  "/prds/$id/tasks/$taskId": typeof PrdsIdTasksTaskIdRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
-  "/prds/$id": typeof PrdsIdRoute;
+  "/prds/$id": typeof PrdsIdRouteWithChildren;
+  "/prds/$id/": typeof PrdsIdIndexRoute;
+  "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
+  "/prds/$id/tasks/$taskId": typeof PrdsIdTasksTaskIdRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/" | "/prds/$id";
+  fullPaths:
+    | "/"
+    | "/prds/$id"
+    | "/prds/$id/"
+    | "/prds/$id/reviews/$reviewId"
+    | "/prds/$id/tasks/$taskId";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/prds/$id";
-  id: "__root__" | "/" | "/prds/$id";
+  to:
+    | "/"
+    | "/prds/$id"
+    | "/prds/$id/reviews/$reviewId"
+    | "/prds/$id/tasks/$taskId";
+  id:
+    | "__root__"
+    | "/"
+    | "/prds/$id"
+    | "/prds/$id/"
+    | "/prds/$id/reviews/$reviewId"
+    | "/prds/$id/tasks/$taskId";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
-  PrdsIdRoute: typeof PrdsIdRoute;
+  PrdsIdRoute: typeof PrdsIdRouteWithChildren;
 }
 
 declare module "@tanstack/react-router" {
@@ -65,12 +106,48 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof PrdsIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/prds/$id/": {
+      id: "/prds/$id/";
+      path: "/";
+      fullPath: "/prds/$id/";
+      preLoaderRoute: typeof PrdsIdIndexRouteImport;
+      parentRoute: typeof PrdsIdRoute;
+    };
+    "/prds/$id/tasks/$taskId": {
+      id: "/prds/$id/tasks/$taskId";
+      path: "/tasks/$taskId";
+      fullPath: "/prds/$id/tasks/$taskId";
+      preLoaderRoute: typeof PrdsIdTasksTaskIdRouteImport;
+      parentRoute: typeof PrdsIdRoute;
+    };
+    "/prds/$id/reviews/$reviewId": {
+      id: "/prds/$id/reviews/$reviewId";
+      path: "/reviews/$reviewId";
+      fullPath: "/prds/$id/reviews/$reviewId";
+      preLoaderRoute: typeof PrdsIdReviewsReviewIdRouteImport;
+      parentRoute: typeof PrdsIdRoute;
+    };
   }
 }
 
+interface PrdsIdRouteChildren {
+  PrdsIdIndexRoute: typeof PrdsIdIndexRoute;
+  PrdsIdReviewsReviewIdRoute: typeof PrdsIdReviewsReviewIdRoute;
+  PrdsIdTasksTaskIdRoute: typeof PrdsIdTasksTaskIdRoute;
+}
+
+const PrdsIdRouteChildren: PrdsIdRouteChildren = {
+  PrdsIdIndexRoute: PrdsIdIndexRoute,
+  PrdsIdReviewsReviewIdRoute: PrdsIdReviewsReviewIdRoute,
+  PrdsIdTasksTaskIdRoute: PrdsIdTasksTaskIdRoute,
+};
+
+const PrdsIdRouteWithChildren =
+  PrdsIdRoute._addFileChildren(PrdsIdRouteChildren);
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  PrdsIdRoute: PrdsIdRoute,
+  PrdsIdRoute: PrdsIdRouteWithChildren,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

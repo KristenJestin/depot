@@ -1,31 +1,44 @@
-import type { Task } from "../lib/api-types";
-import { parseDesc } from "../lib/format";
+import { getTaskDescriptionSections } from "#/modules/tasks/spec";
 
-function DescField({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="font-mono text-2xs tracking-wider text-muted-foreground mb-0.5">{label}</div>
-      <div className="text-xs text-foreground leading-normal opacity-75">{value}</div>
-    </div>
-  );
+interface TaskLike {
+  description: string;
+  doneCriteria: string;
 }
 
-export function TaskDetail({ task }: { task: Task }) {
-  const desc = parseDesc(task.description);
+export function TaskDetail({ task }: { task: TaskLike }) {
+  const sections = getTaskDescriptionSections(task.description);
+
   return (
-    <div className="mx-2 mb-1 bg-card border-l-2 border-primary/30 rounded-r-sm px-3 py-2">
-      {desc ? (
-        <div className="grid grid-cols-3 gap-2 mb-2">
-          {desc.intent && <DescField label="INTENT" value={desc.intent} />}
-          {desc.scope && <DescField label="SCOPE" value={desc.scope} />}
-          {desc.nongoals && <DescField label="NON-GOALS" value={desc.nongoals} />}
+    <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
+      <h4 className="font-semibold text-sm">Execution plan</h4>
+
+      <div className="space-y-3">
+        {sections.map((section) => (
+          <div key={section.label}>
+            <p className="text-xs font-semibold text-foreground mb-1">{section.label}</p>
+            {section.style === "list" ? (
+              <ul className="space-y-0.5 text-xs text-muted-foreground">
+                {section.lines.map((line, i) => (
+                  <li key={i} className="flex gap-1.5 leading-normal">
+                    <span className="shrink-0">—</span>
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground leading-normal">
+                {section.lines.join(" ")}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="pt-3 border-t border-border">
+        <p className="text-xs font-semibold text-foreground mb-1">Done when</p>
+        <div className="bg-secondary/50 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground">
+          {task.doneCriteria}
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground leading-normal mb-2">{task.description}</p>
-      )}
-      <div className="font-mono text-2xs tracking-wider text-muted-foreground mb-1">DONE WHEN</div>
-      <div className="bg-secondary rounded px-2 py-1.5 text-xs leading-normal opacity-80">
-        {task.doneCriteria}
       </div>
     </div>
   );

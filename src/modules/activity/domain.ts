@@ -153,6 +153,17 @@ export const listActivity = (filter: { projectId: string; workspaceId?: string; 
     return rows.reverse();
   });
 
+export const listActivityForTask = (taskId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    return yield* dbQuery(() =>
+      db.query.activityLog.findMany({
+        where: { taskId },
+        orderBy: { createdAt: "asc" },
+      }),
+    );
+  });
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 /**

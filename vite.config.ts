@@ -86,7 +86,7 @@ export default defineConfig({
     semi: true,
     tabWidth: 2,
     trailingComma: "all",
-    ignorePatterns: ["dist/**", "node_modules/**"],
+    ignorePatterns: ["dist/**", "node_modules/**", "src/web/routeTree.gen.ts"],
   },
 
   pack: {

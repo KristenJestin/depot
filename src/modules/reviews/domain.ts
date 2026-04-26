@@ -102,6 +102,18 @@ export const listReviews = (prdId: string) =>
     );
   });
 
+export const getLatestReview = (prdId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const row = yield* dbQuery(() =>
+      db.query.reviews.findFirst({
+        where: { prdId },
+        orderBy: { createdAt: "desc" },
+      }),
+    );
+    return row ?? null;
+  });
+
 export const startReview = (id: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
