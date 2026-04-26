@@ -68,6 +68,7 @@ export const prds = sqliteTable(
     context: text(), // why this PRD exists
     scope: text(), // what is included and excluded
     status: text({ enum: VALID_PRD_STATUSES }).notNull().default("draft"),
+    auditCycles: integer().notNull().default(0),
     createdAt: integer({ mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(() => new Date()),

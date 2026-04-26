@@ -68,3 +68,4 @@ depot prd show <prd-id>    # Inspect the active PRD before starting
 - Do not mark the PRD done without explicit human approval
 - Always use depot context coder and depot context auditor as sub-agent entry points
 - Any ambiguity beyond the implementation scope (conflicting constraints, impact on project-wide rules, choices not specified in the PRD) → pause and ask the human before continuing
+- All depot commands support `--json` for machine-readable output; prefer this flag in scripts and sub-agents

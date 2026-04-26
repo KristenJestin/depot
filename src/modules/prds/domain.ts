@@ -7,6 +7,7 @@ import { VALID_PRD_TRANSITIONS, type PrdStatus, type Effort } from "#/shared/val
 import { Db } from "#/services/database";
 import {
   PrdNotFoundError,
+  PrdNotDraftError,
   WorkspaceAlreadyHasActivePrdError,
   InvalidTransitionError,
   DatabaseError,
@@ -232,6 +233,36 @@ export const forkPrd = (id: string) =>
         .returning(),
     );
     const newPrd = rows[0]!;
+
+    const sourceTasks = yield* dbQuery(() =>
+      db.query.tasks.findMany({ where: { prdId: prd.id }, orderBy: { position: "asc" } }),
+    );
+
+    const idMap = new Map<string, string>();
+    for (const task of sourceTasks) {
+      idMap.set(task.id, generateId());
+    }
+
+    for (const task of sourceTasks) {
+      const newTaskId = idMap.get(task.id)!;
+      const remappedDeps = (JSON.parse(task.dependsOn ?? "[]") as string[]).map(
+        (oldId) => idMap.get(oldId) ?? oldId,
+      );
+      yield* dbQuery(() =>
+        db.insert(tasks).values({
+          ...task,
+          id: newTaskId,
+          prdId: newId,
+          status: "pending",
+          blockedReason: null,
+          skipReason: null,
+          startedAt: null,
+          completedAt: null,
+          dependsOn: JSON.stringify(remappedDeps),
+        }),
+      );
+    }
+
     yield* logActivity({
       projectId: prd.projectId,
       prdId: newPrd.id,
@@ -250,6 +281,92 @@ export const listPrdFamily = (rootId: string) =>
         orderBy: { revision: "asc" },
       }),
     );
+  });
+
+export type ReloadPrdBatchInput = {
+  prdId: string;
+  title: string;
+  context?: string;
+  scope?: string;
+  tasks: BatchTaskInput[];
+};
+
+/**
+ * Replace the content of a draft PRD in a single atomic transaction.
+ * ID, createdAt, rootId, parentId, revision, and workspaceId are preserved.
+ * Only draft PRDs can be reloaded.
+ */
+export const reloadPrdBatch = (input: ReloadPrdBatchInput) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+
+    const prd = yield* getPrd(input.prdId);
+    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id: input.prdId }));
+    if (prd.status !== "draft") {
+      return yield* Effect.fail(new PrdNotDraftError({ id: input.prdId, status: prd.status }));
+    }
+
+    const result = yield* Effect.try({
+      try: () =>
+        db.transaction((tx) => {
+          tx.update(prds)
+            .set({ title: input.title, context: input.context ?? null, scope: input.scope ?? null })
+            .where(eq(prds.id, input.prdId))
+            .run();
+
+          tx.delete(tasks).where(eq(tasks.prdId, input.prdId)).run();
+
+          const createdTaskIds: string[] = [];
+          const createdTasks: (typeof tasks.$inferSelect)[] = [];
+
+          for (let i = 0; i < input.tasks.length; i++) {
+            const taskInput = input.tasks[i]!;
+            const resolvedDeps = (taskInput.dependsOn ?? []).map((idx) => {
+              const resolved = createdTaskIds[idx];
+              if (resolved === undefined) {
+                throw new Error(
+                  `Task at index ${i} has invalid dependsOn index ${idx}: task ID not yet created (forward reference or out-of-range)`,
+                );
+              }
+              return resolved;
+            });
+            const storedDescription = normalizeTaskDescriptionForStorage(taskInput.description);
+            const taskId = generateId();
+            const position = i + 1;
+
+            const taskRows = tx
+              .insert(tasks)
+              .values({
+                id: taskId,
+                prdId: input.prdId,
+                position,
+                title: taskInput.title,
+                description: storedDescription.description,
+                descriptionFormat: storedDescription.descriptionFormat,
+                doneCriteria: taskInput.doneCriteria,
+                dependsOn: JSON.stringify(resolvedDeps),
+                effort: taskInput.effort,
+                status: "pending",
+                blockedReason: null,
+                skipReason: null,
+                startedAt: null,
+                completedAt: null,
+              })
+              .returning()
+              .all();
+
+            const task = taskRows[0]!;
+            createdTaskIds.push(task.id);
+            createdTasks.push(task);
+          }
+
+          const updatedPrd = tx.select().from(prds).where(eq(prds.id, input.prdId)).all()[0]!;
+          return { prd: updatedPrd, tasks: createdTasks };
+        }),
+      catch: (e) => new DatabaseError({ cause: e }),
+    });
+
+    return result;
   });
 
 export type BatchTaskInput = {

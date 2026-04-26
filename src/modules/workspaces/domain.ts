@@ -5,8 +5,42 @@ import { generateId, normalizeWorkspacePath } from "#/shared/utils";
 import { Db } from "#/services/database";
 import { WorkspaceNotFoundError, WorkspaceHasLinkedPrdsError } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 // ── Functions ─────────────────────────────────────────────────────────────────
+
+/**
+ * Walk up from `startDir` looking for a `.git` file (not directory).
+ * If found and it points to a worktree gitdir (contains `/.git/worktrees/`),
+ * returns the main repo root path. Otherwise returns null.
+ */
+export function resolveWorktreeMainPath(startDir: string): Effect.Effect<string | null> {
+  const loop = (current: string): Effect.Effect<string | null> =>
+    Effect.gen(function* () {
+      const gitPath = path.join(current, ".git");
+      const stat = yield* Effect.tryPromise(() => fs.stat(gitPath)).pipe(Effect.option);
+      if (stat._tag === "Some" && stat.value.isFile()) {
+        const content = yield* Effect.tryPromise(() => fs.readFile(gitPath, "utf-8")).pipe(
+          Effect.map((c) => c.trim()),
+          Effect.orElseSucceed(() => null),
+        );
+        if (!content) return null;
+        const match = /^gitdir:\s*(.+)$/.exec(content);
+        if (!match) return null;
+        const rawGitdir = match[1]!.trim();
+        const gitdir = path.isAbsolute(rawGitdir) ? rawGitdir : path.resolve(current, rawGitdir);
+        const normalizedGitdir = gitdir.replace(/\\/g, "/");
+        if (!normalizedGitdir.includes("/.git/worktrees/")) return null;
+        const gitSegmentIndex = normalizedGitdir.indexOf("/.git/worktrees/");
+        return normalizedGitdir.slice(0, gitSegmentIndex);
+      }
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      return yield* loop(parent);
+    });
+  return loop(startDir);
+}
 
 export const addWorkspace = (input: { projectId: string; path: string; label?: string }) =>
   Effect.gen(function* () {
@@ -30,6 +64,8 @@ export const addWorkspace = (input: { projectId: string; path: string; label?: s
 /**
  * Resolve the current workspace using longest-prefix matching on canonical paths.
  * Commands run from any nested subdirectory resolve to the correct workspace.
+ * If no match is found and the current path is inside a git worktree,
+ * falls back to matching against the main repo path.
  */
 export const resolveWorkspace = (currentPath: string) =>
   Effect.gen(function* () {
@@ -37,20 +73,28 @@ export const resolveWorkspace = (currentPath: string) =>
     const allWorkspaces = yield* dbQuery(() => db.query.workspaces.findMany());
     const canonicalCurrentPath = normalizeWorkspacePath(currentPath);
 
-    let bestMatch: (typeof allWorkspaces)[number] | null = null;
-    let bestLen = 0;
-
-    for (const ws of allWorkspaces) {
-      const wsPath = normalizeWorkspacePath(ws.path);
-      if (canonicalCurrentPath === wsPath || canonicalCurrentPath.startsWith(wsPath + "/")) {
-        if (wsPath.length > bestLen) {
-          bestLen = wsPath.length;
-          bestMatch = ws;
+    const findBestMatch = (candidatePath: string) => {
+      let bestMatch: (typeof allWorkspaces)[number] | null = null;
+      let bestLen = 0;
+      for (const ws of allWorkspaces) {
+        const wsPath = normalizeWorkspacePath(ws.path);
+        if (candidatePath === wsPath || candidatePath.startsWith(wsPath + "/")) {
+          if (wsPath.length > bestLen) {
+            bestLen = wsPath.length;
+            bestMatch = ws;
+          }
         }
       }
-    }
+      return bestMatch;
+    };
 
-    return bestMatch;
+    const directMatch = findBestMatch(canonicalCurrentPath);
+    if (directMatch) return directMatch;
+
+    const mainRepoPath = yield* resolveWorktreeMainPath(currentPath);
+    if (!mainRepoPath) return null;
+
+    return findBestMatch(normalizeWorkspacePath(mainRepoPath));
   });
 
 export const listWorkspaces = (filter: { projectId?: string } = {}) =>

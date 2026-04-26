@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import { Schema } from "effect";
 import { command } from "#/cli/command";
@@ -30,14 +29,18 @@ export const installCommand = command({
     let targets;
 
     try {
-      targets = resolveInstallTargets(
+      targets = await resolveInstallTargets(
         {
           opencode: args.opencode,
           claudeCode: args["claude-code"],
           all: args.all,
         },
         {
-          existsSync,
+          existsSync: (p) =>
+            fs.access(p).then(
+              () => true,
+              () => false,
+            ),
         },
       );
     } catch (error) {

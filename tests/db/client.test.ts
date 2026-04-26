@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   applyMigrations,
+  openDatabase,
   openDatabaseWith,
   resolveMigrationsFolder,
   type Database,
@@ -17,45 +18,61 @@ type TestDatabaseClient = {
 
 const tempDirs: string[] = [];
 
-function createTempDir(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "depot-db-client-"));
+async function createTempDir(): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "depot-db-client-"));
   tempDirs.push(dir);
   return dir;
 }
 
-function createMigrationLayout(root: string): void {
+async function createMigrationLayout(root: string): Promise<void> {
   const migrationDir = path.join(root, "20260420161744_test_migration");
-  mkdirSync(migrationDir, { recursive: true });
-  writeFileSync(path.join(migrationDir, "migration.sql"), "CREATE TABLE test (id integer);");
+  await fs.mkdir(migrationDir, { recursive: true });
+  await fs.writeFile(path.join(migrationDir, "migration.sql"), "CREATE TABLE test (id integer);");
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });
 
+describe("openDatabase", () => {
+  it("creates parent directory when it does not exist", async () => {
+    const baseDir = await createTempDir();
+    const dbPath = path.join(baseDir, "nested", "dir", "depot.db");
+    const { db, client } = openDatabase(dbPath);
+    expect(db).toBeTruthy();
+    client.close();
+  });
+
+  it("works with :memory: without creating any directory", () => {
+    const { db, client } = openDatabase(":memory:");
+    expect(db).toBeTruthy();
+    client.close();
+  });
+});
+
 describe("db client", () => {
-  it("resolves migrations from packaged dist/migrations layout", () => {
-    const distDir = createTempDir();
+  it("resolves migrations from packaged dist/migrations layout", async () => {
+    const distDir = await createTempDir();
     const nestedMigrationsDir = path.join(distDir, "migrations");
-    createMigrationLayout(nestedMigrationsDir);
+    await createMigrationLayout(nestedMigrationsDir);
 
     expect(resolveMigrationsFolder(distDir)).toBe(nestedMigrationsDir);
   });
 
-  it("does not accept legacy dist root migrations layout", () => {
-    const distDir = createTempDir();
-    createMigrationLayout(distDir);
+  it("does not accept legacy dist root migrations layout", async () => {
+    const distDir = await createTempDir();
+    await createMigrationLayout(distDir);
 
     expect(() => resolveMigrationsFolder(distDir)).toThrow(
       /Could not find Drizzle migrations folder/,
     );
   });
 
-  it("retries retryable migration failures once the competing process finishes", () => {
-    const distDir = createTempDir();
-    createMigrationLayout(path.join(distDir, "migrations"));
+  it("retries retryable migration failures once the competing process finishes", async () => {
+    const distDir = await createTempDir();
+    await createMigrationLayout(path.join(distDir, "migrations"));
     let callCount = 0;
     const migrateFn: TestMigrationRunner = () => {
       callCount += 1;
@@ -74,9 +91,9 @@ describe("db client", () => {
     expect(callCount).toBe(2);
   });
 
-  it("does not retry non-retryable migration failures", () => {
-    const distDir = createTempDir();
-    createMigrationLayout(path.join(distDir, "migrations"));
+  it("does not retry non-retryable migration failures", async () => {
+    const distDir = await createTempDir();
+    await createMigrationLayout(path.join(distDir, "migrations"));
     let callCount = 0;
     const migrateFn: TestMigrationRunner = () => {
       callCount += 1;
@@ -94,9 +111,9 @@ describe("db client", () => {
     expect(callCount).toBe(1);
   });
 
-  it("retries SQLITE_BUSY during initial PRAGMA setup and closes failed handles", () => {
-    const distDir = createTempDir();
-    createMigrationLayout(path.join(distDir, "migrations"));
+  it("retries SQLITE_BUSY during initial PRAGMA setup and closes failed handles", async () => {
+    const distDir = await createTempDir();
+    await createMigrationLayout(path.join(distDir, "migrations"));
     const clients: TestDatabaseClient[] = [];
     let createCount = 0;
     let closeCount = 0;
@@ -132,9 +149,9 @@ describe("db client", () => {
     expect(result.client).toBe(clients[1]);
   });
 
-  it("closes the handle when migrations fail after opening the DB", () => {
-    const distDir = createTempDir();
-    createMigrationLayout(path.join(distDir, "migrations"));
+  it("closes the handle when migrations fail after opening the DB", async () => {
+    const distDir = await createTempDir();
+    await createMigrationLayout(path.join(distDir, "migrations"));
     let closeCount = 0;
 
     expect(() =>

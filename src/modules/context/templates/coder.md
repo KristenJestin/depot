@@ -34,3 +34,4 @@ For each task:
 - Never mark a task done without satisfying all done_criteria
 - Implement tasks in order unless dependencies force otherwise
 - Do not start tasks outside of this context
+- All depot commands support `--json` for machine-readable output; prefer this flag in scripts and sub-agents

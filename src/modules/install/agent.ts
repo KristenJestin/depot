@@ -6,7 +6,7 @@ export type CommandShell = "powershell" | "bash";
 
 type ResolveInstallTargetsOptions = {
   homeDir?: string;
-  existsSync?: (filePath: string) => boolean;
+  existsSync?: (path: string) => boolean | Promise<boolean>;
 };
 
 export function getInstallDirectory(target: InstallTarget, homeDir: string): string {
@@ -17,12 +17,12 @@ export function getInstallDirectory(target: InstallTarget, homeDir: string): str
   return path.join(homeDir, ".claude", "commands");
 }
 
-export function resolveInstallTargets(
+export async function resolveInstallTargets(
   flags: { opencode?: boolean; claudeCode?: boolean; all?: boolean },
   options: ResolveInstallTargetsOptions = {},
-): Array<{ target: InstallTarget; directory: string; ensureDirectory: boolean }> {
+): Promise<Array<{ target: InstallTarget; directory: string; ensureDirectory: boolean }>> {
   const homeDir = options.homeDir ?? getHomeDirectory();
-  const existsSync = options.existsSync ?? (() => false);
+  const existsCheck = options.existsSync ?? (() => false);
   const allTargets: InstallTarget[] = ["opencode", "claude-code"];
 
   if (flags.all) {
@@ -49,13 +49,13 @@ export function resolveInstallTargets(
     }));
   }
 
-  const detectedTargets = allTargets
-    .map((target) => ({
-      target,
-      directory: getInstallDirectory(target, homeDir),
-      ensureDirectory: false,
-    }))
-    .filter((target) => existsSync(target.directory));
+  const candidates = allTargets.map((target) => ({
+    target,
+    directory: getInstallDirectory(target, homeDir),
+    ensureDirectory: false,
+  }));
+  const results = await Promise.all(candidates.map((t) => existsCheck(t.directory)));
+  const detectedTargets = candidates.filter((_, i) => results[i]);
 
   if (detectedTargets.length === 0) {
     throw new Error(

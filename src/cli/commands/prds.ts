@@ -351,6 +351,100 @@ const loadCommand = command({
   },
 });
 
+// ── reloadCommand ─────────────────────────────────────────────────────────────
+
+const reloadCommand = command({
+  meta: { name: "reload", description: "Replace all content of a draft PRD in place" },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Draft PRD ID to reload",
+    },
+    file: {
+      schema: Schema.String,
+      description: "Path to JSON file (reads stdin if omitted)",
+      alias: "f",
+    },
+  },
+  run: async ({ args, output }) => {
+    let rawContent: string;
+    if (args.file) {
+      try {
+        rawContent = await readFile(args.file, "utf-8");
+      } catch (e) {
+        return output.error(
+          "file_read_error",
+          `Cannot read file '${args.file}': ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    } else {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) {
+        chunks.push(chunk as Buffer);
+      }
+      rawContent = Buffer.concat(chunks).toString("utf-8");
+    }
+
+    const parseResult = parseJsonSchema(rawContent, prdLoadSchema);
+    if (!parseResult.ok) {
+      return output.error(parseResult.kind, parseResult.message);
+    }
+
+    const data: PrdLoadInput = parseResult.data;
+
+    for (let i = 0; i < data.tasks.length; i++) {
+      const task = data.tasks[i]!;
+      for (const idx of task.dependsOn ?? []) {
+        if (idx >= i) {
+          return output.error(
+            "invalid_depends_on",
+            `Task at index ${i} has invalid dependsOn index ${idx}: only backward references (index < task index) are allowed`,
+          );
+        }
+      }
+    }
+
+    const result = await runEffect(
+      DomainPrds.reloadPrdBatch({
+        prdId: args.prdId,
+        title: data.title,
+        context: data.context,
+        scope: data.scope,
+        tasks: data.tasks.map((t) => ({
+          title: t.title,
+          description: t.description,
+          doneCriteria: t.doneCriteria,
+          effort: t.effort,
+          dependsOn: t.dependsOn,
+        })),
+      }).pipe(
+        Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
+        Effect.catchTag("PrdNotDraftError", (e) => {
+          output.error("prd_not_draft", e.message);
+          return Effect.succeed(null);
+        }),
+      ),
+    );
+
+    if (!result) return;
+
+    const { prd: finalPrd, tasks: updatedTasks } = result;
+
+    if (output.isJson()) {
+      output.success({ prd: finalPrd, tasks: updatedTasks });
+    } else {
+      output.print(`Reloaded PRD '${finalPrd.title}' (${finalPrd.id}) [${finalPrd.status}]`);
+      output.print(`  Replaced with ${updatedTasks.length} task(s)`);
+      for (const t of updatedTasks) {
+        output.print(`  - ${t.id} #${t.position} ${t.title} [${t.status}] ${t.effort}`);
+      }
+    }
+  },
+});
+
 export const prdCommand = command({
   meta: { name: "prd", description: "PRD management" },
   subCommands: {
@@ -363,5 +457,6 @@ export const prdCommand = command({
     cancel: cancelCommand,
     fork: forkCommand,
     load: loadCommand,
+    reload: reloadCommand,
   },
 });

@@ -9,9 +9,9 @@ import {
 } from "#/modules/install/agent";
 
 describe("agent install helpers", () => {
-  it("detects both command directories when they already exist", () => {
+  it("detects both command directories when they already exist", async () => {
     const homeDir = "/home/tester";
-    const targets = resolveInstallTargets(
+    const targets = await resolveInstallTargets(
       {},
       {
         homeDir,
@@ -26,9 +26,9 @@ describe("agent install helpers", () => {
     expect(targets.every((target) => target.ensureDirectory === false)).toBe(true);
   });
 
-  it("creates the requested canonical directory when an explicit flag is used", () => {
+  it("creates the requested canonical directory when an explicit flag is used", async () => {
     const homeDir = "/home/tester";
-    const targets = resolveInstallTargets(
+    const targets = await resolveInstallTargets(
       { opencode: true },
       {
         homeDir,

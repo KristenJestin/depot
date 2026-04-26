@@ -345,6 +345,9 @@ function appendDevPrdSections(
   if (prd.scope) {
     lines.push(`Scope   : ${prd.scope}`);
   }
+  if (prd.auditCycles > 0) {
+    lines.push(`Audit cycles: ${prd.auditCycles}/10`);
+  }
   lines.push("");
 
   lines.push(CONTEXT_SECTION_TITLES.dev.progress);

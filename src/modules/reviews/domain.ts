@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { reviews, tasks } from "#/db/schema";
+import { reviews, tasks, prds } from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import {
   VALID_REVIEW_TRANSITIONS,
@@ -13,6 +13,10 @@ import { Db } from "#/services/database";
 import { InvalidTransitionError, ValidationError } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const MAX_AUDIT_CYCLES = 10;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +47,26 @@ const checkReviewTransition = (from: ReviewStatus, to: ReviewStatus) => {
 export const createReview = (input: { prdId: string; type: ReviewType }) =>
   Effect.gen(function* () {
     const db = yield* Db;
+
+    if (input.type === "agent") {
+      const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: input.prdId } }));
+      if (prd) {
+        if (prd.auditCycles >= MAX_AUDIT_CYCLES) {
+          return yield* Effect.fail(
+            new ValidationError({
+              reason: `Max audit cycles reached (${MAX_AUDIT_CYCLES}/${MAX_AUDIT_CYCLES}). Report to dev.`,
+            }),
+          );
+        }
+        yield* dbQuery(() =>
+          db
+            .update(prds)
+            .set({ auditCycles: prd.auditCycles + 1 })
+            .where(eq(prds.id, input.prdId)),
+        );
+      }
+    }
+
     const id = generateId();
     const rows = yield* dbQuery(() =>
       db
@@ -103,6 +127,11 @@ export const doneReview = (id: string) =>
         .where(eq(reviews.id, id))
         .returning(),
     );
+    if (review.type === "human") {
+      yield* dbQuery(() =>
+        db.update(prds).set({ auditCycles: 0 }).where(eq(prds.id, review.prdId)),
+      );
+    }
     return rows[0]!;
   });
 
@@ -186,4 +215,77 @@ export const listReviewTasks = (reviewId: string) =>
         orderBy: { position: "asc" },
       }),
     );
+  });
+
+export const addReviewTaskBatch = (
+  reviewId: string,
+  inputs: Array<{
+    title: string;
+    description: string;
+    doneCriteria: string;
+    severity?: SeverityLevel;
+  }>,
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const review = yield* getReview(reviewId);
+    if (!review) return yield* Effect.fail(new ReviewNotFoundError({ id: reviewId }));
+
+    if (review.status === "draft") {
+      yield* dbQuery(() =>
+        db.update(reviews).set({ status: "in_progress" }).where(eq(reviews.id, reviewId)),
+      );
+    } else if (review.status !== "in_progress") {
+      return yield* Effect.fail(
+        new InvalidTransitionError({
+          entity: "review",
+          from: review.status,
+          to: "in_progress",
+          allowed: [],
+        }),
+      );
+    }
+
+    const prdId = review.prdId;
+    const existing = yield* dbQuery(() => db.query.tasks.findMany({ where: { prdId } }));
+    let nextPosition = existing.length + 1;
+
+    const createdTasks: (typeof tasks.$inferSelect)[] = [];
+
+    for (const input of inputs) {
+      if (!input.doneCriteria || input.doneCriteria.trim() === "") {
+        return yield* Effect.fail(
+          new ValidationError({ reason: "Task must have non-empty done_criteria" }),
+        );
+      }
+      const storedDescription = normalizeTaskDescriptionForStorage(input.description);
+      const id = generateId();
+      const rows = yield* dbQuery(() =>
+        db
+          .insert(tasks)
+          .values({
+            id,
+            prdId,
+            position: nextPosition,
+            title: input.title,
+            description: storedDescription.description,
+            descriptionFormat: storedDescription.descriptionFormat,
+            doneCriteria: input.doneCriteria,
+            dependsOn: "[]",
+            effort: "s",
+            status: "pending",
+            reviewId,
+            severity: input.severity ?? null,
+            blockedReason: null,
+            skipReason: null,
+            startedAt: null,
+            completedAt: null,
+          })
+          .returning(),
+      );
+      createdTasks.push(rows[0]!);
+      nextPosition++;
+    }
+
+    return createdTasks;
   });

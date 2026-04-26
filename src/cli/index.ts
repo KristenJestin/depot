@@ -13,6 +13,11 @@ import { command } from "#/cli/command";
 import { setDebug, setJsonMode } from "#/shared/logger";
 import pkg from "../../package.json";
 
+process.on("warning", (warning) => {
+  if (warning.name === "ExperimentalWarning") return;
+  process.stderr.write(`${warning.name}: ${warning.message}\n`);
+});
+
 const main = command({
   meta: {
     name: "depot",

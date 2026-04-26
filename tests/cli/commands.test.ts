@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { writeFileSync, unlinkSync } from "fs";
+import fs from "node:fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { eq } from "drizzle-orm";
@@ -832,9 +832,9 @@ describe("CLI commands", () => {
       tmpFile = join(tmpdir(), `depot-test-${Date.now()}.json`);
     });
 
-    afterEach(() => {
+    afterEach(async () => {
       try {
-        unlinkSync(tmpFile);
+        await fs.unlink(tmpFile);
       } catch {
         // ignore
       }
@@ -866,7 +866,7 @@ describe("CLI commands", () => {
           },
         ],
       };
-      writeFileSync(tmpFile, JSON.stringify(payload));
+      await fs.writeFile(tmpFile, JSON.stringify(payload));
 
       const output = await captureStdout(async () => {
         await loadCommand.run({ args: { file: tmpFile } });
@@ -894,7 +894,7 @@ describe("CLI commands", () => {
           { title: "Task 1", description: "D", doneCriteria: "C", effort: "xs", dependsOn: [] },
         ],
       };
-      writeFileSync(tmpFile, JSON.stringify(payload));
+      await fs.writeFile(tmpFile, JSON.stringify(payload));
 
       const output = await captureStdout(async () => {
         await loadCommand.run({ args: { file: tmpFile } });
@@ -910,7 +910,7 @@ describe("CLI commands", () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const loadCommand = await getSubCommand(prdCommand, "load");
 
-      writeFileSync(tmpFile, "not json {{");
+      await fs.writeFile(tmpFile, "not json {{");
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
         code?: string | number | null,
@@ -942,7 +942,7 @@ describe("CLI commands", () => {
           { title: "Task A", description: "D", doneCriteria: "C", effort: "s", dependsOn: [5] },
         ],
       };
-      writeFileSync(tmpFile, JSON.stringify(payload));
+      await fs.writeFile(tmpFile, JSON.stringify(payload));
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
         code?: string | number | null,
@@ -975,7 +975,7 @@ describe("CLI commands", () => {
           { title: "Task B", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] },
         ],
       };
-      writeFileSync(tmpFile, JSON.stringify(payload));
+      await fs.writeFile(tmpFile, JSON.stringify(payload));
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
         code?: string | number | null,
@@ -1001,7 +1001,7 @@ describe("CLI commands", () => {
       const loadCommand = await getSubCommand(prdCommand, "load");
 
       const payload = { title: "Empty PRD", ready: false, tasks: [] };
-      writeFileSync(tmpFile, JSON.stringify(payload));
+      await fs.writeFile(tmpFile, JSON.stringify(payload));
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
         code?: string | number | null,

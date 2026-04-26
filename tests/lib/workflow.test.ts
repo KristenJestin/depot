@@ -1,9 +1,14 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import { Effect } from "effect";
+import fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createTestDb } from "../helpers/db";
 import { resolveMigrationsFolder } from "../helpers/db";
 import type { Database } from "#/db/client";
 import { prds } from "#/db/schema";
+import { resolveWorktreeMainPath } from "#/modules/workspaces/domain";
 import {
   createProject,
   listProjects,
@@ -22,6 +27,7 @@ import {
   donePrd,
   forkPrd,
   loadPrd,
+  reloadPrd,
   createTask,
   startTask,
   completeTask,
@@ -1050,5 +1056,154 @@ describe("loadPrd", () => {
 
     const allPrds = await db.query.prds.findMany({ where: { projectId } });
     expect(allPrds.find((p) => p.title === "Rollback PRD")).toBeUndefined();
+  });
+});
+
+// ── reloadPrd ──────────────────────────────────────────────────────────────
+
+describe("reloadPrd", () => {
+  let projectId: string;
+
+  beforeEach(async () => {
+    const project = await createProject(db, { name: "reload-test" });
+    projectId = project.id;
+  });
+
+  it("replaces title, context, scope, and tasks while preserving the PRD id", async () => {
+    const { prd: original } = await loadPrd(db, {
+      projectId,
+      title: "Original Title",
+      context: "Old context",
+      scope: "Old scope",
+      ready: false,
+      tasks: [
+        {
+          title: "Old Task",
+          description: "Old desc",
+          doneCriteria: "Old done",
+          effort: "s",
+          dependsOn: [],
+        },
+      ],
+    });
+
+    const { prd: reloaded, tasks: newTasks } = await reloadPrd(db, {
+      prdId: original.id,
+      title: "New Title",
+      context: "New context",
+      scope: "New scope",
+      tasks: [
+        {
+          title: "Task A",
+          description: "Desc A",
+          doneCriteria: "Done A",
+          effort: "m",
+          dependsOn: [],
+        },
+        {
+          title: "Task B",
+          description: "Desc B",
+          doneCriteria: "Done B",
+          effort: "s",
+          dependsOn: [0],
+        },
+      ],
+    });
+
+    expect(reloaded.id).toBe(original.id);
+    expect(reloaded.title).toBe("New Title");
+    expect(reloaded.context).toBe("New context");
+    expect(reloaded.scope).toBe("New scope");
+    expect(reloaded.status).toBe("draft");
+    expect(newTasks).toHaveLength(2);
+    expect(newTasks[0]!.title).toBe("Task A");
+    expect(newTasks[1]!.title).toBe("Task B");
+    const deps: string[] = JSON.parse(newTasks[1]!.dependsOn);
+    expect(deps).toEqual([newTasks[0]!.id]);
+  });
+
+  it("fails with PrdNotDraftError when the PRD is not in draft status", async () => {
+    const { prd } = await loadPrd(db, {
+      projectId,
+      title: "Ready PRD",
+      ready: true,
+      tasks: [{ title: "T", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] }],
+    });
+
+    await expect(
+      reloadPrd(db, {
+        prdId: prd.id,
+        title: "Updated",
+        tasks: [{ title: "T", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] }],
+      }),
+    ).rejects.toThrow(/prd_not_draft|Only draft PRDs/i);
+  });
+
+  it("all new tasks start with status pending", async () => {
+    const { prd } = await loadPrd(db, {
+      projectId,
+      title: "PRD",
+      ready: false,
+      tasks: [{ title: "Old", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] }],
+    });
+
+    const { tasks: newTasks } = await reloadPrd(db, {
+      prdId: prd.id,
+      title: "PRD",
+      tasks: [{ title: "New", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] }],
+    });
+
+    expect(newTasks.every((t) => t.status === "pending")).toBe(true);
+  });
+});
+
+// ── resolveWorktreeMainPath ────────────────────────────────────────────────
+
+describe("resolveWorktreeMainPath", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function createTempDir(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), "depot-worktree-test-"));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it("returns the main repo path from a worktree .git file", async () => {
+    const mainRepo = await createTempDir();
+    const worktreeDir = await createTempDir();
+    const worktreesDir = path.join(mainRepo, ".git", "worktrees", "test");
+    await fs.mkdir(worktreesDir, { recursive: true });
+    const gitdir = path.join(mainRepo, ".git", "worktrees", "test");
+    await fs.writeFile(path.join(worktreeDir, ".git"), `gitdir: ${gitdir}\n`);
+
+    const result = await Effect.runPromise(resolveWorktreeMainPath(worktreeDir));
+    expect(result?.replace(/\\/g, "/")).toBe(mainRepo.replace(/\\/g, "/"));
+  });
+
+  it("returns null when no .git file is found", async () => {
+    const dir = await createTempDir();
+    expect(await Effect.runPromise(resolveWorktreeMainPath(dir))).toBeNull();
+  });
+
+  it("returns null when .git is a directory (normal repo)", async () => {
+    const dir = await createTempDir();
+    await fs.mkdir(path.join(dir, ".git"), { recursive: true });
+    expect(await Effect.runPromise(resolveWorktreeMainPath(dir))).toBeNull();
+  });
+
+  it("returns null when .git file points to a submodule gitdir (no /worktrees/)", async () => {
+    const mainRepo = await createTempDir();
+    const submoduleDir = await createTempDir();
+    const gitdir = path.join(mainRepo, ".git", "modules", "sub");
+    await fs.mkdir(gitdir, { recursive: true });
+    await fs.writeFile(path.join(submoduleDir, ".git"), `gitdir: ${gitdir}\n`);
+
+    expect(await Effect.runPromise(resolveWorktreeMainPath(submoduleDir))).toBeNull();
   });
 });

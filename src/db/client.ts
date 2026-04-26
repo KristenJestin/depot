@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import * as schema from "#/db/schema";
 import path from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 
 const MIGRATION_RETRY_ATTEMPTS = 5;
 const MIGRATION_RETRY_DELAY_MS = 100;
@@ -106,12 +106,29 @@ export function applyMigrations(
 
 /**
  * Open (or create) the depot database at the given path.
+ * Automatically creates the parent directory if it does not exist.
  * Runs pending migrations automatically.
  * Use `":memory:"` for tests.
  */
-export function openDatabase(path: string): { db: Database; client: DatabaseSync } {
-  return openDatabaseWith(path, {
-    databaseFactory: (dbPath) => new DatabaseSync(dbPath),
+export function openDatabase(dbPath: string): { db: Database; client: DatabaseSync } {
+  if (dbPath === ":memory:") {
+    return openDatabaseWith(dbPath, {
+      databaseFactory: (p) => new DatabaseSync(p),
+      createDbFn: (client) => createDb(client),
+    });
+  }
+
+  const dir = path.dirname(dbPath);
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (error) {
+    throw new Error(
+      `Failed to create depot directory '${dir}'. Check permissions.\n${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  return openDatabaseWith(dbPath, {
+    databaseFactory: (p) => new DatabaseSync(p),
     createDbFn: (client) => createDb(client),
   });
 }

@@ -1,8 +1,10 @@
 import { Schema, Effect } from "effect";
+import { readFile } from "node:fs/promises";
 import { command } from "#/cli/command";
 import { runEffect } from "#/cli/runtime";
 import * as DomainReviews from "#/modules/reviews/domain";
 import { formatDate } from "#/shared/utils";
+import { parseJsonSchema } from "#/lib/json";
 
 const startCommand = command({
   meta: { name: "start", description: "Start a new review for a PRD" },
@@ -84,10 +86,73 @@ const taskAddCommand = command({
   },
 });
 
+const reviewTaskBatchInputSchema = Schema.Array(
+  Schema.Struct({
+    title: Schema.String.pipe(Schema.minLength(1)),
+    description: Schema.String.pipe(Schema.minLength(1)),
+    doneCriteria: Schema.String.pipe(Schema.minLength(1)),
+    severity: Schema.optional(Schema.Literal("critical", "major", "minor", "info")),
+  }),
+).pipe(Schema.minItems(1));
+
+const taskAddBatchCommand = command({
+  meta: { name: "add-batch", description: "Add multiple tasks to a review from a JSON file" },
+  workspace: true,
+  args: {
+    reviewId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Review ID",
+    },
+    file: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      alias: "f",
+      description: "Path to JSON file with array of findings",
+    },
+  },
+  run: async ({ args, output }) => {
+    let rawContent: string;
+    try {
+      rawContent = await readFile(args.file, "utf-8");
+    } catch (e) {
+      return output.error(
+        "file_read_error",
+        `Cannot read file '${args.file}': ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    const parseResult = parseJsonSchema(rawContent, reviewTaskBatchInputSchema);
+    if (!parseResult.ok) {
+      return output.error(parseResult.kind, parseResult.message);
+    }
+
+    const createdTasks = await runEffect(
+      DomainReviews.addReviewTaskBatch(args.reviewId, [...parseResult.data]).pipe(
+        Effect.catchTag("ReviewNotFoundError", () => Effect.succeed(null)),
+      ),
+    );
+
+    if (!createdTasks) return output.error("not_found", `Review not found: ${args.reviewId}`);
+
+    if (output.isJson()) {
+      output.success({ items: createdTasks });
+    } else {
+      output.print(`Added ${createdTasks.length} task(s) to review ${args.reviewId}`);
+      for (const task of createdTasks) {
+        const sev = task.severity ? ` [${task.severity}]` : "";
+        output.print(`  - ${task.id} ${task.title}${sev}`);
+      }
+    }
+  },
+});
+
 const taskCommand = command({
   meta: { name: "task", description: "Manage review tasks" },
   subCommands: {
     add: taskAddCommand,
+    "add-batch": taskAddBatchCommand,
   },
 });
 

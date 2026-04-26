@@ -39,6 +39,15 @@ export class PrdNotFoundError extends Data.TaggedError("PrdNotFoundError")<{
   }
 }
 
+export class PrdNotDraftError extends Data.TaggedError("PrdNotDraftError")<{
+  id: string;
+  status: string;
+}> {
+  get message() {
+    return `prd_not_draft — PRD ${this.id} is in status '${this.status}'. Only draft PRDs can be reloaded. Use \`prd fork\` to revise a ready PRD.`;
+  }
+}
+
 export class WorkspaceAlreadyHasActivePrdError extends Data.TaggedError(
   "WorkspaceAlreadyHasActivePrdError",
 )<{

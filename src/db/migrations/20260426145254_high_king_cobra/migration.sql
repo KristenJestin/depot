@@ -1,0 +1,1 @@
+ALTER TABLE `prds` ADD `audit_cycles` integer DEFAULT 0 NOT NULL;

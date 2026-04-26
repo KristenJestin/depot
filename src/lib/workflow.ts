@@ -255,7 +255,7 @@ export function listReviewTasks(db: Database, reviewId: string) {
 
 // ── Batch operations ──────────────────────────────────────────────────────────
 
-export async function loadPrd(
+export function loadPrd(
   db: Database,
   input: {
     projectId: string;
@@ -273,4 +273,23 @@ export async function loadPrd(
   },
 ): Promise<{ prd: Awaited<ReturnType<typeof createPrd>>; tasks: TaskRow[] }> {
   return runWithDb(db, DomainPrds.loadPrdBatch(input));
+}
+
+export function reloadPrd(
+  db: Database,
+  input: {
+    prdId: string;
+    title: string;
+    context?: string;
+    scope?: string;
+    tasks: Array<{
+      title: string;
+      description: string;
+      doneCriteria: string;
+      effort: Effort;
+      dependsOn?: number[];
+    }>;
+  },
+): Promise<{ prd: Awaited<ReturnType<typeof createPrd>>; tasks: TaskRow[] }> {
+  return runWithDb(db, DomainPrds.reloadPrdBatch(input));
 }
