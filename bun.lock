@@ -8,6 +8,7 @@
         "@base-ui/react": "^1.4.1",
         "@fontsource-variable/inter": "^5.2.8",
         "@fontsource-variable/space-grotesk": "^5.2.10",
+        "@netsirk/depot": "^2.1.4",
         "@tanstack/react-query": "5.100.2",
         "@tanstack/react-router": "1.168.24",
         "citty": "^0.2.2",
@@ -179,6 +180,8 @@
     "@js-temporal/polyfill": ["@js-temporal/polyfill@0.5.1", "", { "dependencies": { "jsbi": "^4.3.0" } }, "sha512-hloP58zRVCRSpgDxmqCWJNlizAlUgJFqG2ypq79DCvyv9tHjRYMDOcPFjzfl/A1/YxDvRCZz8wvZvmapQnKwFQ=="],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
+
+    "@netsirk/depot": ["@netsirk/depot@2.1.4", "", { "dependencies": { "@base-ui/react": "^1.4.1", "@fontsource-variable/inter": "^5.2.8", "@fontsource-variable/space-grotesk": "^5.2.10", "@netsirk/depot": "^2.1.3", "@tanstack/react-query": "5.100.2", "@tanstack/react-router": "1.168.24", "citty": "^0.2.2", "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "drizzle-orm": "1.0.0-beta.22", "effect": "^3.21.1", "hono": "^4.12.14", "lucide-react": "^1.11.0", "react": "^19.2.5", "react-dom": "^19.2.5", "tailwind-merge": "^3.5.0", "ulid": "^3.0.2" }, "bin": { "depot": "dist/index.mjs" } }, "sha512-YHnXga1jbVhlpU16svhFnptFMprKepH67kKHBctXwhDwZdjuu8lRErDlVdXYeGb1IjmoEWRatlZ4ivKv/52exg=="],
 
     "@oxc-project/runtime": ["@oxc-project/runtime@0.126.0", "", {}, "sha512-oksjxfqDNmIYMGlIgLzYgnz5YjZax27RtQezsPpKEGo9AC5LOaIGHsivCCeaAWdCtPnRyjZXM/7svreCC8kZVQ=="],
 

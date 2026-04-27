@@ -35,7 +35,7 @@ describe("web api", () => {
     const res = await app.request("/api/context");
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ workspaceId: null });
+    expect(body.workspaceId).toBeNull();
   });
 
   describe("GET /api/prds", () => {
@@ -90,6 +90,47 @@ describe("web api", () => {
       const body = await res.json();
       expect(body.prd.id).toBe("prd-1");
       expect(Array.isArray(body.tasks)).toBe(true);
+    });
+  });
+
+  describe("GET /api/prds (enrichi)", () => {
+    it("inclut totalTasks et doneTasks (0 si aucune task)", async () => {
+      const res = await app.request("/api/prds");
+      expect(res.status).toBe(200);
+      const { prds } = await res.json();
+      expect(prds.length).toBeGreaterThan(0);
+      expect(typeof prds[0].totalTasks).toBe("number");
+      expect(typeof prds[0].doneTasks).toBe("number");
+      expect(prds[0].totalTasks).toBe(0);
+      expect(prds[0].doneTasks).toBe(0);
+    });
+  });
+
+  describe("GET /api/activity", () => {
+    it("retourne { events: [] } quand aucun événement", async () => {
+      const res = await app.request("/api/activity");
+      expect(res.status).toBe(200);
+      const { events } = await res.json();
+      expect(Array.isArray(events)).toBe(true);
+    });
+  });
+
+  describe("GET /api/sessions/current", () => {
+    it("retourne { session: null }", async () => {
+      const res = await app.request("/api/sessions/current");
+      expect(res.status).toBe(200);
+      const { session } = await res.json();
+      expect(session).toBeNull();
+    });
+  });
+
+  describe("GET /api/context (enrichi)", () => {
+    it("retourne workspaceId et workspacePath null si aucun workspace courant", async () => {
+      const res = await app.request("/api/context");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.workspaceId).toBeNull();
+      expect(body.workspacePath).toBeNull();
     });
   });
 });

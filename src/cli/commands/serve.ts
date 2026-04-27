@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -31,7 +32,7 @@ export const serveCommand = command({
 
     server.route("/", api);
 
-    const distWebDir = resolve(import.meta.dirname, "web");
+    const distWebDir = fileURLToPath(new URL("web", import.meta.url));
 
     try {
       await fs.access(distWebDir);

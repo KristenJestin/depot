@@ -44,4 +44,22 @@ describe.skipIf(!built)("build smoke", () => {
     });
     expect(result.status).toBe(0);
   });
+
+  test("npm pack tarball includes dist/web/index.html and dist/index.mjs", () => {
+    const projectRoot = resolve(distDir, "..");
+    const result = spawnSync("npm", ["pack", "--dry-run", "--json"], {
+      encoding: "utf-8",
+      timeout: 30_000,
+      cwd: projectRoot,
+    });
+    let packs: Array<{ files: Array<{ path: string }> }>;
+    try {
+      packs = JSON.parse(result.stdout);
+    } catch {
+      throw new Error(`npm pack --json produced non-JSON output:\n${result.stdout}\n${result.stderr}`);
+    }
+    const files = packs[0].files.map((f) => f.path);
+    expect(files).toContain("dist/index.mjs");
+    expect(files).toContain("dist/web/index.html");
+  });
 });

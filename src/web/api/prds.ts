@@ -9,9 +9,29 @@ import type { Variables } from "./types";
 
 export const prdsRoutes = new Hono<{ Variables: Variables }>()
   .get("/prds", async (c) => {
+    const db = c.var.db;
     const prdList = await getRuntime().runPromise(DomainPrds.listPrds({ latestOnly: true }));
     prdList.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-    return c.json({ prds: prdList }, 200);
+
+    const allTaskRows = await db.query.tasks.findMany({
+      columns: { prdId: true, status: true, reviewId: true },
+    });
+    const taskRows = allTaskRows.filter((t) => t.reviewId === null);
+
+    const taskCounts = new Map<string, { total: number; done: number }>();
+    for (const task of taskRows) {
+      const entry = taskCounts.get(task.prdId) ?? { total: 0, done: 0 };
+      entry.total++;
+      if (task.status === "done" || task.status === "skipped") entry.done++;
+      taskCounts.set(task.prdId, entry);
+    }
+
+    const prds = prdList.map((p) => {
+      const counts = taskCounts.get(p.id) ?? { total: 0, done: 0 };
+      return { ...p, totalTasks: counts.total, doneTasks: counts.done };
+    });
+
+    return c.json({ prds }, 200);
   })
   .get("/prds/:id", async (c) => {
     const { id } = c.req.param();
