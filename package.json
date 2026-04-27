@@ -1,6 +1,6 @@
 {
   "name": "@netsirk/depot",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "description": "AI agent task and PRD management CLI",
   "keywords": [
     "agent",
@@ -32,7 +32,8 @@
     "build": "vp pack",
     "build:web": "vp build",
     "check": "vp check",
-    "prepublishOnly": "vp pack",
+    "prepublishOnly": "vp pack && vp build",
+    "test:smoke": "vp pack && vp build && vp test tests/build",
     "depot": "npx tsx src/cli/index.ts --",
     "dev:web": "vp dev",
     "db:check": "drizzle-kit check",

@@ -33,6 +33,15 @@ export const serveCommand = command({
 
     const distWebDir = resolve(import.meta.dirname, "web");
 
+    try {
+      await fs.access(distWebDir);
+    } catch {
+      output.error(
+        "web_not_built",
+        `Web UI assets not found at '${distWebDir}'. The package may be missing 'dist/web/' — ensure you are on the latest published version.`,
+      );
+    }
+
     server.use(
       "/*",
       serveStatic({
