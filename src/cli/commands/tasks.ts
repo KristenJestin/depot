@@ -57,10 +57,26 @@ const addCommand = command({
       schema: Schema.String,
       description: "Comma-separated list of dependency task IDs",
     },
+    phase: {
+      schema: Schema.Int.pipe(Schema.positive()),
+      alias: "p",
+      description: "Phase number this task belongs to (multi-phase PRDs only)",
+    },
   },
   run: async ({ args, output }) => {
     const prd = await runEffect(DomainPrds.getPrd(args.prdId));
     if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
+
+    if (prd.status !== "draft") {
+      const hint =
+        prd.status === "ready"
+          ? ` Run \`depot prd fork ${prd.id}\` to create a new draft revision first.`
+          : " No task modifications are allowed on a PRD in this status.";
+      return output.error(
+        "prd_not_draft",
+        `PRD '${prd.title}' is in status '${prd.status}'. Only draft PRDs accept new tasks.${hint}`,
+      );
+    }
 
     let dependencyIds: string[] | undefined = undefined;
     if (args.depends) {
@@ -74,12 +90,13 @@ const addCommand = command({
 
     const task = await runEffect(
       DomainTasks.createTask({
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         title: args.title,
         description: args.desc,
         doneCriteria: args.criteria,
         effort: args.effort,
         dependsOn: dependencyIds,
+        phaseNumber: args.phase,
       }),
     );
 
@@ -121,7 +138,16 @@ const listCommand = command({
       targetPrdId = prd.id;
     }
 
-    const taskList = await runEffect(DomainTasks.listTasks(targetPrdId));
+    const prd = await runEffect(DomainPrds.getPrd(targetPrdId));
+    if (!prd) return output.error("not_found", `PRD not found: ${targetPrdId}`);
+
+    // For multi-phase in_progress PRDs, only show tasks for the current phase
+    const phaseFilter =
+      prd.status === "in_progress" && prd.currentPhase !== null && prd.currentPhase !== undefined
+        ? prd.currentPhase
+        : undefined;
+
+    const taskList = await runEffect(DomainTasks.listTasks(targetPrdId, { phase: phaseFilter }));
     if (output.isJson()) {
       output.success({ items: taskList.map(serializeTask) });
       return;
@@ -216,20 +242,42 @@ const updateCommand = command({
       alias: "e",
       description: "New effort estimate (xs/s/m/l/xl)",
     },
+    phase: {
+      schema: Schema.Int.pipe(Schema.positive()),
+      alias: "p",
+      description: "New phase number (multi-phase PRDs only)",
+    },
   },
   run: async ({ args, output }) => {
     const task = await runEffect(DomainTasks.getTask(args.taskId));
     if (!task) return output.error("not_found", `Task not found: ${args.taskId}`);
 
+    // Only PRD tasks (not review tasks) are subject to the draft-only guard
+    if (!task.reviewId) {
+      const prd = await runEffect(DomainPrds.getPrd(task.prdRevisionId));
+      if (!prd) return output.error("not_found", `PRD not found: ${task.prdRevisionId}`);
+      if (prd.status !== "draft") {
+        const hint =
+          prd.status === "ready"
+            ? ` Run \`depot prd fork ${prd.id}\` to create a new draft revision first.`
+            : " No task modifications are allowed on a PRD in this status.";
+        return output.error(
+          "prd_not_draft",
+          `PRD '${prd.title}' is in status '${prd.status}'. Only draft PRDs allow task updates.${hint}`,
+        );
+      }
+    }
+
     if (
       args.title === undefined &&
       args.desc === undefined &&
       args.criteria === undefined &&
-      args.effort === undefined
+      args.effort === undefined &&
+      args.phase === undefined
     ) {
       return output.error(
         "no_changes",
-        "No changes provided. Use --title, --desc, --criteria, or --effort.",
+        "No changes provided. Use --title, --desc, --criteria, --effort, or --phase.",
       );
     }
 
@@ -239,6 +287,7 @@ const updateCommand = command({
         description: args.desc,
         doneCriteria: args.criteria,
         effort: args.effort,
+        phaseNumber: args.phase,
       }),
     );
 

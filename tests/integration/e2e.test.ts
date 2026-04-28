@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
-import { prds } from "#/db/schema";
+import { prdRevisions } from "#/db/schema";
 import {
   createProject,
   addWorkspace,
@@ -62,7 +62,7 @@ describe("end-to-end workflow", () => {
     expect(prd.status).toBe("draft");
 
     // 5. Agent marks the PRD ready
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     const readyPrd = (await getPrd(db, prd.id))!;
     expect(readyPrd.status).toBe("ready");
 
@@ -72,14 +72,14 @@ describe("end-to-end workflow", () => {
 
     // 7. Agent creates tasks
     const t1 = await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Set up database schema",
       description: "Create all tables with Drizzle",
       doneCriteria: "All 5 tables exist\nMigrations run clean",
       effort: "m",
     });
     const t2 = await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Implement workflow engine",
       description: "Core business logic for state transitions",
       doneCriteria: "All transition tests pass",
@@ -87,7 +87,7 @@ describe("end-to-end workflow", () => {
       dependsOn: [t1.id],
     });
     const t3 = await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Build context command",
       description: "Structured plaintext output for agent resume",
       doneCriteria: "Context output matches spec format",
@@ -153,11 +153,11 @@ describe("end-to-end workflow", () => {
       projectId: project.id,
       title: "Feature Y",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     await activatePrd(db, prd.id, ws.id);
 
     const task = await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Deploy",
       description: "Deploy to production",
       doneCriteria: "Service is running",
@@ -197,9 +197,9 @@ describe("end-to-end workflow", () => {
       title: "New feature",
     });
 
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd1.id));
     const activated1 = await activatePrd(db, prd1.id, ws1.id);
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd2.id));
     const activated2 = await activatePrd(db, prd2.id, ws2.id);
 
     // Each workspace has its own isolated active PRD
@@ -261,8 +261,8 @@ describe("end-to-end workflow", () => {
       title: "Second PRD",
     });
 
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd1.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd2.id));
     await activatePrd(db, prd1.id, ws.id);
 
     await expect(activatePrd(db, prd2.id, ws.id)).rejects.toThrow(

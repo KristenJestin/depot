@@ -81,6 +81,7 @@ export const VALID_EVENT_TYPES = [
   "review_updated",
   "review_started",
   "review_done",
+  "phase_advanced",
   "note",
   "error",
 ] as const;

@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .depot
+.depot-dev/
+.env
 .prds/
 test-results/
 dev-server*.log

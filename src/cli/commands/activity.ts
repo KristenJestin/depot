@@ -56,7 +56,7 @@ const addCommand = command({
       DomainActivity.logActivity({
         projectId: ws.projectId,
         workspaceId: ws.id,
-        prdId: prd?.id,
+        prdRevisionId: prd?.id,
         taskId: task?.id,
         eventType: args.eventType,
         payload,

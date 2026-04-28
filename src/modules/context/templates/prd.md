@@ -86,7 +86,54 @@ Before marking the PRD ready, explicitly surface:
 
 Resolve them with the user.
 
-### 5. Finish At Ready
+### 5. Phase Design (multi-phase PRDs only)
+
+For large PRDs where reviewing a full diff at once would be impractical, split tasks into explicit phases. This is a **manual decision** — phases are never inferred automatically from file counts, diff size, or task categories.
+
+**Phase formation rules:**
+
+- Group tasks that are logically coupled or that produce a more coherent diff together.
+- Open a new phase when it improves review clarity, user control, or risk management.
+- Avoid phases that are too small (artificial round-trips, little material) or too large (painful validation).
+- Number phases contiguously starting at 1. No gaps.
+- No task may depend on a task in a future phase.
+- Phases and tasks are frozen at `ready`. No new phases or tasks may be added after that.
+- A PRD in `ready`, `in_progress`, `done`, or `canceled` status cannot receive new tasks or phases.
+- Feedback or issues discovered after `ready` must be handled as reviews/findings, or by forking to a new revision if the scope itself must change.
+
+**How to set phases:**
+
+Each task has a `--phase` flag. Set it when adding or updating tasks during the draft:
+
+```
+depot task add --prd <prd-id> --phase 1 ...
+depot task update <task-id> --phase 2
+```
+
+The PRD's `currentPhase` advances via `depot prd phase-advance <prd-id>` after human review, not automatically.
+
+Single-phase PRDs (no `--phase` set on tasks) behave identically to today.
+
+### 6. Mutability Rules
+
+The revision status controls what you may change:
+
+| Status              | What you can do                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| `draft`             | Modify freely: `prd update`, `task add`, `task update`, `prd reload`                               |
+| `ready`             | No direct changes. Run `depot prd fork <prd-id>` to create a new draft revision, then modify that. |
+| `in_progress`       | No changes. Use `review task add` for findings.                                                    |
+| `done` / `canceled` | Immutable.                                                                                         |
+
+If you need to adjust a ready PRD, always fork first:
+
+```
+depot prd fork <prd-id>   # creates a new draft revision
+depot task update <new-task-id> ...
+depot prd ready <new-prd-id>
+```
+
+### 7. Finish At Ready
 
 Only when you are confident that a dev orchestrator can hand the work to a coder without major ambiguity:
 

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { workspaces, prds, tasks, activityLog } from "#/db/schema";
+import { workspaces, prdRevisions, tasks, activityLog } from "#/db/schema";
 import { generateId, normalizeWorkspacePath } from "#/shared/utils";
 import { Db } from "#/services/database";
 import { WorkspaceNotFoundError, WorkspaceHasLinkedPrdsError } from "#/shared/errors";
@@ -135,7 +135,9 @@ export const removeWorkspace = (id: string, force = false) =>
     const workspace = yield* getWorkspace(id);
     if (!workspace) return yield* Effect.fail(new WorkspaceNotFoundError({ id }));
 
-    const linkedPrds = yield* dbQuery(() => db.query.prds.findMany({ where: { workspaceId: id } }));
+    const linkedPrds = yield* dbQuery(() =>
+      db.query.prdRevisions.findMany({ where: { workspaceId: id } }),
+    );
     if (linkedPrds.length > 0 && !force) {
       return yield* Effect.fail(
         new WorkspaceHasLinkedPrdsError({ workspaceId: id, count: linkedPrds.length }),
@@ -145,16 +147,16 @@ export const removeWorkspace = (id: string, force = false) =>
     if (force && linkedPrds.length > 0) {
       for (const prd of linkedPrds) {
         const prdTasks = yield* dbQuery(() =>
-          db.query.tasks.findMany({ where: { prdId: prd.id } }),
+          db.query.tasks.findMany({ where: { prdRevisionId: prd.id } }),
         );
         for (const task of prdTasks) {
           yield* dbQuery(() => db.delete(activityLog).where(eq(activityLog.taskId, task.id)));
         }
-        yield* dbQuery(() => db.delete(activityLog).where(eq(activityLog.prdId, prd.id)));
-        yield* dbQuery(() => db.delete(tasks).where(eq(tasks.prdId, prd.id)));
+        yield* dbQuery(() => db.delete(activityLog).where(eq(activityLog.prdRevisionId, prd.id)));
+        yield* dbQuery(() => db.delete(tasks).where(eq(tasks.prdRevisionId, prd.id)));
       }
       for (const prd of linkedPrds) {
-        yield* dbQuery(() => db.delete(prds).where(eq(prds.id, prd.id)));
+        yield* dbQuery(() => db.delete(prdRevisions).where(eq(prdRevisions.id, prd.id)));
       }
     }
 

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { prds, tasks } from "#/db/schema";
+import { prds, prdRevisions, tasks } from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
 import { VALID_PRD_TRANSITIONS, type PrdStatus, type Effort } from "#/shared/validator";
@@ -11,6 +11,7 @@ import {
   WorkspaceAlreadyHasActivePrdError,
   InvalidTransitionError,
   DatabaseError,
+  ValidationError,
 } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { logActivity } from "#/modules/activity/domain";
@@ -29,6 +30,10 @@ const checkPrdTransition = (from: PrdStatus, to: PrdStatus) => {
 
 // ── Functions ─────────────────────────────────────────────────────────────────
 
+/**
+ * Create a new PRD (logical entity + initial revision r1).
+ * Returns the revision row — callers always work with revision IDs.
+ */
 export const createPrd = (input: {
   projectId: string;
   title: string;
@@ -37,16 +42,25 @@ export const createPrd = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const id = generateId();
-    const rows = yield* dbQuery(() =>
+    const prdId = generateId();
+    const revId = generateId();
+
+    yield* dbQuery(() =>
+      db.insert(prds).values({
+        id: prdId,
+        projectId: input.projectId,
+        currentRevisionId: revId,
+      }),
+    );
+
+    const revRows = yield* dbQuery(() =>
       db
-        .insert(prds)
+        .insert(prdRevisions)
         .values({
-          id,
+          id: revId,
+          prdId,
           projectId: input.projectId,
           workspaceId: null,
-          rootId: id, // v1 points to itself
-          parentId: null,
           revision: 1,
           title: input.title,
           context: input.context ?? null,
@@ -57,14 +71,16 @@ export const createPrd = (input: {
         })
         .returning(),
     );
-    const prd = rows[0]!;
+    const rev = revRows[0]!;
+
     yield* logActivity({
-      projectId: prd.projectId,
-      prdId: prd.id,
+      projectId: rev.projectId,
+      prdRevisionId: rev.id,
       eventType: "prd_created",
-      payload: { prdId: prd.id, title: prd.title },
+      payload: { prdRevisionId: rev.id, prdId, title: rev.title },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    return prd;
+
+    return rev;
   });
 
 export const updatePrd = (
@@ -77,10 +93,10 @@ export const updatePrd = (
 ) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const prd = yield* getPrd(id);
-    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id }));
-    if (prd.status !== "draft") {
-      return yield* Effect.fail(new PrdNotDraftError({ id, status: prd.status }));
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    if (rev.status !== "draft") {
+      return yield* Effect.fail(new PrdNotDraftError({ id, status: rev.status }));
     }
 
     const fields = [
@@ -95,13 +111,13 @@ export const updatePrd = (
 
     const rows = yield* dbQuery(() =>
       db
-        .update(prds)
+        .update(prdRevisions)
         .set({
-          title: changes.title ?? prd.title,
-          context: changes.context !== undefined ? changes.context : prd.context,
-          scope: changes.scope !== undefined ? changes.scope : prd.scope,
+          title: changes.title ?? rev.title,
+          context: changes.context !== undefined ? changes.context : rev.context,
+          scope: changes.scope !== undefined ? changes.scope : rev.scope,
         })
-        .where(eq(prds.id, id))
+        .where(eq(prdRevisions.id, id))
         .returning(),
     );
 
@@ -109,17 +125,18 @@ export const updatePrd = (
     yield* logActivity({
       projectId: updated.projectId,
       workspaceId: updated.workspaceId ?? undefined,
-      prdId: updated.id,
+      prdRevisionId: updated.id,
       eventType: "prd_updated",
-      payload: { prdId: updated.id, title: updated.title, fields },
+      payload: { prdRevisionId: updated.id, title: updated.title, fields },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return updated;
   });
 
+/** Look up a PRD by its revision ID. */
 export const getPrd = (id: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const row = yield* dbQuery(() => db.query.prds.findFirst({ where: { id } }));
+    const row = yield* dbQuery(() => db.query.prdRevisions.findFirst({ where: { id } }));
     return row ?? null;
   });
 
@@ -128,29 +145,34 @@ export const listPrds = (
 ) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    let rows: (typeof prds.$inferSelect)[];
+    let rows: (typeof prdRevisions.$inferSelect)[];
     if (filter.workspaceId) {
       rows = yield* dbQuery(() =>
-        db.query.prds.findMany({
+        db.query.prdRevisions.findMany({
           where: { workspaceId: filter.workspaceId },
           orderBy: { createdAt: "asc" },
         }),
       );
     } else if (filter.projectId) {
       rows = yield* dbQuery(() =>
-        db.query.prds.findMany({
+        db.query.prdRevisions.findMany({
           where: { projectId: filter.projectId },
           orderBy: { createdAt: "asc" },
         }),
       );
     } else {
-      rows = yield* dbQuery(() => db.query.prds.findMany({ orderBy: { createdAt: "asc" } }));
+      rows = yield* dbQuery(() =>
+        db.query.prdRevisions.findMany({ orderBy: { createdAt: "asc" } }),
+      );
     }
 
     if (filter.latestOnly) {
-      // Exclude PRDs that are a parent of another PRD (i.e., keep only leaf revisions)
-      const parentIds = new Set(rows.filter((p) => p.parentId !== null).map((p) => p.parentId!));
-      rows = rows.filter((p) => !parentIds.has(p.id));
+      // Keep only the current revision for each logical PRD (the one pointed to by prds.currentRevisionId)
+      const prdRows = yield* dbQuery(() => db.query.prds.findMany());
+      const currentRevIds = new Set(
+        prdRows.map((p) => p.currentRevisionId).filter((id): id is string => id !== null),
+      );
+      rows = rows.filter((r) => currentRevIds.has(r.id));
     }
 
     return rows;
@@ -159,11 +181,11 @@ export const listPrds = (
 export const activatePrd = (id: string, workspaceId: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const prd = yield* getPrd(id);
-    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
 
     const activePrd = yield* dbQuery(() =>
-      db.query.prds.findFirst({ where: { workspaceId, status: "in_progress" } }),
+      db.query.prdRevisions.findFirst({ where: { workspaceId, status: "in_progress" } }),
     );
     if (activePrd && activePrd.id !== id) {
       return yield* Effect.fail(
@@ -171,22 +193,22 @@ export const activatePrd = (id: string, workspaceId: string) =>
       );
     }
 
-    yield* checkPrdTransition(prd.status, "in_progress");
+    yield* checkPrdTransition(rev.status, "in_progress");
 
     const rows = yield* dbQuery(() =>
       db
-        .update(prds)
+        .update(prdRevisions)
         .set({ status: "in_progress", workspaceId, activatedAt: new Date() })
-        .where(eq(prds.id, id))
+        .where(eq(prdRevisions.id, id))
         .returning(),
     );
 
     yield* logActivity({
-      projectId: prd.projectId,
+      projectId: rev.projectId,
       workspaceId,
-      prdId: id,
+      prdRevisionId: id,
       eventType: "prd_activated",
-      payload: { prdId: id, title: prd.title },
+      payload: { prdRevisionId: id, title: rev.title },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
 
     return rows[0]!;
@@ -195,21 +217,21 @@ export const activatePrd = (id: string, workspaceId: string) =>
 export const markPrdReady = (id: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const prd = yield* getPrd(id);
-    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id }));
-    yield* checkPrdTransition(prd.status, "ready");
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    yield* checkPrdTransition(rev.status, "ready");
     const rows = yield* dbQuery(() =>
       db
-        .update(prds)
+        .update(prdRevisions)
         .set({ status: "ready", readyAt: new Date() })
-        .where(eq(prds.id, id))
+        .where(eq(prdRevisions.id, id))
         .returning(),
     );
     yield* logActivity({
-      projectId: prd.projectId,
-      prdId: id,
+      projectId: rev.projectId,
+      prdRevisionId: id,
       eventType: "prd_ready",
-      payload: { prdId: id, title: prd.title },
+      payload: { prdRevisionId: id, title: rev.title },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
@@ -217,18 +239,18 @@ export const markPrdReady = (id: string) =>
 export const donePrd = (id: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const prd = yield* getPrd(id);
-    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id }));
-    yield* checkPrdTransition(prd.status, "done");
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    yield* checkPrdTransition(rev.status, "done");
     const rows = yield* dbQuery(() =>
-      db.update(prds).set({ status: "done" }).where(eq(prds.id, id)).returning(),
+      db.update(prdRevisions).set({ status: "done" }).where(eq(prdRevisions.id, id)).returning(),
     );
     yield* logActivity({
-      projectId: prd.projectId,
-      workspaceId: prd.workspaceId ?? undefined,
-      prdId: id,
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId: id,
       eventType: "prd_done",
-      payload: { prdId: id, title: prd.title },
+      payload: { prdRevisionId: id, title: rev.title },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
@@ -236,62 +258,84 @@ export const donePrd = (id: string) =>
 export const cancelPrd = (id: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const prd = yield* getPrd(id);
-    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id }));
-    yield* checkPrdTransition(prd.status, "canceled");
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    yield* checkPrdTransition(rev.status, "canceled");
     const rows = yield* dbQuery(() =>
-      db.update(prds).set({ status: "canceled" }).where(eq(prds.id, id)).returning(),
+      db
+        .update(prdRevisions)
+        .set({ status: "canceled" })
+        .where(eq(prdRevisions.id, id))
+        .returning(),
     );
     yield* logActivity({
-      projectId: prd.projectId,
-      workspaceId: prd.workspaceId ?? undefined,
-      prdId: id,
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId: id,
       eventType: "prd_canceled",
-      payload: { prdId: id, title: prd.title },
+      payload: { prdRevisionId: id, title: rev.title },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
 
+/**
+ * Fork a ready revision into a new draft revision.
+ *
+ * Only `ready` revisions can be forked. The new revision is draft, inherits
+ * spec fields and clones all PRD tasks. The logical PRD's `currentRevisionId`
+ * is updated to point to the new revision, and `supersededAt` is set on the
+ * old revision.
+ */
 export const forkPrd = (id: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const prd = yield* getPrd(id);
-    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id }));
-    if (prd.status !== "ready") {
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    if (rev.status !== "ready") {
       return yield* Effect.fail(
         new InvalidTransitionError({
           entity: "PRD",
-          from: prd.status,
+          from: rev.status,
           to: "draft (fork)",
           allowed: ["ready"],
         }),
       );
     }
-    const newId = generateId();
-    const rootId = prd.rootId ?? prd.id;
-    const rows = yield* dbQuery(() =>
+    const newRevId = generateId();
+    const newRevRows = yield* dbQuery(() =>
       db
-        .insert(prds)
+        .insert(prdRevisions)
         .values({
-          id: newId,
-          projectId: prd.projectId,
+          id: newRevId,
+          prdId: rev.prdId,
+          projectId: rev.projectId,
           workspaceId: null,
-          rootId,
-          parentId: prd.id,
-          revision: prd.revision + 1,
-          title: prd.title,
-          context: prd.context,
-          scope: prd.scope,
+          revision: rev.revision + 1,
+          title: rev.title,
+          context: rev.context,
+          scope: rev.scope,
           status: "draft",
           readyAt: null,
           activatedAt: null,
         })
         .returning(),
     );
-    const newPrd = rows[0]!;
+    const newRev = newRevRows[0]!;
 
+    // Mark old revision as superseded and update logical PRD pointer
+    yield* dbQuery(() =>
+      db.update(prdRevisions).set({ supersededAt: new Date() }).where(eq(prdRevisions.id, id)),
+    );
+    yield* dbQuery(() =>
+      db.update(prds).set({ currentRevisionId: newRevId }).where(eq(prds.id, rev.prdId)),
+    );
+
+    // Clone PRD tasks into the new revision
     const sourceTasks = yield* dbQuery(() =>
-      db.query.tasks.findMany({ where: { prdId: prd.id }, orderBy: { position: "asc" } }),
+      db.query.tasks.findMany({
+        where: { prdRevisionId: rev.id, reviewId: { isNull: true } },
+        orderBy: { position: "asc" },
+      }),
     );
 
     const idMap = new Map<string, string>();
@@ -308,7 +352,7 @@ export const forkPrd = (id: string) =>
         db.insert(tasks).values({
           ...task,
           id: newTaskId,
-          prdId: newId,
+          prdRevisionId: newRevId,
           status: "pending",
           blockedReason: null,
           skipReason: null,
@@ -320,27 +364,32 @@ export const forkPrd = (id: string) =>
     }
 
     yield* logActivity({
-      projectId: prd.projectId,
-      prdId: newPrd.id,
+      projectId: rev.projectId,
+      prdRevisionId: newRev.id,
       eventType: "prd_forked",
-      payload: { sourcePrdId: prd.id, newPrdId: newPrd.id, revision: newPrd.revision },
+      payload: {
+        sourcePrdRevisionId: rev.id,
+        newPrdRevisionId: newRev.id,
+        revision: newRev.revision,
+      },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    return newPrd;
+    return newRev;
   });
 
-export const listPrdFamily = (rootId: string) =>
+/** List all revisions for the same logical PRD, ordered by revision number. */
+export const listPrdFamily = (prdId: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
     return yield* dbQuery(() =>
-      db.query.prds.findMany({
-        where: { rootId },
+      db.query.prdRevisions.findMany({
+        where: { prdId },
         orderBy: { revision: "asc" },
       }),
     );
   });
 
 export type ReloadPrdBatchInput = {
-  prdId: string;
+  prdRevisionId: string;
   title: string;
   context?: string;
   scope?: string;
@@ -348,29 +397,38 @@ export type ReloadPrdBatchInput = {
 };
 
 /**
- * Replace the content of a draft PRD in a single atomic transaction.
- * ID, createdAt, rootId, parentId, revision, and workspaceId are preserved.
- * Only draft PRDs can be reloaded.
+ * Replace the content of a draft PRD revision in a single atomic transaction.
+ * Only draft revisions can be reloaded.
  */
 export const reloadPrdBatch = (input: ReloadPrdBatchInput) =>
   Effect.gen(function* () {
     const db = yield* Db;
 
-    const prd = yield* getPrd(input.prdId);
-    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id: input.prdId }));
-    if (prd.status !== "draft") {
-      return yield* Effect.fail(new PrdNotDraftError({ id: input.prdId, status: prd.status }));
+    const rev = yield* getPrd(input.prdRevisionId);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id: input.prdRevisionId }));
+    if (rev.status !== "draft") {
+      return yield* Effect.fail(
+        new PrdNotDraftError({ id: input.prdRevisionId, status: rev.status }),
+      );
     }
 
     const result = yield* Effect.try({
       try: () =>
         db.transaction((tx) => {
-          tx.update(prds)
-            .set({ title: input.title, context: input.context ?? null, scope: input.scope ?? null })
-            .where(eq(prds.id, input.prdId))
+          const hasPhases = input.tasks.some(
+            (t) => t.phaseNumber !== undefined && t.phaseNumber !== null,
+          );
+          tx.update(prdRevisions)
+            .set({
+              title: input.title,
+              context: input.context ?? null,
+              scope: input.scope ?? null,
+              currentPhase: hasPhases ? 1 : null,
+            })
+            .where(eq(prdRevisions.id, input.prdRevisionId))
             .run();
 
-          tx.delete(tasks).where(eq(tasks.prdId, input.prdId)).run();
+          tx.delete(tasks).where(eq(tasks.prdRevisionId, input.prdRevisionId)).run();
 
           const createdTaskIds: string[] = [];
           const createdTasks: (typeof tasks.$inferSelect)[] = [];
@@ -394,7 +452,7 @@ export const reloadPrdBatch = (input: ReloadPrdBatchInput) =>
               .insert(tasks)
               .values({
                 id: taskId,
-                prdId: input.prdId,
+                prdRevisionId: input.prdRevisionId,
                 position,
                 title: taskInput.title,
                 description: storedDescription.description,
@@ -402,6 +460,7 @@ export const reloadPrdBatch = (input: ReloadPrdBatchInput) =>
                 doneCriteria: taskInput.doneCriteria,
                 dependsOn: JSON.stringify(resolvedDeps),
                 effort: taskInput.effort,
+                phaseNumber: taskInput.phaseNumber ?? null,
                 status: "pending",
                 blockedReason: null,
                 skipReason: null,
@@ -416,8 +475,12 @@ export const reloadPrdBatch = (input: ReloadPrdBatchInput) =>
             createdTasks.push(task);
           }
 
-          const updatedPrd = tx.select().from(prds).where(eq(prds.id, input.prdId)).all()[0]!;
-          return { prd: updatedPrd, tasks: createdTasks };
+          const updatedRev = tx
+            .select()
+            .from(prdRevisions)
+            .where(eq(prdRevisions.id, input.prdRevisionId))
+            .all()[0]!;
+          return { prd: updatedRev, tasks: createdTasks };
         }),
       catch: (e) => new DatabaseError({ cause: e }),
     });
@@ -431,6 +494,7 @@ export type BatchTaskInput = {
   doneCriteria: string;
   effort: Effort;
   dependsOn?: readonly number[] | number[];
+  phaseNumber?: number;
 };
 
 export type LoadPrdBatchInput = {
@@ -443,8 +507,8 @@ export type LoadPrdBatchInput = {
 };
 
 /**
- * Atomically create a PRD with all its tasks in a single SQLite transaction.
- * If any step fails, the entire batch is rolled back — no partial state is committed.
+ * Atomically create a PRD (logical + first revision) with all its tasks.
+ * If any step fails, the entire batch is rolled back.
  */
 export const loadPrdBatch = (input: LoadPrdBatchInput) =>
   Effect.gen(function* () {
@@ -454,26 +518,39 @@ export const loadPrdBatch = (input: LoadPrdBatchInput) =>
       try: () =>
         db.transaction((tx) => {
           const prdId = generateId();
-          const prdRows = tx
-            .insert(prds)
+          const revId = generateId();
+          const hasPhases = input.tasks.some(
+            (t) => t.phaseNumber !== undefined && t.phaseNumber !== null,
+          );
+
+          tx.insert(prds)
             .values({
               id: prdId,
               projectId: input.projectId,
+              currentRevisionId: revId,
+            })
+            .run();
+
+          const revRows = tx
+            .insert(prdRevisions)
+            .values({
+              id: revId,
+              prdId,
+              projectId: input.projectId,
               workspaceId: null,
-              rootId: prdId,
-              parentId: null,
               revision: 1,
               title: input.title,
               context: input.context ?? null,
               scope: input.scope ?? null,
               status: "draft",
+              currentPhase: hasPhases ? 1 : null,
               readyAt: null,
               activatedAt: null,
             })
             .returning()
             .all();
 
-          const prd = prdRows[0]!;
+          const rev = revRows[0]!;
 
           const createdTaskIds: string[] = [];
           const createdTasks: (typeof tasks.$inferSelect)[] = [];
@@ -497,7 +574,7 @@ export const loadPrdBatch = (input: LoadPrdBatchInput) =>
               .insert(tasks)
               .values({
                 id: taskId,
-                prdId: prdId,
+                prdRevisionId: revId,
                 position,
                 title: taskInput.title,
                 description: storedDescription.description,
@@ -505,6 +582,7 @@ export const loadPrdBatch = (input: LoadPrdBatchInput) =>
                 doneCriteria: taskInput.doneCriteria,
                 dependsOn: JSON.stringify(resolvedDeps),
                 effort: taskInput.effort,
+                phaseNumber: taskInput.phaseNumber ?? null,
                 status: "pending",
                 blockedReason: null,
                 skipReason: null,
@@ -519,21 +597,136 @@ export const loadPrdBatch = (input: LoadPrdBatchInput) =>
             createdTasks.push(task);
           }
 
-          let finalPrd = prd;
+          let finalRev = rev;
           if (input.ready) {
             const updatedRows = tx
-              .update(prds)
+              .update(prdRevisions)
               .set({ status: "ready", readyAt: new Date() })
-              .where(eq(prds.id, prdId))
+              .where(eq(prdRevisions.id, revId))
               .returning()
               .all();
-            finalPrd = updatedRows[0]!;
+            finalRev = updatedRows[0]!;
           }
 
-          return { prd: finalPrd, tasks: createdTasks };
+          return { prd: finalRev, tasks: createdTasks };
         }),
       catch: (e) => new DatabaseError({ cause: e }),
     });
 
     return result;
+  });
+
+// -- Phase advance -------------------------------------------------------------
+
+/**
+ * Advance a multi-phase in_progress PRD to its next phase.
+ */
+export const phaseAdvance = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+
+    if (rev.status !== "in_progress") {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `PRD ${id} is not in_progress (status: '${rev.status}'). Phase advance is only allowed for active PRDs.`,
+        }),
+      );
+    }
+
+    if (rev.currentPhase === null || rev.currentPhase === undefined) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `PRD ${id} has no phases defined. Phase advance only applies to multi-phase PRDs.`,
+        }),
+      );
+    }
+
+    const currentPhase = rev.currentPhase;
+
+    const phaseTasks = yield* dbQuery(() =>
+      db.query.tasks.findMany({
+        where: { prdRevisionId: id, phaseNumber: currentPhase, reviewId: { isNull: true } },
+      }),
+    );
+
+    const blockedTask = phaseTasks.find((t) => t.status !== "done" && t.status !== "skipped");
+    if (blockedTask) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Cannot advance phase: task '${blockedTask.title}' (${blockedTask.id}) in phase ${currentPhase} is still '${blockedTask.status}'. All tasks must be done or skipped first.`,
+        }),
+      );
+    }
+
+    const phaseReviews = yield* dbQuery(() =>
+      db.query.reviews.findMany({ where: { prdRevisionId: id, phaseNumber: currentPhase } }),
+    );
+
+    const openReview = phaseReviews.find((r) => r.status !== "done");
+    if (openReview) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Cannot advance phase: review ${openReview.id} for phase ${currentPhase} is still '${openReview.status}'. All reviews must be done first.`,
+        }),
+      );
+    }
+
+    for (const review of phaseReviews) {
+      const reviewTasks = yield* dbQuery(() =>
+        db.query.tasks.findMany({ where: { reviewId: review.id } }),
+      );
+      const openTask = reviewTasks.find((t) => t.status !== "done" && t.status !== "skipped");
+      if (openTask) {
+        return yield* Effect.fail(
+          new ValidationError({
+            reason: `Cannot advance phase: review task '${openTask.title}' (${openTask.id}) in review ${review.id} is still '${openTask.status}'.`,
+          }),
+        );
+      }
+    }
+
+    const nextPhaseTasks = yield* dbQuery(() =>
+      db.query.tasks.findMany({
+        where: { prdRevisionId: id, phaseNumber: currentPhase + 1, reviewId: { isNull: true } },
+      }),
+    );
+
+    if (nextPhaseTasks.length > 0) {
+      const rows = yield* dbQuery(() =>
+        db
+          .update(prdRevisions)
+          .set({ currentPhase: currentPhase + 1 })
+          .where(eq(prdRevisions.id, id))
+          .returning(),
+      );
+      yield* logActivity({
+        projectId: rev.projectId,
+        workspaceId: rev.workspaceId ?? undefined,
+        prdRevisionId: id,
+        eventType: "phase_advanced",
+        payload: { prdRevisionId: id, fromPhase: currentPhase, toPhase: currentPhase + 1 },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      return { prd: rows[0]!, advanced: true as const };
+    } else {
+      const rows = yield* dbQuery(() =>
+        db.update(prdRevisions).set({ status: "done" }).where(eq(prdRevisions.id, id)).returning(),
+      );
+      yield* logActivity({
+        projectId: rev.projectId,
+        workspaceId: rev.workspaceId ?? undefined,
+        prdRevisionId: id,
+        eventType: "phase_advanced",
+        payload: { prdRevisionId: id, fromPhase: currentPhase, toPhase: undefined },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      yield* logActivity({
+        projectId: rev.projectId,
+        workspaceId: rev.workspaceId ?? undefined,
+        prdRevisionId: id,
+        eventType: "prd_done",
+        payload: { prdRevisionId: id, title: rev.title },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      return { prd: rows[0]!, advanced: false as const };
+    }
   });

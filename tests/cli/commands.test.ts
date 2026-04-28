@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
-import { prds } from "#/db/schema";
+import { prdRevisions } from "#/db/schema";
 import { Db } from "#/services/database";
 import { formatStructuredTaskDescription } from "#/modules/tasks/spec";
 import {
@@ -109,10 +109,9 @@ describe("CLI commands", () => {
       projectId,
       title: "CLI PRD",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
 
     const dependency = await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Dependency",
       description: "desc",
       doneCriteria: "done",
@@ -188,9 +187,9 @@ describe("CLI commands", () => {
       projectId,
       title: "CLI PRD",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Listed task",
       description: "desc",
       doneCriteria: "done",
@@ -206,6 +205,7 @@ describe("CLI commands", () => {
     });
 
     const lines = stdout.mock.calls.map((call) => String(call[0]));
+
     expect(lines.some((line) => line.includes("Listed task"))).toBe(true);
 
     stdout.mockRestore();
@@ -219,17 +219,17 @@ describe("CLI commands", () => {
       projectId,
       title: "CLI PRD",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
 
     await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Task A",
       description: "desc",
       doneCriteria: "done",
       effort: "s",
     });
     await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Task B",
       description: "desc",
       doneCriteria: "done",
@@ -262,7 +262,7 @@ describe("CLI commands", () => {
       title: "CLI PRD",
     });
     const task = await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Task for log",
       description: "desc",
       doneCriteria: "done",
@@ -282,7 +282,7 @@ describe("CLI commands", () => {
 
     const entries = await listActivity(db, { projectId, workspaceId });
     expect(entries).toHaveLength(1);
-    expect(entries[0]!.prdId).toBe(prd.id);
+    expect(entries[0]!.prdRevisionId).toBe(prd.id);
     expect(entries[0]!.taskId).toBe(task.id);
 
     stdout.mockRestore();
@@ -318,7 +318,7 @@ describe("CLI commands", () => {
     });
 
     const task = await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Structured task",
       description: formatStructuredTaskDescription({
         intent: "Clarify the implementation intent.",
@@ -354,7 +354,7 @@ describe("CLI commands", () => {
       projectId,
       title: "CLI PRD",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
 
     const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -441,17 +441,17 @@ describe("CLI commands", () => {
       const listCmd = await getSubCommand(taskCommand, "list");
 
       const prd = await createPrd(db, { projectId, title: "JSON PRD" });
-      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+      await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
 
       const dep = await createTask(db, {
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         title: "Dep task",
         description: "d",
         doneCriteria: "c",
         effort: "s",
       });
       await createTask(db, {
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         title: "Main task",
         description: "d",
         doneCriteria: "c",
@@ -480,7 +480,6 @@ describe("CLI commands", () => {
       const addCmd = await getSubCommand(taskCommand, "add");
 
       const prd = await createPrd(db, { projectId, title: "JSON PRD" });
-      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
 
       const output = await captureStdout(async () => {
         await addCmd.run({
@@ -724,7 +723,7 @@ describe("CLI commands", () => {
       const removeCommand = await getSubCommand(workspaceCommand, "remove");
 
       const prd = await createPrd(db, { projectId, title: "linked PRD" });
-      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+      await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
       await activatePrd(db, prd.id, workspaceId);
 
       const exit = vi.spyOn(process, "exit").mockImplementation(((
@@ -745,7 +744,7 @@ describe("CLI commands", () => {
       const removeCommand = await getSubCommand(workspaceCommand, "remove");
 
       const prd = await createPrd(db, { projectId, title: "linked PRD" });
-      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+      await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
       await activatePrd(db, prd.id, workspaceId);
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -794,7 +793,7 @@ describe("CLI commands", () => {
       const doneCommand = await getSubCommand(prdCommand, "done");
 
       const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
-      await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+      await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
       await activatePrd(db, prd.id, workspaceId);
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -1045,7 +1044,7 @@ describe("CLI commands", () => {
 
       const prd = await createPrd(db, { projectId, title: "Review PRD" });
       const { createReview, getReview } = await import("#/lib/workflow");
-      const review = await createReview(db, { prdId: prd.id, type: "human" });
+      const review = await createReview(db, { prdRevisionId: prd.id, type: "human" });
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
       await beginCommand.run({ args: { reviewId: review.id } });
@@ -1061,7 +1060,7 @@ describe("CLI commands", () => {
 
       const prd = await createPrd(db, { projectId, title: "Review PRD" });
       const { createReview, getReview } = await import("#/lib/workflow");
-      const review = await createReview(db, { prdId: prd.id, type: "human" });
+      const review = await createReview(db, { prdRevisionId: prd.id, type: "human" });
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
       await updateCommand.run({

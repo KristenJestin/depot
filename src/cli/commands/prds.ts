@@ -67,10 +67,9 @@ const showCommand = command({
         ["Title", prd.title],
         ["Status", prd.status],
         ["Revision", prd.revision],
-        ["Root", prd.rootId],
+        ["PRD", prd.prdId],
         ["Context", prd.context],
         ["Scope", prd.scope],
-        ["Parent", prd.parentId],
         ["Created", formatDate(prd.createdAt)],
         ["Ready", formatDate(prd.readyAt)],
         ["Activated", formatDate(prd.activatedAt)],
@@ -305,6 +304,7 @@ const taskInputSchema = Schema.Struct({
   doneCriteria: Schema.String.pipe(Schema.minLength(1)),
   effort: effortSchema,
   dependsOn: Schema.optional(Schema.Array(Schema.Int.pipe(Schema.nonNegative()))),
+  phase: Schema.optional(Schema.Int.pipe(Schema.positive())),
 });
 
 const prdLoadSchema = Schema.Struct({
@@ -380,6 +380,7 @@ const loadCommand = command({
           doneCriteria: t.doneCriteria,
           effort: t.effort,
           dependsOn: t.dependsOn,
+          phaseNumber: t.phase,
         })),
       }),
     );
@@ -459,7 +460,7 @@ const reloadCommand = command({
 
     const result = await runEffect(
       DomainPrds.reloadPrdBatch({
-        prdId: args.prdId,
+        prdRevisionId: args.prdId,
         title: data.title,
         context: data.context,
         scope: data.scope,
@@ -469,6 +470,7 @@ const reloadCommand = command({
           doneCriteria: t.doneCriteria,
           effort: t.effort,
           dependsOn: t.dependsOn,
+          phaseNumber: t.phase,
         })),
       }).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
@@ -495,6 +497,46 @@ const reloadCommand = command({
   },
 });
 
+// ── phaseAdvanceCommand ───────────────────────────────────────────────────────
+
+const phaseAdvanceCommand = command({
+  meta: {
+    name: "phase-advance",
+    description:
+      "Advance a multi-phase in_progress PRD to its next phase (marks done if last phase)",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainPrds.phaseAdvance(args.prdId).pipe(
+        Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
+      ),
+    );
+    if (!result) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    if (output.isJson()) {
+      output.success({ item: result.prd, advanced: result.advanced });
+    } else {
+      if (result.advanced) {
+        output.print(
+          `Advanced PRD '${result.prd.title}' (${result.prd.id}) to phase ${result.prd.currentPhase}`,
+        );
+      } else {
+        output.print(
+          `Completed final phase for PRD '${result.prd.title}' (${result.prd.id}) — marked as done`,
+        );
+      }
+    }
+  },
+});
+
 export const prdCommand = command({
   meta: { name: "prd", description: "PRD management" },
   subCommands: {
@@ -509,5 +551,6 @@ export const prdCommand = command({
     fork: forkCommand,
     load: loadCommand,
     reload: reloadCommand,
+    "phase-advance": phaseAdvanceCommand,
   },
 });

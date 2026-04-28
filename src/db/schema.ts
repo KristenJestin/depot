@@ -1,6 +1,5 @@
 import { defineRelations } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
   VALID_EFFORTS,
   VALID_PRD_STATUSES,
@@ -51,7 +50,11 @@ export const workspaces = sqliteTable(
   (table) => [index("workspaces_project_id_idx").on(table.projectId)],
 );
 
-// ── PRDs ──────────────────────────────────────────────────────────────────────
+// ── PRDs (logical containers) ─────────────────────────────────────────────────
+//
+// A PRD logical entity is a stable identifier for a product requirement.
+// It always points to its current (head) revision via `currentRevisionId`.
+// Revisions are created via fork; the logical ID never changes.
 
 export const prds = sqliteTable(
   "prds",
@@ -60,15 +63,54 @@ export const prds = sqliteTable(
     projectId: text()
       .notNull()
       .references(() => projects.id),
+    // Points to the head revision. Nullable only during the initial insert;
+    // always set before the row is returned to callers.
+    // The circular FK (prds ↔ prd_revisions) is enforced at the application level;
+    // SQLite drizzle does not support DEFERRABLE so we omit the FK here.
+    currentRevisionId: text(),
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    index("prds_project_id_idx").on(table.projectId),
+    index("prds_current_revision_id_idx").on(table.currentRevisionId),
+  ],
+);
+
+// ── PRD Revisions ─────────────────────────────────────────────────────────────
+//
+// Each revision is an immutable snapshot of the PRD spec at a point in time.
+// A new revision is created only via `depot prd fork` from a `ready` revision.
+// The first revision (`revision = 1`) is created alongside the logical PRD.
+//
+// Spec fields (title, context, scope) and all runtime/workflow state live here.
+// Tasks, reviews, and activity entries are attached to a revision, not the
+// logical PRD, to avoid ambiguity between revisions.
+
+export const prdRevisions = sqliteTable(
+  "prd_revisions",
+  {
+    id: text().primaryKey(),
+    prdId: text()
+      .notNull()
+      .references(() => prds.id),
+    projectId: text()
+      .notNull()
+      .references(() => projects.id),
     workspaceId: text().references(() => workspaces.id), // set at activation, null until then
-    rootId: text().references((): AnySQLiteColumn => prds.id), // points to v1 (self if v1)
-    parentId: text().references((): AnySQLiteColumn => prds.id), // set when created via `prd fork`
     revision: integer().notNull().default(1),
     title: text().notNull(),
     context: text(), // why this PRD exists
     scope: text(), // what is included and excluded
     status: text({ enum: VALID_PRD_STATUSES }).notNull().default("draft"),
     auditCycles: integer().notNull().default(0),
+    currentPhase: integer(), // null = single-phase; >= 1 = current phase number
+    supersededAt: integer({ mode: "timestamp_ms" }), // set when a fork creates a newer revision
     createdAt: integer({ mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -80,10 +122,9 @@ export const prds = sqliteTable(
     activatedAt: integer({ mode: "timestamp_ms" }),
   },
   (table) => [
-    index("prds_project_id_idx").on(table.projectId),
-    index("prds_workspace_id_idx").on(table.workspaceId),
-    index("prds_root_id_idx").on(table.rootId),
-    index("prds_parent_id_idx").on(table.parentId),
+    index("prd_revisions_prd_id_idx").on(table.prdId),
+    index("prd_revisions_project_id_idx").on(table.projectId),
+    index("prd_revisions_workspace_id_idx").on(table.workspaceId),
   ],
 );
 
@@ -93,12 +134,14 @@ export const reviews = sqliteTable(
   "reviews",
   {
     id: text().primaryKey(),
-    prdId: text()
+    // Points to the revision this review was opened against.
+    prdRevisionId: text()
       .notNull()
-      .references(() => prds.id),
+      .references(() => prdRevisions.id),
     type: text({ enum: VALID_REVIEW_TYPES }).notNull(),
     status: text({ enum: VALID_REVIEW_STATUSES }).notNull().default("draft"),
     userFeedback: text(),
+    phaseNumber: integer(), // set automatically when review is created during a multi-phase PRD
     createdAt: integer({ mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -108,7 +151,7 @@ export const reviews = sqliteTable(
       .$onUpdateFn(() => new Date()),
     doneAt: integer({ mode: "timestamp_ms" }),
   },
-  (table) => [index("reviews_prd_id_idx").on(table.prdId)],
+  (table) => [index("reviews_prd_revision_id_idx").on(table.prdRevisionId)],
 );
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -117,9 +160,11 @@ export const tasks = sqliteTable(
   "tasks",
   {
     id: text().primaryKey(),
-    prdId: text()
+    // For PRD tasks: points to the revision they belong to.
+    // For review tasks: also points to the revision (same revision as the review).
+    prdRevisionId: text()
       .notNull()
-      .references(() => prds.id),
+      .references(() => prdRevisions.id),
     position: integer().notNull(),
     title: text().notNull(),
     description: text().notNull(),
@@ -129,6 +174,7 @@ export const tasks = sqliteTable(
     doneCriteria: text().notNull(), // textual, non-empty
     dependsOn: text().notNull().default("[]"), // JSON array of task ids
     effort: text({ enum: VALID_EFFORTS }).notNull(),
+    phaseNumber: integer(), // which phase this task belongs to; null = single-phase PRD
     status: text({ enum: VALID_TASK_STATUSES }).notNull().default("pending"),
     reviewId: text().references(() => reviews.id), // set when task belongs to a review
     severity: text({ enum: VALID_SEVERITY_LEVELS }), // relevant when reviewId is set
@@ -141,7 +187,7 @@ export const tasks = sqliteTable(
     completedAt: integer({ mode: "timestamp_ms" }),
   },
   (table) => [
-    index("tasks_prd_id_idx").on(table.prdId),
+    index("tasks_prd_revision_id_idx").on(table.prdRevisionId),
     index("tasks_review_id_idx").on(table.reviewId),
   ],
 );
@@ -158,7 +204,8 @@ export const activityLog = sqliteTable(
       .notNull()
       .references(() => projects.id),
     workspaceId: text().references(() => workspaces.id),
-    prdId: text().references(() => prds.id),
+    // Revision-scoped: points to the prd_revision this event is about.
+    prdRevisionId: text().references(() => prdRevisions.id),
     taskId: text().references(() => tasks.id),
     eventType: text().notNull(),
     payload: text().notNull().default("{}"), // JSON
@@ -169,7 +216,7 @@ export const activityLog = sqliteTable(
   (table) => [
     index("activity_log_project_id_idx").on(table.projectId),
     index("activity_log_workspace_id_idx").on(table.workspaceId),
-    index("activity_log_prd_id_idx").on(table.prdId),
+    index("activity_log_prd_revision_id_idx").on(table.prdRevisionId),
     index("activity_log_task_id_idx").on(table.taskId),
   ],
 );
@@ -179,6 +226,7 @@ export const activityLog = sqliteTable(
 export type ProjectRow = typeof projects.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type PrdRow = typeof prds.$inferSelect;
+export type PrdRevisionRow = typeof prdRevisions.$inferSelect;
 export type ReviewRow = typeof reviews.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 export type ActivityRow = typeof activityLog.$inferSelect;
@@ -186,7 +234,7 @@ export type ActivityRow = typeof activityLog.$inferSelect;
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const relations = defineRelations(
-  { projects, workspaces, prds, reviews, tasks, activityLog },
+  { projects, workspaces, prds, prdRevisions, reviews, tasks, activityLog },
   (r) => ({
     projects: {
       workspaces: r.many.workspaces({
@@ -207,10 +255,6 @@ export const relations = defineRelations(
         from: r.workspaces.projectId,
         to: r.projects.id,
       }),
-      prds: r.many.prds({
-        from: r.workspaces.id,
-        to: r.prds.workspaceId,
-      }),
       activityLogs: r.many.activityLog({
         from: r.workspaces.id,
         to: r.activityLog.workspaceId,
@@ -221,37 +265,41 @@ export const relations = defineRelations(
         from: r.prds.projectId,
         to: r.projects.id,
       }),
+      revisions: r.many.prdRevisions({
+        from: r.prds.id,
+        to: r.prdRevisions.prdId,
+      }),
+    },
+    prdRevisions: {
+      prd: r.one.prds({
+        from: r.prdRevisions.prdId,
+        to: r.prds.id,
+      }),
+      project: r.one.projects({
+        from: r.prdRevisions.projectId,
+        to: r.projects.id,
+      }),
       workspace: r.one.workspaces({
-        from: r.prds.workspaceId,
+        from: r.prdRevisions.workspaceId,
         to: r.workspaces.id,
       }),
-      root: r.one.prds({
-        from: r.prds.rootId,
-        to: r.prds.id,
-        alias: "prd_root",
-      }),
-      parent: r.one.prds({
-        from: r.prds.parentId,
-        to: r.prds.id,
-        alias: "prd_parent",
-      }),
       tasks: r.many.tasks({
-        from: r.prds.id,
-        to: r.tasks.prdId,
+        from: r.prdRevisions.id,
+        to: r.tasks.prdRevisionId,
       }),
       reviews: r.many.reviews({
-        from: r.prds.id,
-        to: r.reviews.prdId,
+        from: r.prdRevisions.id,
+        to: r.reviews.prdRevisionId,
       }),
       activityLogs: r.many.activityLog({
-        from: r.prds.id,
-        to: r.activityLog.prdId,
+        from: r.prdRevisions.id,
+        to: r.activityLog.prdRevisionId,
       }),
     },
     reviews: {
-      prd: r.one.prds({
-        from: r.reviews.prdId,
-        to: r.prds.id,
+      prdRevision: r.one.prdRevisions({
+        from: r.reviews.prdRevisionId,
+        to: r.prdRevisions.id,
       }),
       tasks: r.many.tasks({
         from: r.reviews.id,
@@ -259,9 +307,9 @@ export const relations = defineRelations(
       }),
     },
     tasks: {
-      prd: r.one.prds({
-        from: r.tasks.prdId,
-        to: r.prds.id,
+      prdRevision: r.one.prdRevisions({
+        from: r.tasks.prdRevisionId,
+        to: r.prdRevisions.id,
       }),
       review: r.one.reviews({
         from: r.tasks.reviewId,
@@ -281,9 +329,9 @@ export const relations = defineRelations(
         from: r.activityLog.workspaceId,
         to: r.workspaces.id,
       }),
-      prd: r.one.prds({
-        from: r.activityLog.prdId,
-        to: r.prds.id,
+      prdRevision: r.one.prdRevisions({
+        from: r.activityLog.prdRevisionId,
+        to: r.prdRevisions.id,
       }),
       task: r.one.tasks({
         from: r.activityLog.taskId,

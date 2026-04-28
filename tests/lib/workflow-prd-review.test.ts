@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
-import { prds } from "#/db/schema";
+import { prdRevisions } from "#/db/schema";
 import {
   createProject,
   addWorkspace,
@@ -42,10 +42,9 @@ describe("PRD workflow", () => {
     await addWorkspace(db, { projectId, path: "/home/user/my-app" });
   });
 
-  it("creates a PRD with rootId pointing to itself", async () => {
+  it("creates a PRD with prdId pointing to the logical PRD", async () => {
     const prd = await createPrd(db, { projectId, title: "PRD v1" });
-    expect(prd.rootId).toBe(prd.id);
-    expect(prd.parentId).toBeNull();
+    expect(prd.prdId).toBeTruthy();
     expect(prd.revision).toBe(1);
   });
 
@@ -69,20 +68,20 @@ describe("PRD workflow", () => {
 
   it("rejects updatePrd on non-draft PRD", async () => {
     const prd = await createPrd(db, { projectId, title: "PRD" });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
 
     await expect(updatePrd(db, prd.id, { title: "Updated" })).rejects.toThrow(/only draft PRDs/i);
   });
 
   it("rejects markPrdReady on non-draft PRD", async () => {
     const prd = await createPrd(db, { projectId, title: "PRD" });
-    await db.update(prds).set({ status: "in_progress" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "in_progress" }).where(eq(prdRevisions.id, prd.id));
     await expect(markPrdReady(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
   });
 
   it("marks an in_progress PRD as done", async () => {
     const prd = await createPrd(db, { projectId, title: "PRD" });
-    await db.update(prds).set({ status: "in_progress" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "in_progress" }).where(eq(prdRevisions.id, prd.id));
     const done = await donePrd(db, prd.id);
     expect(done.status).toBe("done");
   });
@@ -94,11 +93,9 @@ describe("PRD workflow", () => {
 
   it("forks a ready PRD into a new draft revision", async () => {
     const v1 = await createPrd(db, { projectId, title: "PRD" });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, v1.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, v1.id));
 
     const v2 = await forkPrd(db, v1.id);
-    expect(v2.parentId).toBe(v1.id);
-    expect(v2.rootId).toBe(v1.id);
     expect(v2.revision).toBe(2);
     expect(v2.status).toBe("draft");
 
@@ -114,20 +111,19 @@ describe("PRD workflow", () => {
 
   it("lists entire PRD family by rootId", async () => {
     const v1 = await createPrd(db, { projectId, title: "PRD" });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, v1.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, v1.id));
     const v2 = await forkPrd(db, v1.id);
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, v2.id));
-    const v3 = await forkPrd(db, v2.id);
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, v2.id));
+    const _v3 = await forkPrd(db, v2.id);
 
-    const family = await listPrdFamily(db, v1.id);
+    const family = await listPrdFamily(db, v1.prdId);
     expect(family).toHaveLength(3);
     expect(family.map((p) => p.revision)).toEqual([1, 2, 3]);
-    expect(v3.rootId).toBe(v1.id);
   });
 
   it("listPrds with latestOnly filters out superseded revisions", async () => {
     const v1 = await createPrd(db, { projectId, title: "PRD" });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, v1.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, v1.id));
     await forkPrd(db, v1.id); // creates v2
 
     const all = await listPrds(db, { projectId });
@@ -143,31 +139,31 @@ describe("PRD workflow", () => {
 
 describe("review workflow", () => {
   let projectId: string;
-  let prdId: string;
+  let prdRevisionId: string;
 
   beforeEach(async () => {
     const project = await createProject(db, { name: "my-app" });
     projectId = project.id;
     await addWorkspace(db, { projectId, path: "/home/user/my-app" });
     const prd = await createPrd(db, { projectId, title: "PRD" });
-    prdId = prd.id;
+    prdRevisionId = prd.id;
   });
 
   it("creates a review in draft status", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     expect(review.status).toBe("draft");
     expect(review.type).toBe("agent");
-    expect(review.prdId).toBe(prdId);
+    expect(review.prdRevisionId).toBe(prdRevisionId);
   });
 
   it("starts a review (draft → in_progress)", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     const started = await startReview(db, review.id);
     expect(started.status).toBe("in_progress");
   });
 
   it("updates review feedback in draft", async () => {
-    const review = await createReview(db, { prdId, type: "human" });
+    const review = await createReview(db, { prdRevisionId, type: "human" });
     const updated = await updateReview(db, review.id, { userFeedback: "Need smaller scope" });
 
     expect(updated.userFeedback).toBe("Need smaller scope");
@@ -175,13 +171,13 @@ describe("review workflow", () => {
   });
 
   it("rejects startReview on non-draft review", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     await startReview(db, review.id);
     await expect(startReview(db, review.id)).rejects.toThrow(/invalid review transition/i);
   });
 
   it("marks a review as done (in_progress → done)", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     await startReview(db, review.id);
     const done = await doneReview(db, review.id);
     expect(done.status).toBe("done");
@@ -189,14 +185,14 @@ describe("review workflow", () => {
   });
 
   it("allows doneReview directly on a draft review (no findings case)", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     const done = await doneReview(db, review.id);
     expect(done.status).toBe("done");
     expect(done.doneAt).toBeTruthy();
   });
 
   it("adds a task to a review with severity", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     const task = await addReviewTask(db, review.id, {
       title: "Fix missing validation",
       description: "Input is not validated",
@@ -205,14 +201,14 @@ describe("review workflow", () => {
     });
     expect(task.reviewId).toBe(review.id);
     expect(task.severity).toBe("major");
-    expect(task.prdId).toBe(prdId);
+    expect(task.prdRevisionId).toBe(prdRevisionId);
     expect(task.status).toBe("pending");
     const reviewAfter = await getReview(db, review.id);
     expect(reviewAfter!.status).toBe("draft");
   });
 
   it("updates a review task in place", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     const task = await addReviewTask(db, review.id, {
       title: "Fix missing validation",
       description: "Input is not validated",
@@ -231,7 +227,7 @@ describe("review workflow", () => {
   });
 
   it("does not allow doneReview on draft review with findings", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     await addReviewTask(db, review.id, {
       title: "Fix missing validation",
       description: "Input is not validated",
@@ -243,7 +239,7 @@ describe("review workflow", () => {
   });
 
   it("adds a task to a review without severity", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     const task = await addReviewTask(db, review.id, {
       title: "Refactor function",
       description: "Cleanup code",
@@ -253,7 +249,7 @@ describe("review workflow", () => {
   });
 
   it("lists tasks for a review", async () => {
-    const review = await createReview(db, { prdId, type: "human" });
+    const review = await createReview(db, { prdRevisionId, type: "human" });
     await addReviewTask(db, review.id, {
       title: "Task 1",
       description: "desc",
@@ -271,9 +267,9 @@ describe("review workflow", () => {
   });
 
   it("lists reviews for a PRD", async () => {
-    await createReview(db, { prdId, type: "agent" });
-    await createReview(db, { prdId, type: "human" });
-    const list = await listReviews(db, prdId);
+    await createReview(db, { prdRevisionId, type: "agent" });
+    await createReview(db, { prdRevisionId, type: "human" });
+    const list = await listReviews(db, prdRevisionId);
     expect(list).toHaveLength(2);
     expect(list.map((r) => r.type).sort()).toEqual(["agent", "human"]);
   });
@@ -284,7 +280,7 @@ describe("review workflow", () => {
   });
 
   it("rejects addReviewTask with empty done_criteria", async () => {
-    const review = await createReview(db, { prdId, type: "agent" });
+    const review = await createReview(db, { prdRevisionId, type: "agent" });
     await expect(
       addReviewTask(db, review.id, {
         title: "Task",

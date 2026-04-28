@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { reviews, tasks, prds } from "#/db/schema";
+import { reviews, tasks, prdRevisions } from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import {
   VALID_REVIEW_TRANSITIONS,
@@ -45,14 +45,16 @@ const checkReviewTransition = (from: ReviewStatus, to: ReviewStatus) => {
 
 // ── Functions ─────────────────────────────────────────────────────────────────
 
-export const createReview = (input: { prdId: string; type: ReviewType }) =>
+export const createReview = (input: { prdRevisionId: string; type: ReviewType }) =>
   Effect.gen(function* () {
     const db = yield* Db;
 
     if (input.type === "agent") {
-      const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: input.prdId } }));
-      if (prd) {
-        if (prd.auditCycles >= MAX_AUDIT_CYCLES) {
+      const rev = yield* dbQuery(() =>
+        db.query.prdRevisions.findFirst({ where: { id: input.prdRevisionId } }),
+      );
+      if (rev) {
+        if (rev.auditCycles >= MAX_AUDIT_CYCLES) {
           return yield* Effect.fail(
             new ValidationError({
               reason: `Max audit cycles reached (${MAX_AUDIT_CYCLES}/${MAX_AUDIT_CYCLES}). Report to dev.`,
@@ -61,36 +63,39 @@ export const createReview = (input: { prdId: string; type: ReviewType }) =>
         }
         yield* dbQuery(() =>
           db
-            .update(prds)
-            .set({ auditCycles: prd.auditCycles + 1 })
-            .where(eq(prds.id, input.prdId)),
+            .update(prdRevisions)
+            .set({ auditCycles: rev.auditCycles + 1 })
+            .where(eq(prdRevisions.id, input.prdRevisionId)),
         );
       }
     }
 
     const id = generateId();
+    const revRow = yield* dbQuery(() =>
+      db.query.prdRevisions.findFirst({ where: { id: input.prdRevisionId } }),
+    );
     const rows = yield* dbQuery(() =>
       db
         .insert(reviews)
         .values({
           id,
-          prdId: input.prdId,
+          prdRevisionId: input.prdRevisionId,
           type: input.type,
           status: "draft",
           userFeedback: null,
+          phaseNumber: revRow?.currentPhase ?? null,
           doneAt: null,
         })
         .returning(),
     );
     const review = rows[0]!;
-    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: input.prdId } }));
-    if (prd) {
+    if (revRow) {
       yield* logActivity({
-        projectId: prd.projectId,
-        workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        projectId: revRow.projectId,
+        workspaceId: revRow.workspaceId ?? undefined,
+        prdRevisionId: revRow.id,
         eventType: "review_created",
-        payload: { reviewId: review.id, prdId: prd.id, type: review.type },
+        payload: { reviewId: review.id, prdRevisionId: revRow.id, type: review.type },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return review;
@@ -103,23 +108,23 @@ export const getReview = (id: string) =>
     return row ?? null;
   });
 
-export const listReviews = (prdId: string) =>
+export const listReviews = (prdRevisionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
     return yield* dbQuery(() =>
       db.query.reviews.findMany({
-        where: { prdId },
+        where: { prdRevisionId },
         orderBy: { createdAt: "asc" },
       }),
     );
   });
 
-export const getLatestReview = (prdId: string) =>
+export const getLatestReview = (prdRevisionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const row = yield* dbQuery(() =>
       db.query.reviews.findFirst({
-        where: { prdId },
+        where: { prdRevisionId },
         orderBy: { createdAt: "desc" },
       }),
     );
@@ -136,14 +141,16 @@ export const startReview = (id: string) =>
       db.update(reviews).set({ status: "in_progress" }).where(eq(reviews.id, id)).returning(),
     );
     const started = rows[0]!;
-    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: started.prdId } }));
-    if (prd) {
+    const rev = yield* dbQuery(() =>
+      db.query.prdRevisions.findFirst({ where: { id: started.prdRevisionId } }),
+    );
+    if (rev) {
       yield* logActivity({
-        projectId: prd.projectId,
-        workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        projectId: rev.projectId,
+        workspaceId: rev.workspaceId ?? undefined,
+        prdRevisionId: rev.id,
         eventType: "review_started",
-        payload: { reviewId: started.id, prdId: prd.id },
+        payload: { reviewId: started.id, prdRevisionId: rev.id },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return started;
@@ -180,14 +187,16 @@ export const updateReview = (
     );
 
     const updated = rows[0]!;
-    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: updated.prdId } }));
-    if (prd) {
+    const rev = yield* dbQuery(() =>
+      db.query.prdRevisions.findFirst({ where: { id: updated.prdRevisionId } }),
+    );
+    if (rev) {
       yield* logActivity({
-        projectId: prd.projectId,
-        workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        projectId: rev.projectId,
+        workspaceId: rev.workspaceId ?? undefined,
+        prdRevisionId: rev.id,
         eventType: "review_updated",
-        payload: { reviewId: updated.id, prdId: prd.id, fields },
+        payload: { reviewId: updated.id, prdRevisionId: rev.id, fields },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
 
@@ -222,18 +231,23 @@ export const doneReview = (id: string) =>
     );
     if (review.type === "human") {
       yield* dbQuery(() =>
-        db.update(prds).set({ auditCycles: 0 }).where(eq(prds.id, review.prdId)),
+        db
+          .update(prdRevisions)
+          .set({ auditCycles: 0 })
+          .where(eq(prdRevisions.id, review.prdRevisionId)),
       );
     }
     const done = rows[0]!;
-    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: done.prdId } }));
-    if (prd) {
+    const rev = yield* dbQuery(() =>
+      db.query.prdRevisions.findFirst({ where: { id: done.prdRevisionId } }),
+    );
+    if (rev) {
       yield* logActivity({
-        projectId: prd.projectId,
-        workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        projectId: rev.projectId,
+        workspaceId: rev.workspaceId ?? undefined,
+        prdRevisionId: rev.id,
         eventType: "review_done",
-        payload: { reviewId: done.id, prdId: prd.id },
+        payload: { reviewId: done.id, prdRevisionId: rev.id },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return done;
@@ -271,10 +285,9 @@ export const addReviewTask = (
       );
     }
 
-    // Get prdId from review to link the task correctly
-    const prdId = review.prdId;
+    const prdRevisionId = review.prdRevisionId;
 
-    const existing = yield* dbQuery(() => db.query.tasks.findMany({ where: { prdId } }));
+    const existing = yield* dbQuery(() => db.query.tasks.findMany({ where: { prdRevisionId } }));
     const nextPosition = existing.length + 1;
     const storedDescription = normalizeTaskDescriptionForStorage(input.description);
 
@@ -284,7 +297,7 @@ export const addReviewTask = (
         .insert(tasks)
         .values({
           id,
-          prdId,
+          prdRevisionId,
           position: nextPosition,
           title: input.title,
           description: storedDescription.description,
@@ -303,12 +316,14 @@ export const addReviewTask = (
         .returning(),
     );
     const task = rows[0]!;
-    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: prdId } }));
-    if (prd) {
+    const rev = yield* dbQuery(() =>
+      db.query.prdRevisions.findFirst({ where: { id: prdRevisionId } }),
+    );
+    if (rev) {
       yield* logActivity({
-        projectId: prd.projectId,
-        workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        projectId: rev.projectId,
+        workspaceId: rev.workspaceId ?? undefined,
+        prdRevisionId: rev.id,
         taskId: task.id,
         eventType: "task_created",
         payload: { taskId: task.id, title: task.title, kind: "review" },
@@ -353,8 +368,8 @@ export const addReviewTaskBatch = (
       );
     }
 
-    const prdId = review.prdId;
-    const existing = yield* dbQuery(() => db.query.tasks.findMany({ where: { prdId } }));
+    const prdRevisionId = review.prdRevisionId;
+    const existing = yield* dbQuery(() => db.query.tasks.findMany({ where: { prdRevisionId } }));
     let nextPosition = existing.length + 1;
 
     const createdTasks: (typeof tasks.$inferSelect)[] = [];
@@ -372,7 +387,7 @@ export const addReviewTaskBatch = (
           .insert(tasks)
           .values({
             id,
-            prdId,
+            prdRevisionId,
             position: nextPosition,
             title: input.title,
             description: storedDescription.description,

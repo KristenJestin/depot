@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { Layer, ManagedRuntime } from "effect";
 import type { Database } from "#/db/client";
-import { projects, prds } from "#/db/schema";
+import { projects, prds, prdRevisions } from "#/db/schema";
 import { createTestDb } from "../helpers/db";
 
 vi.mock("#/services/database", async (importOriginal) => {
@@ -46,21 +47,31 @@ describe("web api", () => {
         name: "Test Project",
       });
       await db.insert(prds).values([
+        { id: "prd-1", projectId },
+        { id: "prd-2", projectId },
+      ]);
+      await db.insert(prdRevisions).values([
         {
-          id: "prd-1",
+          id: "rev-1",
+          prdId: "prd-1",
           projectId,
           title: "First PRD",
           status: "draft",
           updatedAt: new Date(1000),
+          revision: 1,
         },
         {
-          id: "prd-2",
+          id: "rev-2",
+          prdId: "prd-2",
           projectId,
           title: "Second PRD",
           status: "in_progress",
           updatedAt: new Date(2000),
+          revision: 1,
         },
       ]);
+      await db.update(prds).set({ currentRevisionId: "rev-1" }).where(eq(prds.id, "prd-1"));
+      await db.update(prds).set({ currentRevisionId: "rev-2" }).where(eq(prds.id, "prd-2"));
     });
 
     it("returns 200 with prds array", async () => {
@@ -74,8 +85,8 @@ describe("web api", () => {
     it("prds sont triés par updatedAt desc", async () => {
       const res = await app.request("/api/prds");
       const body = await res.json();
-      expect(body.prds[0].id).toBe("prd-2");
-      expect(body.prds[1].id).toBe("prd-1");
+      expect(body.prds[0].id).toBe("rev-2");
+      expect(body.prds[1].id).toBe("rev-1");
     });
   });
 
@@ -86,9 +97,9 @@ describe("web api", () => {
     });
 
     it("retourne le PRD avec ses tasks et review", async () => {
-      const res = await app.request("/api/prds/prd-1");
+      const res = await app.request("/api/prds/rev-1");
       const body = await res.json();
-      expect(body.prd.id).toBe("prd-1");
+      expect(body.prd.id).toBe("rev-1");
       expect(Array.isArray(body.tasks)).toBe(true);
     });
   });

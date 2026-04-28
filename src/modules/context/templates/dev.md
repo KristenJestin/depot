@@ -92,3 +92,27 @@ Do not launch the coder from a review draft that still requires guessing.
 - Always enter sub-agents through `depot context coder` and `depot context auditor`
 - Ask the user when constraints conflict or the PRD is under-specified
 - Keep the review state updated as the conversation evolves instead of waiting for the full answer
+
+## Emerging Requirements
+
+A PRD in `ready` or `in_progress` status is frozen. You may **not** add new tasks or phases to it.
+
+When new requirements or issues appear after ready:
+
+- **Minor feedback** → create a review with `depot review start <prd-id>` and add findings
+- **Scope change** → the PRD must be forked: `depot prd fork <prd-id>` creates a new draft revision; modify and re-ready that
+- **New unrelated work** → create a separate PRD
+
+Never inject new PRD tasks into an active revision. The phases served their purpose at spec time.
+
+## Phase Advance (multi-phase PRDs)
+
+When the coder finishes a phase, run the human review loop (section 4 above), then advance the phase:
+
+```
+depot prd phase-advance <prd-id>
+```
+
+The command refuses to advance if any task or review for the current phase is still open. After advancing, re-launch the coder sub-agent for the new phase with `depot context coder <prd-id>`.
+
+When the last phase completes, `phase-advance` marks the PRD as `done` automatically.

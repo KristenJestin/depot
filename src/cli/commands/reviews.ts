@@ -25,12 +25,14 @@ const startCommand = command({
   },
   run: async ({ args, output }) => {
     const review = await runEffect(
-      DomainReviews.createReview({ prdId: args.prdId, type: args.type }),
+      DomainReviews.createReview({ prdRevisionId: args.prdId, type: args.type }),
     );
     if (output.isJson()) {
       output.success({ item: review });
     } else {
-      output.print(`Created review ${review.id} [${review.type}] for PRD ${review.prdId} [draft]`);
+      output.print(
+        `Created review ${review.id} [${review.type}] for PRD ${review.prdRevisionId} [draft]`,
+      );
     }
   },
 });
@@ -265,7 +267,7 @@ const showCommand = command({
     } else {
       output.fields([
         ["ID", review.id],
-        ["PRD", review.prdId],
+        ["PRD", review.prdRevisionId],
         ["Type", review.type],
         ["Status", review.status],
         ["User Feedback", review.userFeedback],
@@ -306,7 +308,7 @@ const listCommand = command({
       return;
     }
     for (const r of reviewList) {
-      output.print(`${r.id}  [${r.type}]  [${r.status}]  PRD: ${r.prdId}`);
+      output.print(`${r.id}  [${r.type}]  [${r.status}]  PRD: ${r.prdRevisionId}`);
     }
   },
 });

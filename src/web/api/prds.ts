@@ -14,16 +14,16 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
     prdList.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
     const allTaskRows = await db.query.tasks.findMany({
-      columns: { prdId: true, status: true, reviewId: true },
+      columns: { prdRevisionId: true, status: true, reviewId: true },
     });
     const taskRows = allTaskRows.filter((t) => t.reviewId === null);
 
     const taskCounts = new Map<string, { total: number; done: number }>();
     for (const task of taskRows) {
-      const entry = taskCounts.get(task.prdId) ?? { total: 0, done: 0 };
+      const entry = taskCounts.get(task.prdRevisionId) ?? { total: 0, done: 0 };
       entry.total++;
       if (task.status === "done" || task.status === "skipped") entry.done++;
-      taskCounts.set(task.prdId, entry);
+      taskCounts.set(task.prdRevisionId, entry);
     }
 
     const prds = prdList.map((p) => {
@@ -57,7 +57,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       }),
     );
 
-    const revisions = await getRuntime().runPromise(DomainPrds.listPrdFamily(prd.rootId ?? prd.id));
+    const revisions = await getRuntime().runPromise(DomainPrds.listPrdFamily(prd.prdId));
 
     return c.json({ prd, tasks, reviews, revisions }, 200);
   })
@@ -68,7 +68,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
     if (!prd) return c.json({ error: "Not found" }, 404);
 
     const task = await getRuntime().runPromise(DomainTasks.getTask(taskId));
-    if (!task || task.prdId !== id) return c.json({ error: "Not found" }, 404);
+    if (!task || task.prdRevisionId !== id) return c.json({ error: "Not found" }, 404);
 
     const logs = await getRuntime().runPromise(DomainActivity.listActivityForTask(taskId));
 
@@ -93,7 +93,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
     if (!prd) return c.json({ error: "Not found" }, 404);
 
     const review = await getRuntime().runPromise(DomainReviews.getReview(reviewId));
-    if (!review || review.prdId !== id) return c.json({ error: "Not found" }, 404);
+    if (!review || review.prdRevisionId !== id) return c.json({ error: "Not found" }, 404);
 
     const findings = await getRuntime().runPromise(DomainReviews.listReviewTasks(reviewId));
 

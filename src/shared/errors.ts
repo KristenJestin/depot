@@ -44,7 +44,11 @@ export class PrdNotDraftError extends Data.TaggedError("PrdNotDraftError")<{
   status: string;
 }> {
   get message() {
-    return `prd_not_draft — PRD ${this.id} is in status '${this.status}'. Only draft PRDs can be reloaded. Use \`prd fork\` to revise a ready PRD.`;
+    const hint =
+      this.status === "ready"
+        ? " Run `depot prd fork <prd-id>` to create a new draft revision, then modify that."
+        : " No modifications are allowed on a PRD in this status.";
+    return `PRD ${this.id} is in status '${this.status}'. Only draft PRDs can be modified.${hint}`;
   }
 }
 

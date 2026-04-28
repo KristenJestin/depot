@@ -34,6 +34,7 @@ export type {
   WorkspaceRow,
   ProjectRow,
   PrdRow,
+  PrdRevisionRow,
   ReviewRow,
   TaskRow,
   ActivityRow,
@@ -148,8 +149,8 @@ export function forkPrd(db: Database, id: string) {
   return runWithDb(db, DomainPrds.forkPrd(id));
 }
 
-export function listPrdFamily(db: Database, rootId: string) {
-  return runWithDb(db, DomainPrds.listPrdFamily(rootId));
+export function listPrdFamily(db: Database, prdId: string) {
+  return runWithDb(db, DomainPrds.listPrdFamily(prdId));
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -157,7 +158,7 @@ export function listPrdFamily(db: Database, rootId: string) {
 export function createTask(
   db: Database,
   input: {
-    prdId: string;
+    prdRevisionId: string;
     title: string;
     description: string;
     doneCriteria: string;
@@ -180,8 +181,8 @@ export function getTask(db: Database, id: string) {
   return runWithDb(db, DomainTasks.getTask(id));
 }
 
-export function listTasks(db: Database, prdId: string) {
-  return runWithDb(db, DomainTasks.listTasks(prdId));
+export function listTasks(db: Database, prdRevisionId: string) {
+  return runWithDb(db, DomainTasks.listTasks(prdRevisionId));
 }
 
 export function startTask(db: Database, id: string) {
@@ -207,7 +208,7 @@ export function logActivity(
   input: {
     projectId: string;
     workspaceId?: string;
-    prdId?: string;
+    prdRevisionId?: string;
     taskId?: string;
     eventType: EventType;
     payload: Record<string, unknown>;
@@ -231,7 +232,7 @@ export function buildWorkspaceStatus(db: Database, workspaceId: string) {
 
 // ── Reviews ───────────────────────────────────────────────────────────────────
 
-export function createReview(db: Database, input: { prdId: string; type: ReviewType }) {
+export function createReview(db: Database, input: { prdRevisionId: string; type: ReviewType }) {
   return runWithDb(db, DomainReviews.createReview(input));
 }
 
@@ -239,8 +240,8 @@ export function getReview(db: Database, id: string) {
   return runWithDb(db, DomainReviews.getReview(id));
 }
 
-export function listReviews(db: Database, prdId: string) {
-  return runWithDb(db, DomainReviews.listReviews(prdId));
+export function listReviews(db: Database, prdRevisionId: string) {
+  return runWithDb(db, DomainReviews.listReviews(prdRevisionId));
 }
 
 export function startReview(db: Database, id: string) {
@@ -298,7 +299,7 @@ export function loadPrd(
 export function reloadPrd(
   db: Database,
   input: {
-    prdId: string;
+    prdRevisionId: string;
     title: string;
     context?: string;
     scope?: string;

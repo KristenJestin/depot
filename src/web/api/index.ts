@@ -93,20 +93,22 @@ const app = new Hono<{ Variables: Variables }>()
       limit: 100,
     });
 
-    const prdIds = [...new Set(rows.map((r) => r.prdId).filter((id): id is string => id !== null))];
+    const prdRevIds = [
+      ...new Set(rows.map((r) => r.prdRevisionId).filter((id): id is string => id !== null)),
+    ];
     const prdTitleMap = new Map<string, string>();
-    if (prdIds.length > 0) {
-      const prdRows = await db.query.prds.findMany({ columns: { id: true, title: true } });
+    if (prdRevIds.length > 0) {
+      const prdRows = await db.query.prdRevisions.findMany({ columns: { id: true, title: true } });
       for (const p of prdRows) {
-        if (prdIds.includes(p.id)) prdTitleMap.set(p.id, p.title);
+        if (prdRevIds.includes(p.id)) prdTitleMap.set(p.id, p.title);
       }
     }
 
     const events = rows.map((r) => ({
       id: r.id,
       type: r.eventType,
-      prdId: r.prdId,
-      prdTitle: r.prdId ? (prdTitleMap.get(r.prdId) ?? null) : null,
+      prdRevisionId: r.prdRevisionId,
+      prdTitle: r.prdRevisionId ? (prdTitleMap.get(r.prdRevisionId) ?? null) : null,
       taskId: r.taskId,
       payload: r.payload,
       createdAt: r.createdAt,

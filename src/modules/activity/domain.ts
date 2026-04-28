@@ -18,7 +18,7 @@ import type { EventType } from "#/shared/validator";
 export const logActivity = (input: {
   projectId: string;
   workspaceId?: string;
-  prdId?: string;
+  prdRevisionId?: string;
   taskId?: string;
   eventType: EventType;
   payload: Record<string, unknown>;
@@ -59,22 +59,28 @@ export const logActivity = (input: {
       }
     }
 
-    // Validate PRD (if provided)
-    let prd = null;
-    if (input.prdId) {
-      prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: input.prdId } }));
-      if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id: input.prdId }));
-      if (prd.projectId !== input.projectId) {
+    // Validate PRD revision (if provided)
+    let prdRev = null;
+    if (input.prdRevisionId) {
+      prdRev = yield* dbQuery(() =>
+        db.query.prdRevisions.findFirst({ where: { id: input.prdRevisionId } }),
+      );
+      if (!prdRev) return yield* Effect.fail(new PrdNotFoundError({ id: input.prdRevisionId }));
+      if (prdRev.projectId !== input.projectId) {
         return yield* Effect.fail(
           new CrossEntityError({
-            reason: `PRD '${input.prdId}' does not belong to project '${input.projectId}'`,
+            reason: `PRD '${input.prdRevisionId}' does not belong to project '${input.projectId}'`,
           }),
         );
       }
-      if (input.workspaceId && prd.workspaceId !== null && prd.workspaceId !== input.workspaceId) {
+      if (
+        input.workspaceId &&
+        prdRev.workspaceId !== null &&
+        prdRev.workspaceId !== input.workspaceId
+      ) {
         return yield* Effect.fail(
           new CrossEntityError({
-            reason: `PRD '${input.prdId}' does not belong to workspace '${input.workspaceId}'`,
+            reason: `PRD '${input.prdRevisionId}' does not belong to workspace '${input.workspaceId}'`,
           }),
         );
       }
@@ -85,15 +91,17 @@ export const logActivity = (input: {
       const task = yield* dbQuery(() => db.query.tasks.findFirst({ where: { id: input.taskId } }));
       if (!task) return yield* Effect.fail(new TaskNotFoundError({ id: input.taskId }));
 
-      const taskPrd =
-        prd && prd.id === task.prdId
-          ? prd
-          : yield* dbQuery(() => db.query.prds.findFirst({ where: { id: task.prdId } }));
+      const taskRev =
+        prdRev && prdRev.id === task.prdRevisionId
+          ? prdRev
+          : yield* dbQuery(() =>
+              db.query.prdRevisions.findFirst({ where: { id: task.prdRevisionId } }),
+            );
 
-      if (!taskPrd) {
-        return yield* Effect.fail(new PrdNotFoundError({ id: task.prdId }));
+      if (!taskRev) {
+        return yield* Effect.fail(new PrdNotFoundError({ id: task.prdRevisionId }));
       }
-      if (taskPrd.projectId !== input.projectId) {
+      if (taskRev.projectId !== input.projectId) {
         return yield* Effect.fail(
           new CrossEntityError({
             reason: `Task '${input.taskId}' does not belong to project '${input.projectId}'`,
@@ -102,8 +110,8 @@ export const logActivity = (input: {
       }
       if (
         input.workspaceId &&
-        taskPrd.workspaceId !== null &&
-        taskPrd.workspaceId !== input.workspaceId
+        taskRev.workspaceId !== null &&
+        taskRev.workspaceId !== input.workspaceId
       ) {
         return yield* Effect.fail(
           new CrossEntityError({
@@ -111,10 +119,10 @@ export const logActivity = (input: {
           }),
         );
       }
-      if (prd && taskPrd.id !== prd.id) {
+      if (prdRev && taskRev.id !== prdRev.id) {
         return yield* Effect.fail(
           new CrossEntityError({
-            reason: `Task '${input.taskId}' does not belong to PRD '${prd.id}'`,
+            reason: `Task '${input.taskId}' does not belong to PRD '${prdRev.id}'`,
           }),
         );
       }
@@ -126,7 +134,7 @@ export const logActivity = (input: {
         .values({
           projectId: input.projectId,
           workspaceId: input.workspaceId ?? null,
-          prdId: input.prdId ?? null,
+          prdRevisionId: input.prdRevisionId ?? null,
           taskId: input.taskId ?? null,
           eventType: input.eventType,
           payload: JSON.stringify(input.payload),
@@ -204,7 +212,7 @@ export function summarizeActivityPayload(
     case "prd_canceled":
       return String(payload.title ?? "");
     case "prd_forked":
-      return `${String(payload.sourcePrdId ?? "")} → ${String(payload.newPrdId ?? "")} (rev ${String(payload.revision ?? "")})`;
+      return `${String(payload.sourcePrdRevisionId ?? "")} → ${String(payload.newPrdRevisionId ?? "")} (rev ${String(payload.revision ?? "")})`;
     case "review_created":
       return `${String(payload.reviewId ?? "")} [${String(payload.type ?? "")}]`;
     case "review_updated":

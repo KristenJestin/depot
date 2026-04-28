@@ -5,13 +5,13 @@ import { dbQuery } from "#/shared/db";
 import { listPrds } from "#/modules/prds/domain";
 import { listTasks } from "#/modules/tasks/domain";
 import { listActivity } from "#/modules/activity/domain";
-import type { projects, workspaces, prds, tasks, activityLog } from "#/db/schema";
+import type { projects, workspaces, prdRevisions, tasks, activityLog } from "#/db/schema";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 type ProjectRow = typeof projects.$inferSelect;
-type PrdRow = typeof prds.$inferSelect;
+type PrdRevisionRow = typeof prdRevisions.$inferSelect;
 type TaskRow = typeof tasks.$inferSelect;
 type ActivityRow = typeof activityLog.$inferSelect;
 
@@ -19,10 +19,10 @@ export type WorkspaceStatus = {
   workspace: WorkspaceRow;
   project: ProjectRow;
   generatedAt: string;
-  /** Single active (in_progress) PRD, or null if zero or multiple. */
-  activePrd: PrdRow | null;
-  /** Non-empty when multiple PRDs have status in_progress simultaneously. */
-  conflictingPrds: PrdRow[];
+  /** Single active (in_progress) PRD revision, or null if zero or multiple. */
+  activePrd: PrdRevisionRow | null;
+  /** Non-empty when multiple PRD revisions have status in_progress simultaneously. */
+  conflictingPrds: PrdRevisionRow[];
   /** Tasks for activePrd ordered by position. Empty when activePrd is null. */
   allTasks: TaskRow[];
   /** Next pending task with all deps satisfied, or null. */

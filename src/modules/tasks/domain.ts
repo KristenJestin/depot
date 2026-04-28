@@ -30,12 +30,13 @@ const checkTaskTransition = (from: TaskStatus, to: TaskStatus) => {
 // ── Functions ─────────────────────────────────────────────────────────────────
 
 export const createTask = (input: {
-  prdId: string;
+  prdRevisionId: string;
   title: string;
   description: string;
   doneCriteria: string;
   effort: Effort;
   dependsOn?: string[];
+  phaseNumber?: number;
 }) =>
   Effect.gen(function* () {
     if (!input.doneCriteria || input.doneCriteria.trim() === "") {
@@ -45,8 +46,9 @@ export const createTask = (input: {
     }
 
     const db = yield* Db;
+
     const existing = yield* dbQuery(() =>
-      db.query.tasks.findMany({ where: { prdId: input.prdId } }),
+      db.query.tasks.findMany({ where: { prdRevisionId: input.prdRevisionId } }),
     );
     const nextPosition = existing.length + 1;
     const storedDescription = normalizeTaskDescriptionForStorage(input.description);
@@ -57,7 +59,7 @@ export const createTask = (input: {
         .insert(tasks)
         .values({
           id,
-          prdId: input.prdId,
+          prdRevisionId: input.prdRevisionId,
           position: nextPosition,
           title: input.title,
           description: storedDescription.description,
@@ -65,6 +67,7 @@ export const createTask = (input: {
           doneCriteria: input.doneCriteria,
           dependsOn: JSON.stringify(input.dependsOn ?? []),
           effort: input.effort,
+          phaseNumber: input.phaseNumber ?? null,
           status: "pending",
           blockedReason: null,
           skipReason: null,
@@ -74,12 +77,12 @@ export const createTask = (input: {
         .returning(),
     );
     const task = rows[0]!;
-    const prd = yield* getPrd(task.prdId);
+    const prd = yield* getPrd(task.prdRevisionId);
     if (prd) {
       yield* logActivity({
         projectId: prd.projectId,
         workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         taskId: task.id,
         eventType: "task_created",
         payload: { taskId: task.id, title: task.title, kind: "prd" },
@@ -95,6 +98,7 @@ export const updateTask = (
     description?: string;
     doneCriteria?: string;
     effort?: Effort;
+    phaseNumber?: number | null;
   },
 ) =>
   Effect.gen(function* () {
@@ -107,6 +111,7 @@ export const updateTask = (
       changes.description !== undefined ? "description" : null,
       changes.doneCriteria !== undefined ? "doneCriteria" : null,
       changes.effort !== undefined ? "effort" : null,
+      changes.phaseNumber !== undefined ? "phaseNumber" : null,
     ].filter((field): field is string => field !== null);
 
     if (fields.length === 0) {
@@ -133,18 +138,19 @@ export const updateTask = (
           descriptionFormat: storedDescription?.descriptionFormat ?? task.descriptionFormat,
           doneCriteria: changes.doneCriteria ?? task.doneCriteria,
           effort: changes.effort ?? task.effort,
+          phaseNumber: changes.phaseNumber !== undefined ? changes.phaseNumber : task.phaseNumber,
         })
         .where(eq(tasks.id, id))
         .returning(),
     );
 
     const updated = rows[0]!;
-    const prd = yield* getPrd(updated.prdId);
+    const prd = yield* getPrd(updated.prdRevisionId);
     if (prd) {
       yield* logActivity({
         projectId: prd.projectId,
         workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         taskId: updated.id,
         eventType: "task_updated",
         payload: {
@@ -166,20 +172,29 @@ export const getTask = (id: string) =>
     return row ?? null;
   });
 
-export const listTasks = (prdId: string, options: { prdTasksOnly?: boolean } = {}) =>
+export const listTasks = (
+  prdRevisionId: string,
+  options: { prdTasksOnly?: boolean; phase?: number | null } = {},
+) =>
   Effect.gen(function* () {
     const db = yield* Db;
+    let rows: (typeof tasks.$inferSelect)[];
     if (options.prdTasksOnly) {
-      return yield* dbQuery(() =>
+      rows = yield* dbQuery(() =>
         db.query.tasks.findMany({
-          where: { prdId, reviewId: { isNull: true } },
+          where: { prdRevisionId, reviewId: { isNull: true } },
           orderBy: { position: "asc" },
         }),
       );
+    } else {
+      rows = yield* dbQuery(() =>
+        db.query.tasks.findMany({ where: { prdRevisionId }, orderBy: { position: "asc" } }),
+      );
     }
-    return yield* dbQuery(() =>
-      db.query.tasks.findMany({ where: { prdId }, orderBy: { position: "asc" } }),
-    );
+    if (options.phase !== undefined && options.phase !== null) {
+      rows = rows.filter((t) => t.phaseNumber === options.phase);
+    }
+    return rows;
   });
 
 export const startTask = (id: string) =>
@@ -195,12 +210,12 @@ export const startTask = (id: string) =>
         .where(eq(tasks.id, id))
         .returning(),
     );
-    const prd = yield* getPrd(task.prdId);
+    const prd = yield* getPrd(task.prdRevisionId);
     if (prd) {
       yield* logActivity({
         projectId: prd.projectId,
         workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         taskId: id,
         eventType: "task_started",
         payload: { taskId: task.id, title: task.title },
@@ -240,12 +255,12 @@ export const completeTask = (id: string) =>
         .where(eq(tasks.id, id))
         .returning(),
     );
-    const prd = yield* getPrd(task.prdId);
+    const prd = yield* getPrd(task.prdRevisionId);
     if (prd) {
       yield* logActivity({
         projectId: prd.projectId,
         workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         taskId: id,
         eventType: "task_done",
         payload: { taskId: task.id, title: task.title },
@@ -270,12 +285,12 @@ export const blockTask = (id: string, reason: string) =>
         .where(eq(tasks.id, id))
         .returning(),
     );
-    const prd = yield* getPrd(task.prdId);
+    const prd = yield* getPrd(task.prdRevisionId);
     if (prd) {
       yield* logActivity({
         projectId: prd.projectId,
         workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         taskId: id,
         eventType: "task_blocked",
         payload: { taskId: task.id, title: task.title, reason },
@@ -300,12 +315,12 @@ export const skipTask = (id: string, reason: string) =>
         .where(eq(tasks.id, id))
         .returning(),
     );
-    const prd = yield* getPrd(task.prdId);
+    const prd = yield* getPrd(task.prdRevisionId);
     if (prd) {
       yield* logActivity({
         projectId: prd.projectId,
         workspaceId: prd.workspaceId ?? undefined,
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         taskId: id,
         eventType: "task_skipped",
         payload: { taskId: task.id, title: task.title, reason },

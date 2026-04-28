@@ -7,7 +7,7 @@ import path from "node:path";
 import { createTestDb } from "../helpers/db";
 import { resolveMigrationsFolder } from "../helpers/db";
 import type { Database } from "#/db/client";
-import { prds } from "#/db/schema";
+import { prdRevisions } from "#/db/schema";
 import { resolveWorktreeMainPath } from "#/modules/workspaces/domain";
 import {
   createProject,
@@ -258,7 +258,7 @@ describe("workspaces", () => {
     const project = await createProject(db, { name: "my-app" });
     const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
     const prd = await createPrd(db, { projectId: project.id, title: "PRD" });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     await activatePrd(db, prd.id, ws.id);
     await expect(removeWorkspace(db, ws.id)).rejects.toThrow(/linked PRD/);
   });
@@ -267,10 +267,10 @@ describe("workspaces", () => {
     const project = await createProject(db, { name: "my-app" });
     const ws = await addWorkspace(db, { projectId: project.id, path: "/home/user/my-app" });
     const prd = await createPrd(db, { projectId: project.id, title: "PRD" });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     await activatePrd(db, prd.id, ws.id);
     await createTask(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "Task",
       description: "desc",
       doneCriteria: "done",
@@ -311,7 +311,7 @@ describe("PRD lifecycle", () => {
     });
     expect(prd.status).toBe("draft");
     expect(prd.revision).toBe(1);
-    expect(prd.parentId).toBeNull();
+    expect(prd.prdId).toBeTruthy();
   });
 
   it("creates a PRD with context and scope", async () => {
@@ -330,7 +330,7 @@ describe("PRD lifecycle", () => {
       projectId,
       title: "Core Foundation",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     const activated = await activatePrd(db, prd.id, workspaceId);
     expect(activated.status).toBe("in_progress");
     expect(activated.activatedAt).toBeTruthy();
@@ -355,8 +355,8 @@ describe("PRD lifecycle", () => {
       title: "PRD B",
     });
 
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd1.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd2.id));
     await activatePrd(db, prd1.id, workspaceId);
 
     await expect(activatePrd(db, prd2.id, workspaceId)).rejects.toThrow(
@@ -386,8 +386,8 @@ describe("PRD lifecycle", () => {
       projectId,
       title: "PRD B",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd1.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd2.id));
     const list = await listPrds(db, { projectId });
     const ready = list.filter((p) => p.status === "ready");
     expect(ready).toHaveLength(2);
@@ -406,8 +406,8 @@ describe("PRD lifecycle", () => {
       projectId,
       title: "PRD B",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd1.id));
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd2.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd1.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd2.id));
     await activatePrd(db, prd1.id, workspaceId);
     await activatePrd(db, prd2.id, ws2.id);
     const list = await listPrds(db, { projectId });
@@ -422,32 +422,32 @@ describe("PRD lifecycle", () => {
     const entry = log.find((e) => e.eventType === "prd_ready");
     expect(entry).toBeDefined();
     const payload = JSON.parse(entry!.payload);
-    expect(payload.prdId).toBe(prd.id);
+    expect(payload.prdRevisionId).toBe(prd.id);
     expect(payload.title).toBe("My PRD");
   });
 
   it("auto-logs prd_activated when a PRD is activated", async () => {
     const prd = await createPrd(db, { projectId, title: "My PRD" });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     await activatePrd(db, prd.id, workspaceId);
     const log = await listActivity(db, { projectId });
     const entry = log.find((e) => e.eventType === "prd_activated");
     expect(entry).toBeDefined();
     const payload = JSON.parse(entry!.payload);
-    expect(payload.prdId).toBe(prd.id);
+    expect(payload.prdRevisionId).toBe(prd.id);
     expect(payload.title).toBe("My PRD");
   });
 
   it("auto-logs prd_done when a PRD is marked done", async () => {
     const prd = await createPrd(db, { projectId, title: "My PRD" });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     await activatePrd(db, prd.id, workspaceId);
     await donePrd(db, prd.id);
     const log = await listActivity(db, { projectId });
     const entry = log.find((e) => e.eventType === "prd_done");
     expect(entry).toBeDefined();
     const payload = JSON.parse(entry!.payload);
-    expect(payload.prdId).toBe(prd.id);
+    expect(payload.prdRevisionId).toBe(prd.id);
     expect(payload.title).toBe("My PRD");
   });
 
@@ -459,8 +459,8 @@ describe("PRD lifecycle", () => {
     const entry = log.find((e) => e.eventType === "prd_forked");
     expect(entry).toBeDefined();
     const payload = JSON.parse(entry!.payload);
-    expect(payload.sourcePrdId).toBe(prd.id);
-    expect(payload.newPrdId).toBe(forked.id);
+    expect(payload.sourcePrdRevisionId).toBe(prd.id);
+    expect(payload.newPrdRevisionId).toBe(forked.id);
     expect(payload.revision).toBe(2);
   });
 });
@@ -470,7 +470,7 @@ describe("PRD lifecycle", () => {
 describe("task lifecycle", () => {
   let projectId: string;
   let workspaceId: string;
-  let prdId: string;
+  let prdRevisionId: string;
 
   beforeEach(async () => {
     const project = await createProject(db, { name: "my-app" });
@@ -484,14 +484,14 @@ describe("task lifecycle", () => {
       projectId,
       title: "Core Foundation",
     });
-    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     await activatePrd(db, prd.id, workspaceId);
-    prdId = prd.id;
+    prdRevisionId = prd.id;
   });
 
   it("creates a task with pending status", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Set up schema",
       description: "Create Drizzle schema for all tables",
       doneCriteria: "All tables exist with correct columns",
@@ -504,7 +504,7 @@ describe("task lifecycle", () => {
 
   it("stores structured task descriptions with an explicit format", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Structured task",
       description: [
         "Intent:",
@@ -529,14 +529,14 @@ describe("task lifecycle", () => {
 
   it("auto-increments position within a PRD", async () => {
     const t1 = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task 1",
       description: "Desc",
       doneCriteria: "Done",
       effort: "s",
     });
     const t2 = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task 2",
       description: "Desc",
       doneCriteria: "Done",
@@ -549,7 +549,7 @@ describe("task lifecycle", () => {
   it("rejects creating a task with empty done_criteria", async () => {
     await expect(
       createTask(db, {
-        prdId,
+        prdRevisionId,
         title: "Task",
         description: "Desc",
         doneCriteria: "",
@@ -560,7 +560,7 @@ describe("task lifecycle", () => {
 
   it("starts a pending task", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -573,7 +573,7 @@ describe("task lifecycle", () => {
 
   it("rejects starting a non-pending task", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -585,7 +585,7 @@ describe("task lifecycle", () => {
 
   it("completes an in_progress task", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task",
       description: "Desc",
       doneCriteria: "Tests pass",
@@ -599,7 +599,7 @@ describe("task lifecycle", () => {
 
   it("rejects completing a non-in_progress task", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -611,14 +611,14 @@ describe("task lifecycle", () => {
 
   it("enforces dependency completion before task done", async () => {
     const dep = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Dependency",
       description: "Desc",
       doneCriteria: "Done",
       effort: "s",
     });
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Dependent",
       description: "Desc",
       doneCriteria: "Done",
@@ -632,14 +632,14 @@ describe("task lifecycle", () => {
 
   it("allows completion when all dependencies are done", async () => {
     const dep = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Dependency",
       description: "Desc",
       doneCriteria: "Done",
       effort: "s",
     });
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Dependent",
       description: "Desc",
       doneCriteria: "Done",
@@ -657,7 +657,7 @@ describe("task lifecycle", () => {
 
   it("blocks an in_progress task with a reason", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -671,7 +671,7 @@ describe("task lifecycle", () => {
 
   it("rejects blocking without a reason", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -683,7 +683,7 @@ describe("task lifecycle", () => {
 
   it("skips a pending task with a reason", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -696,7 +696,7 @@ describe("task lifecycle", () => {
 
   it("rejects skipping without a reason", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -707,20 +707,20 @@ describe("task lifecycle", () => {
 
   it("lists tasks for a PRD in position order", async () => {
     await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "Second",
       description: "Desc",
       doneCriteria: "Done",
       effort: "s",
     });
     await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "First",
       description: "Desc",
       doneCriteria: "Done",
       effort: "xs",
     });
-    const list = await listTasks(db, prdId);
+    const list = await listTasks(db, prdRevisionId);
     expect(list).toHaveLength(2);
     expect(list[0].title).toBe("Second");
     expect(list[1].title).toBe("First");
@@ -728,7 +728,7 @@ describe("task lifecycle", () => {
 
   it("auto-logs task_started when a task is started", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "My Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -745,7 +745,7 @@ describe("task lifecycle", () => {
 
   it("auto-logs task_done when a task is completed", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "My Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -763,7 +763,7 @@ describe("task lifecycle", () => {
 
   it("auto-logs task_blocked with reason when a task is blocked", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "My Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -782,7 +782,7 @@ describe("task lifecycle", () => {
 
   it("auto-logs task_skipped with reason when a task is skipped", async () => {
     const task = await createTask(db, {
-      prdId,
+      prdRevisionId,
       title: "My Task",
       description: "Desc",
       doneCriteria: "Done",
@@ -907,7 +907,7 @@ describe("activity log", () => {
       logActivity(db, {
         projectId,
         workspaceId,
-        prdId: otherPrd.id,
+        prdRevisionId: otherPrd.id,
         eventType: "note",
         payload: { message: "cross-project" },
       }),
@@ -924,7 +924,7 @@ describe("activity log", () => {
       title: "PRD B",
     });
     const task = await createTask(db, {
-      prdId: prd2.id,
+      prdRevisionId: prd2.id,
       title: "Task B",
       description: "Desc",
       doneCriteria: "Done",
@@ -935,7 +935,7 @@ describe("activity log", () => {
       logActivity(db, {
         projectId,
         workspaceId,
-        prdId: prd1.id,
+        prdRevisionId: prd1.id,
         taskId: task.id,
         eventType: "note",
         payload: { message: "wrong prd" },
@@ -1054,7 +1054,7 @@ describe("loadPrd", () => {
       }),
     ).rejects.toThrow(/Simulated task insert failure|DatabaseError/i);
 
-    const allPrds = await db.query.prds.findMany({ where: { projectId } });
+    const allPrds = await db.query.prdRevisions.findMany({ where: { projectId } });
     expect(allPrds.find((p) => p.title === "Rollback PRD")).toBeUndefined();
   });
 });
@@ -1088,7 +1088,7 @@ describe("reloadPrd", () => {
     });
 
     const { prd: reloaded, tasks: newTasks } = await reloadPrd(db, {
-      prdId: original.id,
+      prdRevisionId: original.id,
       title: "New Title",
       context: "New context",
       scope: "New scope",
@@ -1132,7 +1132,7 @@ describe("reloadPrd", () => {
 
     await expect(
       reloadPrd(db, {
-        prdId: prd.id,
+        prdRevisionId: prd.id,
         title: "Updated",
         tasks: [{ title: "T", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] }],
       }),
@@ -1148,7 +1148,7 @@ describe("reloadPrd", () => {
     });
 
     const { tasks: newTasks } = await reloadPrd(db, {
-      prdId: prd.id,
+      prdRevisionId: prd.id,
       title: "PRD",
       tasks: [{ title: "New", description: "D", doneCriteria: "C", effort: "s", dependsOn: [] }],
     });
