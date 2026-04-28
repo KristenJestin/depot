@@ -34,7 +34,7 @@
     "check": "vp check",
     "prepublishOnly": "vp pack && vp build",
     "test:smoke": "vp pack && vp build && vp test tests/build",
-    "depot": "bun run src/cli/index.ts --",
+    "depot": "vp pack && node --env-file-if-exists=.env dist/index.mjs --",
     "dev:web": "vp dev",
     "db:check": "drizzle-kit check",
     "db:generate": "drizzle-kit generate",

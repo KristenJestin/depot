@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-`depot` is a Bun + TypeScript CLI for AI agent task and PRD management.
+`depot` is a Node.js + TypeScript CLI for AI agent task and PRD management.
 
-- Runtime: Bun
+- Runtime: Node.js ≥ 25 (uses `node:sqlite`); Bun is used for tooling only (tests, build, package management)
 - Language: TypeScript with `strict` mode
 - CLI entrypoint: `src/cli/index.ts`
 - Main product context lives in `docs/index.md` and `docs/concepts/index.md`
 - Current and planned work is tracked in `docs/roadmap.md`
 - Feature specs (PRDs) live in `.prds/` as numbered Markdown files
-- Distribution target: npm global install (`bun add -g depot`); Bun is required on the user's machine — no standalone binary, no self-contained bundle
+- Distribution target: npm global install (`npm install -g @netsirk/depot`); Node.js ≥ 25 is required on the user's machine — no standalone binary, no self-contained bundle
 
 Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain language. Use `docs/roadmap.md` to understand implementation direction, but treat the current codebase as the source of truth for behavior.
 
@@ -53,6 +53,21 @@ Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain l
 - Generate migrations with `bun run db:generate`.
 - Do not hand-edit generated migration files unless the user explicitly asks for it.
 - Use the existing Drizzle configuration in `drizzle.config.ts`.
+
+### Dev DB isolation — mandatory
+
+The project root contains a `.env` file that sets `DB_PATH=.depot-dev/depot.db`.
+`bun run depot --` builds the CLI (`vp pack`) then runs the dist via `node --env-file-if-exists=.env`,
+so `.env` is automatically picked up. Vitest also loads `.env` automatically.
+
+- **Always use `bun run depot --` for local CLI testing**, never the global `depot` binary.
+  `bun run depot --` writes to `.depot-dev/depot.db`, not `~/.depot/depot.db`.
+- **Never run `bun run db:migrate` or apply migrations manually against `~/.depot/depot.db`.**
+  If you need to test a migration, set `DB_PATH` to a throwaway path and verify there first.
+- When you change `src/db/schema.ts`, regenerate migrations with `bun run db:generate`, verify
+  the generated SQL is additive (ALTER TABLE ADD COLUMN, CREATE TABLE, CREATE INDEX).
+  If the schema change requires dropping or renaming tables, write a data-preserving migration:
+  RENAME old table → copy data → create new table → DROP old table. Never DROP before INSERT.
 
 ## Agent Workflow
 
