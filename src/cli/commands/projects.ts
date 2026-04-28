@@ -6,6 +6,7 @@ import * as DomainWorkspaces from "#/modules/workspaces/domain";
 import { normalizeWorkspacePath, formatDate } from "#/shared/utils";
 import { VALID_PROJECT_STATUSES } from "#/shared/validator";
 import * as path from "node:path";
+import { detectGitContext } from "#/modules/workspaces/bootstrap";
 
 export const initCommand = command({
   meta: {
@@ -37,7 +38,9 @@ export const initCommand = command({
   run: async ({ args, output }) => {
     const rawWsPath = path.resolve(args.path ?? process.cwd());
     const wsPath = normalizeWorkspacePath(rawWsPath);
-    const projectName = args.name ?? path.basename(rawWsPath);
+    const git = await detectGitContext(rawWsPath);
+    const projectName = args.name ?? (git ? path.basename(git.gitRoot) : path.basename(rawWsPath));
+    const defaultLabel = git?.branch;
 
     // Check if workspace already exists at this exact path
     const existing = await runEffect(DomainWorkspaces.resolveWorkspace(wsPath));
@@ -57,9 +60,26 @@ export const initCommand = command({
       return;
     }
 
-    // Reuse an existing project with the same name, or create a new one
     const projects = await runEffect(DomainProjects.listProjects());
-    let project = projects.find((p) => p.name === projectName);
+
+    // Worktree attachment takes priority over name-match: if this is a linked worktree and
+    // --name was not given, attach to the main worktree's project for accurate association.
+    let project: (typeof projects)[number] | undefined;
+
+    if (!args.name && git?.mainWorktreePath) {
+      const mainNormalized = normalizeWorkspacePath(git.mainWorktreePath);
+      const mainWs = await runEffect(DomainWorkspaces.resolveWorkspace(mainNormalized));
+      if (mainWs) {
+        const mainProject = await runEffect(DomainProjects.getProject(mainWs.projectId));
+        if (mainProject) {
+          project = mainProject;
+        }
+      }
+    }
+
+    if (!project) {
+      project = projects.find((p) => p.name === projectName);
+    }
 
     if (!project) {
       project = await runEffect(
@@ -81,7 +101,7 @@ export const initCommand = command({
       DomainWorkspaces.addWorkspace({
         projectId: project.id,
         path: wsPath,
-        label: args.label,
+        label: args.label ?? defaultLabel,
       }),
     );
 

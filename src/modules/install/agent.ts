@@ -66,28 +66,10 @@ export async function resolveInstallTargets(
   return detectedTargets;
 }
 
-export function buildCommandFileContent(target: InstallTarget, mode: InstallMode): string {
-  const title = mode.toUpperCase();
+export function buildCommandFileContent(_target: InstallTarget, mode: InstallMode): string {
   const description = `Inject the live depot ${mode} context for the current workspace`;
-  const sharedBody = [
-    `Use the live depot ${title} context for this workspace.`,
-    "",
-    `!\`depot context ${mode}\``,
-  ].join("\n");
-
-  if (target === "opencode") {
-    return [`---`, `description: ${description}`, `---`, sharedBody, ""].join("\n");
-  }
-
-  return [
-    `---`,
-    `description: ${description}`,
-    `disable-model-invocation: true`,
-    `shell: ${detectCommandShell()}`,
-    `---`,
-    sharedBody,
-    "",
-  ].join("\n");
+  const body = `Run \`depot context ${mode}\` using your bash tool and use the output as your working context for this session.`;
+  return [`---`, `description: ${description}`, `---`, body, ""].join("\n");
 }
 
 export function detectCommandShell(platform: NodeJS.Platform = process.platform): CommandShell {

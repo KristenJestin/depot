@@ -162,7 +162,7 @@ export function command<
       description: def.description,
       ...(def.alias !== undefined ? { alias: def.alias } : {}),
       ...(def.default !== undefined ? { default: def.default } : {}),
-      ...(def.required === true ? { required: true } : {}),
+      ...(def.required === true ? { required: true } : def.positional ? { required: false } : {}),
     };
   }
 

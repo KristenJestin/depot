@@ -1,16 +1,99 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
 import { createProject, addWorkspace, listProjects } from "#/lib/workflow";
-import { resolveOrCreateWorkspaceForPath } from "#/modules/workspaces/bootstrap";
+import { detectGitContext, resolveOrCreateWorkspaceForPath } from "#/modules/workspaces/bootstrap";
+import type { execFile as ExecFileFn, ChildProcess } from "node:child_process";
+
+vi.mock("node:child_process", () => ({ execFile: vi.fn<typeof ExecFileFn>() }));
+
+import { execFile } from "node:child_process";
+const mockExecFile = vi.mocked(execFile);
+
+type ExecFileCallback = (err: Error | null, stdout: string, stderr: string) => void;
+
+function mockExec(stdout: string) {
+  mockExecFile.mockImplementationOnce((_cmd, _args, _opts, cb) => {
+    (cb as unknown as ExecFileCallback)(null, stdout, "");
+    return {} as ChildProcess;
+  });
+}
+
+function mockExecFail() {
+  mockExecFile.mockImplementationOnce((_cmd, _args, _opts, cb) => {
+    (cb as unknown as ExecFileCallback)(new Error("git command failed"), "", "");
+    return {} as ChildProcess;
+  });
+}
 
 let db: Database;
 
 beforeEach(() => {
   ({ db } = createTestDb());
+  vi.restoreAllMocks();
+});
+
+describe("detectGitContext", () => {
+  it("returns null when git rev-parse fails (not a git repo)", async () => {
+    mockExecFail();
+
+    const result = await detectGitContext("/tmp/not-a-repo");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns gitRoot and branch when in a git repo", async () => {
+    mockExec("/home/user/myproject\n"); // rev-parse --show-toplevel
+    mockExec("feature-branch\n"); // rev-parse --abbrev-ref HEAD
+    mockExec("worktree /home/user/myproject\n"); // worktree list
+
+    const result = await detectGitContext("/home/user/myproject");
+
+    expect(result).not.toBeNull();
+    expect(result!.gitRoot).toBe("/home/user/myproject");
+    expect(result!.branch).toBe("feature-branch");
+  });
+
+  it("returns undefined branch when branch detection fails", async () => {
+    mockExec("/home/user/myproject\n"); // rev-parse --show-toplevel
+    mockExecFail(); // branch detection fails
+    mockExec("worktree /home/user/myproject\n"); // worktree list
+
+    const result = await detectGitContext("/home/user/myproject");
+
+    expect(result).not.toBeNull();
+    expect(result!.branch).toBeUndefined();
+  });
+
+  it("returns undefined mainWorktreePath when cwd is the main worktree", async () => {
+    mockExec("/home/user/myproject\n"); // rev-parse --show-toplevel
+    mockExec("main\n"); // branch
+    mockExec("worktree /home/user/myproject\n"); // worktree list (only main)
+
+    const result = await detectGitContext("/home/user/myproject");
+
+    expect(result!.mainWorktreePath).toBeUndefined();
+  });
+
+  it("returns mainWorktreePath when cwd is a linked worktree", async () => {
+    mockExec("/home/user/myproject-feat\n"); // rev-parse --show-toplevel
+    mockExec("feat\n"); // branch
+    mockExec("worktree /home/user/myproject\n\nworktree /home/user/myproject-feat\n"); // worktree list
+
+    const result = await detectGitContext("/home/user/myproject-feat");
+
+    expect(result!.mainWorktreePath).toBe("/home/user/myproject");
+  });
 });
 
 describe("workspace bootstrap", () => {
+  beforeEach(() => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      (cb as unknown as ExecFileCallback)(new Error("not a git repo"), "", "");
+      return {} as ChildProcess;
+    });
+  });
+
   it("resolves an existing workspace without creating a new project", async () => {
     const project = await createProject(db, { name: "existing-project" });
     const workspace = await addWorkspace(db, {

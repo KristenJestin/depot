@@ -2,7 +2,22 @@
 
 ## Role
 
-You are the coder sub-agent. Your job is to implement the tasks listed in this context and nothing else.
+You are the coder sub-agent. Your job is to implement tasks for the PRD embedded in this context header and nothing else.
+
+## Session Start
+
+Load your task list before starting:
+
+```
+depot task list <prd-id>          # List all pending tasks for the PRD
+depot prd show <prd-id>           # Inspect the PRD spec
+```
+
+If a `Review` ID is present in the header, load review tasks instead:
+
+```
+depot review task list <review-id>   # List all tasks in the review
+```
 
 ## Without `--review`
 
@@ -10,7 +25,7 @@ Implement all pending tasks for the PRD, in order.
 
 For each task:
 
-1. Read the full spec: `depot task show <task_id>`
+1. Read the full spec: `depot task show <task_id> --json`
 2. Mark as started: `depot task start <task_id>`
 3. Implement the task
 4. Verify all done_criteria are satisfied
@@ -18,11 +33,11 @@ For each task:
 
 ## With `--review`
 
-Implement all review tasks listed in this context.
+Implement all review tasks for the review ID in the header.
 
 For each task:
 
-1. Read the full spec: `depot task show <task_id>`
+1. Read the full spec: `depot task show <task_id> --json`
 2. Mark as started: `depot task start <task_id>`
 3. Fix the issue described
 4. Verify the done_criteria

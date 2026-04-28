@@ -1,10 +1,9 @@
 import { Schema } from "effect";
 import { command } from "#/cli/command";
-import { renderContextIndex, renderContextMode } from "#/modules/context/render";
+import { getContextTemplate } from "#/modules/context";
 
 export const contextCommand = command({
-  meta: { name: "context", description: "Render live agent context for the current workspace" },
-  workspace: { autoCreate: true },
+  meta: { name: "context", description: "Emit static agent context for the current workspace" },
   args: {
     mode: {
       schema: Schema.Literal("prd", "dev", "coder", "auditor"),
@@ -15,14 +14,14 @@ export const contextCommand = command({
       schema: Schema.String,
       positional: true,
       default: "",
-      description: "PRD ID or title to target (dev/coder/auditor mode)",
+      description: "PRD ID or title to embed in the header (dev/coder/auditor mode)",
     },
     review: {
       schema: Schema.String,
-      description: "Review ID (coder mode only)",
+      description: "Review ID to embed in the header (coder mode only)",
     },
   },
-  run: async ({ args, db, ws, output }) => {
+  run: async ({ args, output }) => {
     if (output.isJson()) {
       output.error(
         "unsupported",
@@ -30,19 +29,28 @@ export const contextCommand = command({
       );
     }
 
-    if (!args.mode) {
-      try {
-        output.print(await renderContextIndex(db, ws.id));
-      } catch (error) {
-        output.error("render_error", error instanceof Error ? error.message : String(error));
-      }
-      return;
+    const mode = args.mode;
+    const lines: string[] = [];
+
+    const modeLabel = mode ? mode.toUpperCase() : "CONTEXT";
+    lines.push(`=== DEPOT CONTEXT — ${modeLabel} ===`);
+
+    if (args.prdTarget) {
+      lines.push(`PRD     : ${args.prdTarget}`);
     }
 
-    try {
-      output.print(await renderContextMode(db, ws.id, args.mode, args.prdTarget, args.review));
-    } catch (error) {
-      output.error("render_error", error instanceof Error ? error.message : String(error));
+    if (args.review) {
+      lines.push(`Review  : ${args.review}`);
     }
+
+    if (args.prdTarget || args.review) {
+      lines.push("");
+    }
+
+    if (mode) {
+      lines.push(getContextTemplate(mode));
+    }
+
+    output.print(lines.join("\n"));
   },
 });

@@ -56,7 +56,9 @@ describe.skipIf(!built)("build smoke", () => {
     try {
       packs = JSON.parse(result.stdout);
     } catch {
-      throw new Error(`npm pack --json produced non-JSON output:\n${result.stdout}\n${result.stderr}`);
+      throw new Error(
+        `npm pack --json produced non-JSON output:\n${result.stdout}\n${result.stderr}`,
+      );
     }
     const files = packs[0].files.map((f) => f.path);
     expect(files).toContain("dist/index.mjs");

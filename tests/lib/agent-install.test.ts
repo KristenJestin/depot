@@ -45,21 +45,27 @@ describe("agent install helpers", () => {
     ]);
   });
 
-  it("builds OpenCode command files with live depot context injection", () => {
+  it("builds command files that instruct the agent to run depot context via bash", () => {
     const content = buildCommandFileContent("opencode", "dev");
 
     expect(content).toContain("description: Inject the live depot dev context");
-    expect(content).toContain("!`depot context dev`");
-    expect(content).not.toContain("shell:");
+    expect(content).toContain("Run `depot context dev`");
+    expect(content).not.toContain("--ws");
   });
 
-  it("builds Claude Code command files with host shell injection", () => {
-    const content = buildCommandFileContent("claude-code", "prd");
+  it("builds the same content regardless of target", () => {
+    const opencodeContent = buildCommandFileContent("opencode", "prd");
+    const claudeContent = buildCommandFileContent("claude-code", "prd");
 
-    expect(content).toContain("description: Inject the live depot prd context");
-    expect(content).toContain("disable-model-invocation: true");
-    expect(content).toContain(`shell: ${detectCommandShell()}`);
-    expect(content).toContain("!`depot context prd`");
+    expect(opencodeContent).toBe(claudeContent);
+  });
+
+  it("does not contain any shell execution syntax", () => {
+    const content = buildCommandFileContent("opencode", "prd");
+
+    expect(content).not.toContain("!`");
+    expect(content).not.toContain("disable-model-invocation");
+    expect(content).not.toContain("shell:");
   });
 
   it("detects the shell from the platform", () => {
@@ -82,5 +88,9 @@ describe("agent install helpers", () => {
       "/home/tester/.config/opencode/commands/depot-prd.md",
       "/home/tester/.config/opencode/commands/depot-dev.md",
     ]);
+    for (const write of writes) {
+      expect(write.content).toContain("Run `depot context");
+      expect(write.content).not.toContain("--ws");
+    }
   });
 });
