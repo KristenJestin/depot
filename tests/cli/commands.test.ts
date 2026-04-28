@@ -758,6 +758,22 @@ describe("CLI commands", () => {
   });
 
   describe("prd lifecycle commands", () => {
+    it("prd update updates a draft PRD", async () => {
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const updateCommand = await getSubCommand(prdCommand, "update");
+
+      const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await updateCommand.run({ args: { prdId: prd.id, title: "Updated PRD", context: "new" } });
+      output.mockRestore();
+
+      const { getPrd } = await import("#/lib/workflow");
+      const updated = await getPrd(db, prd.id);
+      expect(updated!.title).toBe("Updated PRD");
+      expect(updated!.context).toBe("new");
+    });
+
     it("prd ready marks a draft PRD as ready", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const readyCommand = await getSubCommand(prdCommand, "ready");
@@ -1019,6 +1035,42 @@ describe("CLI commands", () => {
       const parsed = JSON.parse(output.trim());
       expect(parsed.kind).toBe("error");
       expect(parsed.error.code).toBe("validation_error");
+    });
+  });
+
+  describe("review commands", () => {
+    it("review begin moves a review to in_progress", async () => {
+      const { reviewCommand } = await import("#/cli/commands/reviews");
+      const beginCommand = await getSubCommand(reviewCommand, "begin");
+
+      const prd = await createPrd(db, { projectId, title: "Review PRD" });
+      const { createReview, getReview } = await import("#/lib/workflow");
+      const review = await createReview(db, { prdId: prd.id, type: "human" });
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await beginCommand.run({ args: { reviewId: review.id } });
+      output.mockRestore();
+
+      const updated = await getReview(db, review.id);
+      expect(updated!.status).toBe("in_progress");
+    });
+
+    it("review update stores user feedback", async () => {
+      const { reviewCommand } = await import("#/cli/commands/reviews");
+      const updateCommand = await getSubCommand(reviewCommand, "update");
+
+      const prd = await createPrd(db, { projectId, title: "Review PRD" });
+      const { createReview, getReview } = await import("#/lib/workflow");
+      const review = await createReview(db, { prdId: prd.id, type: "human" });
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await updateCommand.run({
+        args: { reviewId: review.id, feedback: "Please simplify onboarding" },
+      });
+      output.mockRestore();
+
+      const updated = await getReview(db, review.id);
+      expect(updated!.userFeedback).toBe("Please simplify onboarding");
     });
   });
 });

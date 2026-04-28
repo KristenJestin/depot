@@ -1,3 +1,4 @@
+import * as React from "react";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
 import { reviewsQuery } from "../lib/queries";
@@ -33,8 +34,14 @@ function ReviewDetailPage() {
   const { id, reviewId } = Route.useParams();
   const { data } = reviewsQuery.detail.useSuspense(id, reviewId);
   const { review, prd, findings } = data;
+  const [tab, setTab] = React.useState<"findings" | "details">("findings");
 
   const countBySeverity = (sev: string) => findings.filter((f) => f.severity === sev).length;
+
+  const tabClass = (t: string) =>
+    t === tab
+      ? "pb-3 border-b-2 border-primary text-foreground font-medium text-sm cursor-pointer"
+      : "pb-3 border-b-2 border-transparent text-muted-foreground hover:text-foreground text-sm cursor-pointer";
 
   return (
     <div className="h-full overflow-y-auto">
@@ -63,50 +70,66 @@ function ReviewDetailPage() {
           </BreadcrumbList>
         </Breadcrumb>
 
-        <div className="flex flex-col xl:flex-row gap-8 items-start">
-          {/* Left — task list */}
-          <div className="flex-1 min-w-0 space-y-6">
-            <header className="space-y-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <span
-                  className={cn(
-                    "text-2xs uppercase tracking-wider px-2 py-0.5 rounded-sm font-bold",
-                    review.type === "agent"
-                      ? "bg-chart-1/15 text-chart-1"
-                      : "bg-primary/10 text-primary",
-                  )}
-                >
-                  {review.type}
-                </span>
-                <StatusBadge status={review.status} />
-              </div>
-              <h1 className="text-3xl font-bold tracking-tight">Review</h1>
-              <p className="text-sm text-muted-foreground font-mono">{prd.title}</p>
-            </header>
-
-            <section className="space-y-4">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="text-xl font-semibold">Findings</h3>
-                <span className="text-sm font-medium text-muted-foreground">
-                  {findings.length} finding{findings.length !== 1 ? "s" : ""}
-                </span>
-              </div>
-              {findings.length === 0 ? (
-                <EmptyState message="No findings for this review." />
-              ) : (
-                <FindingsTable findings={findings} prdId={prd.id} />
+        {/* Header */}
+        <div className="space-y-2">
+          <div className="flex items-start gap-3">
+            <h1 className="text-3xl font-bold tracking-tight capitalize">{review.type} Review</h1>
+            <span
+              className={cn(
+                "text-2xs uppercase tracking-wider px-2 py-0.5 rounded-sm font-bold",
+                review.type === "agent"
+                  ? "bg-chart-1/15 text-chart-1"
+                  : "bg-primary/10 text-primary",
               )}
-            </section>
+            >
+              {review.type}
+            </span>
+            <StatusBadge status={review.status} />
           </div>
+          <p className="text-sm text-muted-foreground">
+            <Link to="/prds/$id" params={{ id: prd.id }} className="font-mono hover:underline">
+              {prd.title}
+            </Link>
+            {" · "}
+            {relativeDate(review.createdAt)}
+            {review.doneAt && (
+              <>
+                {" · "}
+                {relativeDate(review.doneAt)}
+              </>
+            )}
+          </p>
+        </div>
 
-          {/* Right — sidebar */}
-          <div className="w-full xl:w-80 shrink-0 space-y-6">
+        {/* Tab strip */}
+        <div className="flex gap-6 border-b border-border">
+          <button className={tabClass("findings")} onClick={() => setTab("findings")}>
+            Findings
+          </button>
+          <button className={tabClass("details")} onClick={() => setTab("details")}>
+            Details
+          </button>
+        </div>
+
+        {/* Tab content */}
+        {tab === "findings" && (
+          <div>
+            {findings.length === 0 ? (
+              <EmptyState message="No findings for this review." />
+            ) : (
+              <FindingsTable findings={findings} prdId={prd.id} />
+            )}
+          </div>
+        )}
+
+        {tab === "details" && (
+          <div className="space-y-4 max-w-xl">
             {/* Severity breakdown */}
-            <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
-              <h4 className="font-semibold text-sm">Findings breakdown</h4>
-              <div className="space-y-1 text-sm">
+            <div className="bg-card border border-border rounded-xl p-5">
+              <h4 className="font-semibold text-sm mb-3">Findings breakdown</h4>
+              <div className="divide-y divide-border">
                 {(["critical", "major", "minor", "info"] as const).map((label) => (
-                  <div key={label} className="flex items-center justify-between py-1">
+                  <div key={label} className="flex items-center justify-between py-2 text-sm">
                     <span
                       className={cn(
                         "font-mono text-xs uppercase tracking-wider",
@@ -122,35 +145,37 @@ function ReviewDetailPage() {
             </div>
 
             {/* Metadata */}
-            <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
-              <h4 className="font-semibold text-sm">Details</h4>
-              <div className="space-y-0 text-sm divide-y divide-border">
-                <div className="flex justify-between items-center py-2">
+            <div className="bg-card border border-border rounded-xl p-5">
+              <h4 className="font-semibold text-sm mb-3">Metadata</h4>
+              <div className="divide-y divide-border">
+                <div className="flex justify-between py-2 text-sm">
                   <span className="text-muted-foreground">Created</span>
                   <span className="font-medium">{relativeDate(review.createdAt) ?? "—"}</span>
                 </div>
-                <div className="flex justify-between items-center py-2">
+                <div className="flex justify-between py-2 text-sm">
                   <span className="text-muted-foreground">Completed</span>
                   <span className="font-medium">{relativeDate(review.doneAt) ?? "—"}</span>
                 </div>
-                <div className="flex justify-between items-center py-2">
+                <div className="flex justify-between py-2 text-sm">
                   <span className="text-muted-foreground">Status</span>
-                  <StatusBadge status={review.status} />
+                  <span className="font-medium">
+                    <StatusBadge status={review.status} />
+                  </span>
                 </div>
               </div>
             </div>
 
             {/* User feedback */}
             {review.userFeedback && (
-              <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-3">
-                <h4 className="font-semibold text-sm">Feedback</h4>
+              <div className="bg-card border border-border rounded-xl p-5">
+                <h4 className="font-semibold text-sm mb-3">Feedback</h4>
                 <p className="text-xs text-muted-foreground leading-relaxed">
                   {review.userFeedback}
                 </p>
               </div>
             )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

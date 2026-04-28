@@ -79,6 +79,56 @@ const showCommand = command({
   },
 });
 
+const updateCommand = command({
+  meta: { name: "update", description: "Update draft or ready PRD fields in place" },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+    title: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      alias: "t",
+      description: "New PRD title",
+    },
+    context: {
+      schema: Schema.String,
+      alias: "c",
+      description: "New PRD context",
+    },
+    scope: {
+      schema: Schema.String,
+      alias: "s",
+      description: "New PRD scope",
+    },
+  },
+  run: async ({ args, output }) => {
+    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+    if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
+
+    if (args.title === undefined && args.context === undefined && args.scope === undefined) {
+      return output.error("no_changes", "No changes provided. Use --title, --context, or --scope.");
+    }
+
+    const updated = await runEffect(
+      DomainPrds.updatePrd(prd.id, {
+        title: args.title,
+        context: args.context,
+        scope: args.scope,
+      }),
+    );
+
+    if (output.isJson()) {
+      output.success({ item: updated });
+    } else {
+      output.print(`Updated PRD '${updated.title}' (${updated.id}) [${updated.status}]`);
+    }
+  },
+});
+
 const listCommand = command({
   meta: { name: "list", description: "List PRDs for the current project" },
   workspace: true,
@@ -450,6 +500,7 @@ export const prdCommand = command({
   subCommands: {
     create: createCommand,
     show: showCommand,
+    update: updateCommand,
     list: listCommand,
     activate: activateCommand,
     ready: readyCommand,

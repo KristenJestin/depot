@@ -108,3 +108,5 @@ depot context auditor <prd-id>
 - the templates used by these contexts are embedded at build time from `src/modules/context/templates/*.md`
 - the command is text-first by design
 - the mode registry contains exactly `prd`, `dev`, `coder`, and `auditor`
+
+The generated slash commands installed by `depot install` inject the rendered output of `depot context prd` or `depot context dev` directly into the agent prompt.

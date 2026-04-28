@@ -45,27 +45,37 @@ describe("agent install helpers", () => {
     ]);
   });
 
-  it("builds command files that instruct the agent to run depot context via bash", () => {
+  it("builds command files that inject depot context directly", () => {
     const content = buildCommandFileContent("opencode", "dev");
 
     expect(content).toContain("description: Inject the live depot dev context");
-    expect(content).toContain("Run `depot context dev`");
+    expect(content).toContain("Use the injected depot dev context below");
+    expect(content).toContain("!`depot context dev`");
     expect(content).not.toContain("--ws");
   });
 
-  it("builds the same content regardless of target", () => {
+  it("builds the same injected body regardless of target", () => {
     const opencodeContent = buildCommandFileContent("opencode", "prd");
     const claudeContent = buildCommandFileContent("claude-code", "prd");
 
-    expect(opencodeContent).toBe(claudeContent);
+    expect(opencodeContent).toContain("!`depot context prd`");
+    expect(claudeContent).toContain("!`depot context prd`");
+    expect(opencodeContent).toContain("Use the injected depot PRD context below");
+    expect(claudeContent).toContain("Use the injected depot PRD context below");
   });
 
-  it("does not contain any shell execution syntax", () => {
+  it("uses native context injection syntax", () => {
     const content = buildCommandFileContent("opencode", "prd");
 
-    expect(content).not.toContain("!`");
+    expect(content).toContain("!`depot context prd`");
     expect(content).not.toContain("disable-model-invocation");
-    expect(content).not.toContain("shell:");
+  });
+
+  it("adds claude-specific frontmatter", () => {
+    const content = buildCommandFileContent("claude-code", "prd");
+
+    expect(content).toContain("disable-model-invocation: true");
+    expect(content).toContain("shell: powershell");
   });
 
   it("detects the shell from the platform", () => {
@@ -89,7 +99,7 @@ describe("agent install helpers", () => {
       "/home/tester/.config/opencode/commands/depot-dev.md",
     ]);
     for (const write of writes) {
-      expect(write.content).toContain("Run `depot context");
+      expect(write.content).toContain("!`depot context");
       expect(write.content).not.toContain("--ws");
     }
   });

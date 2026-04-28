@@ -57,7 +57,63 @@ export const createPrd = (input: {
         })
         .returning(),
     );
-    return rows[0]!;
+    const prd = rows[0]!;
+    yield* logActivity({
+      projectId: prd.projectId,
+      prdId: prd.id,
+      eventType: "prd_created",
+      payload: { prdId: prd.id, title: prd.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return prd;
+  });
+
+export const updatePrd = (
+  id: string,
+  changes: {
+    title?: string;
+    context?: string | null;
+    scope?: string | null;
+  },
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const prd = yield* getPrd(id);
+    if (!prd) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    if (prd.status !== "draft") {
+      return yield* Effect.fail(new PrdNotDraftError({ id, status: prd.status }));
+    }
+
+    const fields = [
+      changes.title !== undefined ? "title" : null,
+      changes.context !== undefined ? "context" : null,
+      changes.scope !== undefined ? "scope" : null,
+    ].filter((field): field is string => field !== null);
+
+    if (fields.length === 0) {
+      return yield* Effect.fail(new DatabaseError({ cause: new Error("No PRD changes provided") }));
+    }
+
+    const rows = yield* dbQuery(() =>
+      db
+        .update(prds)
+        .set({
+          title: changes.title ?? prd.title,
+          context: changes.context !== undefined ? changes.context : prd.context,
+          scope: changes.scope !== undefined ? changes.scope : prd.scope,
+        })
+        .where(eq(prds.id, id))
+        .returning(),
+    );
+
+    const updated = rows[0]!;
+    yield* logActivity({
+      projectId: updated.projectId,
+      workspaceId: updated.workspaceId ?? undefined,
+      prdId: updated.id,
+      eventType: "prd_updated",
+      payload: { prdId: updated.id, title: updated.title, fields },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return updated;
   });
 
 export const getPrd = (id: string) =>

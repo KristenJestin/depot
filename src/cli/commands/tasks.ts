@@ -188,6 +188,68 @@ const showCommand = command({
   },
 });
 
+const updateCommand = command({
+  meta: { name: "update", description: "Update task fields in place" },
+  workspace: true,
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+    title: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      alias: "t",
+      description: "New task title",
+    },
+    desc: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "New task description",
+    },
+    criteria: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "New done criteria",
+    },
+    effort: {
+      schema: effortSchema,
+      alias: "e",
+      description: "New effort estimate (xs/s/m/l/xl)",
+    },
+  },
+  run: async ({ args, output }) => {
+    const task = await runEffect(DomainTasks.getTask(args.taskId));
+    if (!task) return output.error("not_found", `Task not found: ${args.taskId}`);
+
+    if (
+      args.title === undefined &&
+      args.desc === undefined &&
+      args.criteria === undefined &&
+      args.effort === undefined
+    ) {
+      return output.error(
+        "no_changes",
+        "No changes provided. Use --title, --desc, --criteria, or --effort.",
+      );
+    }
+
+    const updated = await runEffect(
+      DomainTasks.updateTask(task.id, {
+        title: args.title,
+        description: args.desc,
+        doneCriteria: args.criteria,
+        effort: args.effort,
+      }),
+    );
+
+    if (output.isJson()) {
+      output.success({ item: serializeTask(updated) });
+    } else {
+      output.print(`Updated task '${updated.title}' (${updated.id}) [${updated.status}]`);
+    }
+  },
+});
+
 const startCommand = command({
   meta: { name: "start", description: "Start a pending task" },
   workspace: true,
@@ -307,6 +369,7 @@ export const taskCommand = command({
     add: addCommand,
     list: listCommand,
     show: showCommand,
+    update: updateCommand,
     start: startCommand,
     done: doneCommand,
     block: blockCommand,

@@ -5,6 +5,9 @@ import {
   ChevronRightIcon,
   ArchiveIcon,
   CopyIcon,
+  BotIcon,
+  UserIcon,
+  FlagIcon,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import {
@@ -67,20 +70,6 @@ function PrdDetailPage() {
   }, [tasks]);
   const doneTasks = tasksByStatus.done + tasksByStatus.skipped;
   const pct = tasks.length ? Math.round((tasksByStatus.done / tasks.length) * 100) : 0;
-
-  // Open findings across all reviews (status != "done" && != "skipped")
-  const allFindings = useMemo(() => reviews.flatMap((r) => r.findings), [reviews]);
-  const openFindings = useMemo(
-    () => allFindings.filter((f) => f.status !== "done" && f.status !== "skipped"),
-    [allFindings],
-  );
-  const openBySeverity = useMemo(() => {
-    const counts = { critical: 0, major: 0, minor: 0, info: 0 };
-    for (const f of openFindings) {
-      if (f.severity !== null && f.severity in counts) counts[f.severity as keyof typeof counts]++;
-    }
-    return counts;
-  }, [openFindings]);
 
   // Revisions
   const latestRevision = revisions[revisions.length - 1];
@@ -165,7 +154,7 @@ function PrdDetailPage() {
         </div>
 
         {/* ── Stats bar ─────────────────────────────────────────────────────── */}
-        <div className="px-6 md:px-10 pb-6 grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="px-6 md:px-10 pb-6 grid grid-cols-2 xl:grid-cols-3 gap-4">
           {/* Overall progress */}
           <div className="bg-card border border-border rounded-xl p-4 space-y-3">
             <p className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
@@ -219,48 +208,6 @@ function PrdDetailPage() {
                   </div>
                 </div>
               </>
-            )}
-          </div>
-
-          {/* Open findings */}
-          <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-              Open findings
-            </p>
-            <p className="text-3xl font-bold">
-              {openFindings.length > 0 ? openFindings.length : "—"}
-            </p>
-            {openFindings.length > 0 && (
-              <div className="space-y-0.5">
-                {openBySeverity.critical > 0 && (
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-destructive shrink-0" />
-                    <span className="text-destructive font-medium">{openBySeverity.critical}</span>
-                    <span className="text-muted-foreground">critical</span>
-                  </div>
-                )}
-                {openBySeverity.major > 0 && (
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-chart-4 shrink-0" />
-                    <span className="text-chart-4 font-medium">{openBySeverity.major}</span>
-                    <span className="text-muted-foreground">major</span>
-                  </div>
-                )}
-                {openBySeverity.minor > 0 && (
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-chart-3 shrink-0" />
-                    <span className="text-chart-3 font-medium">{openBySeverity.minor}</span>
-                    <span className="text-muted-foreground">minor</span>
-                  </div>
-                )}
-                {openBySeverity.info > 0 && (
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground font-medium">{openBySeverity.info}</span>
-                    <span className="text-muted-foreground">info</span>
-                  </div>
-                )}
-              </div>
             )}
           </div>
 
@@ -443,10 +390,16 @@ function OverviewTab({
               <div key={review.id} className="relative flex gap-4 pb-6">
                 <div
                   className={cn(
-                    "shrink-0 size-6 rounded-full ring-2 ring-background z-10 flex items-center justify-center",
+                    "shrink-0 size-5 rounded-full ring-2 ring-background z-10 flex items-center justify-center",
                     review.type === "agent" ? "bg-chart-1" : "bg-chart-2",
                   )}
-                />
+                >
+                  {review.type === "agent" ? (
+                    <BotIcon className="size-3 text-white" />
+                  ) : (
+                    <UserIcon className="size-3 text-white" />
+                  )}
+                </div>
                 <div className="flex-1 min-w-0 space-y-1">
                   <p className="text-xs text-muted-foreground">{relativeDate(review.createdAt)}</p>
                   <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -501,7 +454,9 @@ function OverviewTab({
 
           {/* PRD created node — always last */}
           <div className="relative flex gap-4 pb-6">
-            <div className="shrink-0 size-6 rounded-full bg-muted-foreground/60 ring-2 ring-background z-10" />
+            <div className="shrink-0 size-5 rounded-full bg-muted-foreground/60 ring-2 ring-background z-10 flex items-center justify-center">
+              <FlagIcon className="size-3 text-white" />
+            </div>
             <div className="flex-1 min-w-0 space-y-1">
               <p className="text-xs text-muted-foreground">{relativeDate(prd.createdAt)}</p>
               <div className="bg-card border border-border rounded-xl p-4">

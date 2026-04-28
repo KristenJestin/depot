@@ -35,6 +35,67 @@ const startCommand = command({
   },
 });
 
+const beginCommand = command({
+  meta: { name: "begin", description: "Validate a review draft and move it to in_progress" },
+  workspace: true,
+  args: {
+    reviewId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Review ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const review = await runEffect(
+      DomainReviews.startReview(args.reviewId).pipe(
+        Effect.catchTag("ReviewNotFoundError", () => Effect.succeed(null)),
+      ),
+    );
+    if (!review) return output.error("not_found", `Review not found: ${args.reviewId}`);
+    if (output.isJson()) {
+      output.success({ item: review });
+    } else {
+      output.print(`Started review ${review.id} [in_progress]`);
+    }
+  },
+});
+
+const updateCommand = command({
+  meta: { name: "update", description: "Update review metadata" },
+  workspace: true,
+  args: {
+    reviewId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Review ID",
+    },
+    feedback: {
+      schema: Schema.String,
+      description: "User feedback or review summary",
+    },
+  },
+  run: async ({ args, output }) => {
+    const review = await runEffect(DomainReviews.getReview(args.reviewId));
+    if (!review) return output.error("not_found", `Review not found: ${args.reviewId}`);
+
+    if (args.feedback === undefined) {
+      return output.error("no_changes", "No changes provided. Use --feedback.");
+    }
+
+    const updated = await runEffect(
+      DomainReviews.updateReview(review.id, { userFeedback: args.feedback }),
+    );
+
+    if (output.isJson()) {
+      output.success({ item: updated });
+    } else {
+      output.print(`Updated review ${updated.id} [${updated.status}]`);
+    }
+  },
+});
+
 const taskAddCommand = command({
   meta: { name: "add", description: "Add a task to a review" },
   workspace: true,
@@ -254,6 +315,8 @@ export const reviewCommand = command({
   meta: { name: "review", description: "Review management" },
   subCommands: {
     start: startCommand,
+    begin: beginCommand,
+    update: updateCommand,
     task: taskCommand,
     done: doneCommand,
     show: showCommand,

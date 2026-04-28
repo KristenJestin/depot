@@ -64,7 +64,11 @@ export type SeverityLevel = (typeof VALID_SEVERITY_LEVELS)[number];
 
 export const VALID_EVENT_TYPES = [
   "session_start",
+  "prd_created",
+  "prd_updated",
   "task_started",
+  "task_created",
+  "task_updated",
   "task_done",
   "task_blocked",
   "task_skipped",
@@ -73,6 +77,10 @@ export const VALID_EVENT_TYPES = [
   "prd_done",
   "prd_canceled",
   "prd_forked",
+  "review_created",
+  "review_updated",
+  "review_started",
+  "review_done",
   "note",
   "error",
 ] as const;

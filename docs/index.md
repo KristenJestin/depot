@@ -38,7 +38,7 @@ Today, the application supports:
 - running human or agent review loops with `depot review ...`
 - recording structured activity with `depot log ...`
 - rendering live agent context with `depot context`
-- installing slash-command files for OpenCode and Claude Code with `depot install`
+- installing slash-command files for OpenCode and Claude Code with injected live context via `depot install`
 - serving a small web UI and JSON API with `depot serve`
 
 ## Core Model

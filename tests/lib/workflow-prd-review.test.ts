@@ -10,6 +10,7 @@ import {
   getPrd,
   listPrds,
   markPrdReady,
+  updatePrd,
   donePrd,
   forkPrd,
   listPrdFamily,
@@ -17,9 +18,11 @@ import {
   getReview,
   listReviews,
   startReview,
+  updateReview,
   doneReview,
   addReviewTask,
   listReviewTasks,
+  updateTask,
 } from "#/lib/workflow";
 
 let db: Database;
@@ -51,6 +54,24 @@ describe("PRD workflow", () => {
     const ready = await markPrdReady(db, prd.id);
     expect(ready.status).toBe("ready");
     expect(ready.readyAt).toBeTruthy();
+  });
+
+  it("updates a draft PRD in place", async () => {
+    const prd = await createPrd(db, { projectId, title: "PRD" });
+    const updated = await updatePrd(db, prd.id, {
+      title: "Updated PRD",
+      context: "new context",
+    });
+
+    expect(updated.title).toBe("Updated PRD");
+    expect(updated.context).toBe("new context");
+  });
+
+  it("rejects updatePrd on non-draft PRD", async () => {
+    const prd = await createPrd(db, { projectId, title: "PRD" });
+    await db.update(prds).set({ status: "ready" }).where(eq(prds.id, prd.id));
+
+    await expect(updatePrd(db, prd.id, { title: "Updated" })).rejects.toThrow(/only draft PRDs/i);
   });
 
   it("rejects markPrdReady on non-draft PRD", async () => {
@@ -145,6 +166,14 @@ describe("review workflow", () => {
     expect(started.status).toBe("in_progress");
   });
 
+  it("updates review feedback in draft", async () => {
+    const review = await createReview(db, { prdId, type: "human" });
+    const updated = await updateReview(db, review.id, { userFeedback: "Need smaller scope" });
+
+    expect(updated.userFeedback).toBe("Need smaller scope");
+    expect(updated.status).toBe("draft");
+  });
+
   it("rejects startReview on non-draft review", async () => {
     const review = await createReview(db, { prdId, type: "agent" });
     await startReview(db, review.id);
@@ -178,6 +207,39 @@ describe("review workflow", () => {
     expect(task.severity).toBe("major");
     expect(task.prdId).toBe(prdId);
     expect(task.status).toBe("pending");
+    const reviewAfter = await getReview(db, review.id);
+    expect(reviewAfter!.status).toBe("draft");
+  });
+
+  it("updates a review task in place", async () => {
+    const review = await createReview(db, { prdId, type: "agent" });
+    const task = await addReviewTask(db, review.id, {
+      title: "Fix missing validation",
+      description: "Input is not validated",
+      doneCriteria: "Validation added and tested",
+      severity: "major",
+    });
+
+    const updated = await updateTask(db, task.id, {
+      description:
+        "Intent:\nHarden validation.\n\nScope:\n- Validate agent input.\n\nNon-goals:\n- Do not change output format.",
+      doneCriteria: "Validation rejects invalid input",
+    });
+
+    expect(updated.description).toContain("Intent:");
+    expect(updated.doneCriteria).toBe("Validation rejects invalid input");
+  });
+
+  it("does not allow doneReview on draft review with findings", async () => {
+    const review = await createReview(db, { prdId, type: "agent" });
+    await addReviewTask(db, review.id, {
+      title: "Fix missing validation",
+      description: "Input is not validated",
+      doneCriteria: "Validation added and tested",
+      severity: "major",
+    });
+
+    await expect(doneReview(db, review.id)).rejects.toThrow(/validate it first/i);
   });
 
   it("adds a task to a review without severity", async () => {

@@ -66,10 +66,12 @@ export async function resolveInstallTargets(
   return detectedTargets;
 }
 
-export function buildCommandFileContent(_target: InstallTarget, mode: InstallMode): string {
+export function buildCommandFileContent(target: InstallTarget, mode: InstallMode): string {
   const description = `Inject the live depot ${mode} context for the current workspace`;
-  const body = `Run \`depot context ${mode}\` using your bash tool and use the output as your working context for this session.`;
-  return [`---`, `description: ${description}`, `---`, body, ""].join("\n");
+  const header = buildCommandHeader(target, description);
+  const body = mode === "prd" ? buildPrdCommandBody(target) : buildDevCommandBody(target);
+
+  return [header, body, ""].join("\n");
 }
 
 export function detectCommandShell(platform: NodeJS.Platform = process.platform): CommandShell {
@@ -119,4 +121,49 @@ function getHomeDirectory(): string {
   }
 
   return homeDir;
+}
+
+function buildCommandHeader(target: InstallTarget, description: string): string {
+  const lines = ["---", `description: ${description}`];
+
+  if (target === "claude-code") {
+    lines.push("disable-model-invocation: true", "shell: powershell");
+  }
+
+  lines.push("---");
+  return lines.join("\n");
+}
+
+function buildPrdCommandBody(target: InstallTarget): string {
+  const contextBlock = buildContextInjection(target, "prd");
+
+  return [
+    "Use the injected depot PRD context below as the working context for this session.",
+    "",
+    "The command output has already been injected into this prompt. Do not rerun `depot context prd` unless the user explicitly asks for a refresh.",
+    "",
+    "## Injected Context",
+    contextBlock,
+  ].join("\n");
+}
+
+function buildDevCommandBody(target: InstallTarget): string {
+  const contextBlock = buildContextInjection(target, "dev");
+
+  return [
+    "Use the injected depot dev context below as the working context for this session.",
+    "",
+    "The command output has already been injected into this prompt. Do not rerun `depot context dev` unless the user explicitly asks for a refresh.",
+    "",
+    "## Injected Context",
+    contextBlock,
+  ].join("\n");
+}
+
+function buildContextInjection(target: InstallTarget, mode: InstallMode): string {
+  if (target === "opencode") {
+    return `!\`depot context ${mode}\``;
+  }
+
+  return `!\`depot context ${mode}\``;
 }

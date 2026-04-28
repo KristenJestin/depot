@@ -128,6 +128,14 @@ export function markPrdReady(db: Database, id: string) {
   return runWithDb(db, DomainPrds.markPrdReady(id));
 }
 
+export function updatePrd(
+  db: Database,
+  id: string,
+  changes: { title?: string; context?: string | null; scope?: string | null },
+) {
+  return runWithDb(db, DomainPrds.updatePrd(id, changes));
+}
+
 export function donePrd(db: Database, id: string) {
   return runWithDb(db, DomainPrds.donePrd(id));
 }
@@ -158,6 +166,14 @@ export function createTask(
   },
 ) {
   return runWithDb(db, DomainTasks.createTask(input));
+}
+
+export function updateTask(
+  db: Database,
+  id: string,
+  changes: { title?: string; description?: string; doneCriteria?: string; effort?: Effort },
+) {
+  return runWithDb(db, DomainTasks.updateTask(id, changes));
 }
 
 export function getTask(db: Database, id: string) {
@@ -229,6 +245,10 @@ export function listReviews(db: Database, prdId: string) {
 
 export function startReview(db: Database, id: string) {
   return runWithDb(db, DomainReviews.startReview(id));
+}
+
+export function updateReview(db: Database, id: string, changes: { userFeedback?: string | null }) {
+  return runWithDb(db, DomainReviews.updateReview(id, changes));
 }
 
 export function doneReview(db: Database, id: string) {

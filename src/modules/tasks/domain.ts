@@ -73,7 +73,90 @@ export const createTask = (input: {
         })
         .returning(),
     );
-    return rows[0]!;
+    const task = rows[0]!;
+    const prd = yield* getPrd(task.prdId);
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdId: prd.id,
+        taskId: task.id,
+        eventType: "task_created",
+        payload: { taskId: task.id, title: task.title, kind: "prd" },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return task;
+  });
+
+export const updateTask = (
+  id: string,
+  changes: {
+    title?: string;
+    description?: string;
+    doneCriteria?: string;
+    effort?: Effort;
+  },
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const task = yield* getTask(id);
+    if (!task) return yield* Effect.fail(new TaskNotFoundError({ id }));
+
+    const fields = [
+      changes.title !== undefined ? "title" : null,
+      changes.description !== undefined ? "description" : null,
+      changes.doneCriteria !== undefined ? "doneCriteria" : null,
+      changes.effort !== undefined ? "effort" : null,
+    ].filter((field): field is string => field !== null);
+
+    if (fields.length === 0) {
+      return yield* Effect.fail(new ValidationError({ reason: "No task changes provided" }));
+    }
+
+    if (changes.doneCriteria !== undefined && changes.doneCriteria.trim() === "") {
+      return yield* Effect.fail(
+        new ValidationError({ reason: "Task must have non-empty done_criteria" }),
+      );
+    }
+
+    const storedDescription =
+      changes.description !== undefined
+        ? normalizeTaskDescriptionForStorage(changes.description)
+        : null;
+
+    const rows = yield* dbQuery(() =>
+      db
+        .update(tasks)
+        .set({
+          title: changes.title ?? task.title,
+          description: storedDescription?.description ?? task.description,
+          descriptionFormat: storedDescription?.descriptionFormat ?? task.descriptionFormat,
+          doneCriteria: changes.doneCriteria ?? task.doneCriteria,
+          effort: changes.effort ?? task.effort,
+        })
+        .where(eq(tasks.id, id))
+        .returning(),
+    );
+
+    const updated = rows[0]!;
+    const prd = yield* getPrd(updated.prdId);
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdId: prd.id,
+        taskId: updated.id,
+        eventType: "task_updated",
+        payload: {
+          taskId: updated.id,
+          title: updated.title,
+          fields,
+          kind: updated.reviewId ? "review" : "prd",
+        },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+
+    return updated;
   });
 
 export const getTask = (id: string) =>

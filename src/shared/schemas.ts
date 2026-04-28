@@ -181,9 +181,26 @@ export const eventTypeSchema = Schema.Literal(...VALID_EVENT_TYPES);
  */
 export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, never>> = {
   session_start: Schema.Struct({ context: Schema.optional(Schema.String) }),
+  prd_created: Schema.Struct({ prdId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_updated: Schema.Struct({
+    prdId: Schema.optional(Schema.String),
+    title: Schema.String,
+    fields: Schema.Array(Schema.String),
+  }),
   // taskId and prdId are optional to preserve CLI compatibility: `depot log add` callers
   // do not supply these fields when logging manually via the CLI.
   task_started: Schema.Struct({ taskId: Schema.optional(Schema.String), title: Schema.String }),
+  task_created: Schema.Struct({
+    taskId: Schema.optional(Schema.String),
+    title: Schema.String,
+    kind: Schema.optional(Schema.String),
+  }),
+  task_updated: Schema.Struct({
+    taskId: Schema.optional(Schema.String),
+    title: Schema.String,
+    fields: Schema.Array(Schema.String),
+    kind: Schema.optional(Schema.String),
+  }),
   task_done: Schema.Struct({ taskId: Schema.optional(Schema.String), title: Schema.String }),
   task_blocked: Schema.Struct({
     taskId: Schema.optional(Schema.String),
@@ -204,6 +221,18 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     newPrdId: Schema.String,
     revision: Schema.Number,
   }),
+  review_created: Schema.Struct({
+    reviewId: Schema.String,
+    prdId: Schema.optional(Schema.String),
+    type: Schema.String,
+  }),
+  review_updated: Schema.Struct({
+    reviewId: Schema.String,
+    prdId: Schema.optional(Schema.String),
+    fields: Schema.Array(Schema.String),
+  }),
+  review_started: Schema.Struct({ reviewId: Schema.String, prdId: Schema.optional(Schema.String) }),
+  review_done: Schema.Struct({ reviewId: Schema.String, prdId: Schema.optional(Schema.String) }),
   note: Schema.Struct({ message: Schema.String }),
   error: Schema.Struct({ message: Schema.String, details: Schema.optional(Schema.String) }),
 };

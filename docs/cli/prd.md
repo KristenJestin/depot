@@ -63,6 +63,18 @@ depot prd show <prd-id>
 
 Prints aligned key-value fields for ID, Title, Status, Revision, Root, Context, Scope, Parent, Created, Ready, and Activated.
 
+## `depot prd update`
+
+Update a draft PRD in place.
+
+### Usage
+
+```bash
+depot prd update <prd-id> [--title <text>] [--context <text>] [--scope <text>]
+```
+
+Only `draft` PRDs can be updated in place. To revise a `ready` PRD, fork it first.
+
 ## `depot prd ready`
 
 Mark a draft PRD as ready for execution.

@@ -1,13 +1,6 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import {
-  CheckCircle2Icon,
-  ChevronRightIcon,
-  FileTextIcon,
-  Loader2Icon,
-  PenLineIcon,
-  SearchIcon,
-} from "lucide-react";
+import { ChevronRightIcon, SearchIcon } from "lucide-react";
 
 import { prdsQuery } from "../lib/queries";
 import { relativeDate } from "../lib/format";
@@ -15,6 +8,7 @@ import { DotLoader } from "../components/ui/dot-loader";
 import { EmptyState } from "../components/ui/empty-state";
 import { Input } from "../components/ui/input";
 import { StatusBadge } from "../components/ui/status-badge";
+import { StatCard } from "../components/ui/stat-card";
 import {
   Table,
   TableBody,
@@ -23,7 +17,6 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { MetricCard } from "../components/metric-card";
 import { PageHeader } from "../components/page-header";
 
 export const Route = createFileRoute("/")({
@@ -67,25 +60,37 @@ function RouteComponent() {
       <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
         <PageHeader title="Project Overview" />
 
-        {/* Metric cards */}
+        {/* Stat cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <MetricCard icon={<FileTextIcon />} label="Total PRDs" value={total}>
+          <StatCard
+            label="Total PRDs"
+            value={<span className="text-3xl font-bold tabular-nums">{total}</span>}
+          >
             <span className="text-xs text-muted-foreground">{inProgressCount} in progress</span>
-          </MetricCard>
+          </StatCard>
 
-          <MetricCard icon={<Loader2Icon />} label="In Progress" value={inProgressCount}>
+          <StatCard
+            label="In Progress"
+            value={<span className="text-3xl font-bold tabular-nums">{inProgressCount}</span>}
+          >
             <span className="text-xs text-muted-foreground">
               {inProgressCount === 0 ? "No active PRDs" : "Active PRDs"}
             </span>
-          </MetricCard>
+          </StatCard>
 
-          <MetricCard icon={<CheckCircle2Icon />} label="Completed" value={doneCount}>
-            <span className="text-xs text-success font-medium">{doneCount} completed</span>
-          </MetricCard>
+          <StatCard
+            label="Completed"
+            value={<span className="text-3xl font-bold tabular-nums">{doneCount}</span>}
+          >
+            <span className="text-xs text-success font-medium">PRDs shipped</span>
+          </StatCard>
 
-          <MetricCard icon={<PenLineIcon />} label="Drafts" value={draftCount}>
+          <StatCard
+            label="Drafts"
+            value={<span className="text-3xl font-bold tabular-nums">{draftCount}</span>}
+          >
             <span className="text-xs text-muted-foreground">In preparation</span>
-          </MetricCard>
+          </StatCard>
         </div>
 
         {/* PRD table */}

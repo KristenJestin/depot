@@ -7,7 +7,7 @@ Reviews are containers for finding tasks. Findings are stored as tasks with a `r
 ## Status Model
 
 - `draft`: review created, findings not fully recorded yet
-- `in_progress`: findings exist and follow-up work is active
+- `in_progress`: review draft validated and follow-up work is active
 - `done`: the review is closed
 
 ## Types
@@ -27,6 +27,18 @@ depot review start <prd-id> --type <human|agent>
 
 Creates the review in `draft` status.
 
+## `depot review begin`
+
+Validate a review draft and move it to `in_progress`.
+
+### Usage
+
+```bash
+depot review begin <review-id>
+```
+
+Use this when the review is fully specified and ready to drive the next coder pass.
+
 ## `depot review task add`
 
 Add a task to a review.
@@ -39,7 +51,7 @@ depot review task add <review-id> --title <str> --description <str> --doneCriter
 
 ### Notes
 
-- adding the first task automatically moves the review from `draft` to `in_progress`
+- adding tasks no longer auto-validates the review
 - review tasks are stored in the main `tasks` table with `reviewId` set
 - the default effort for review tasks is `s` when not otherwise specified in code
 
@@ -65,7 +77,7 @@ The transition table allows:
 - `draft -> done`
 - `in_progress -> done`
 
-That means an empty review can be closed without adding findings.
+An empty draft review can be closed directly. A draft review that already contains findings must be validated first with `depot review begin` before it can be closed.
 
 ## `depot review show`
 

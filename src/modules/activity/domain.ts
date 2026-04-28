@@ -178,6 +178,18 @@ export function summarizeActivityPayload(
       return String(payload.message ?? "");
     case "session_start":
       return String(payload.context ?? "New session");
+    case "prd_created":
+      return String(payload.title ?? "");
+    case "prd_updated":
+      return [String(payload.title ?? ""), formatFieldList(payload.fields)]
+        .filter(Boolean)
+        .join(" — ");
+    case "task_created":
+      return [String(payload.title ?? ""), String(payload.kind ?? "")].filter(Boolean).join(" — ");
+    case "task_updated":
+      return [String(payload.title ?? ""), formatFieldList(payload.fields)]
+        .filter(Boolean)
+        .join(" — ");
     case "task_started":
     case "task_done":
       return String(payload.title ?? "");
@@ -193,9 +205,24 @@ export function summarizeActivityPayload(
       return String(payload.title ?? "");
     case "prd_forked":
       return `${String(payload.sourcePrdId ?? "")} → ${String(payload.newPrdId ?? "")} (rev ${String(payload.revision ?? "")})`;
+    case "review_created":
+      return `${String(payload.reviewId ?? "")} [${String(payload.type ?? "")}]`;
+    case "review_updated":
+      return `${String(payload.reviewId ?? "")} — ${formatFieldList(payload.fields)}`;
+    case "review_started":
+    case "review_done":
+      return String(payload.reviewId ?? "");
     case "error":
       return String(payload.message ?? "");
     default:
       return JSON.stringify(payload);
   }
+}
+
+function formatFieldList(fields: unknown): string {
+  if (!Array.isArray(fields) || fields.length === 0) {
+    return "";
+  }
+
+  return `updated ${fields.map((field) => String(field)).join(", ")}`;
 }

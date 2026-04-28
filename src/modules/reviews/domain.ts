@@ -13,6 +13,7 @@ import { Db } from "#/services/database";
 import { InvalidTransitionError, ValidationError } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
+import { logActivity } from "#/modules/activity/domain";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -81,7 +82,18 @@ export const createReview = (input: { prdId: string; type: ReviewType }) =>
         })
         .returning(),
     );
-    return rows[0]!;
+    const review = rows[0]!;
+    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: input.prdId } }));
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdId: prd.id,
+        eventType: "review_created",
+        payload: { reviewId: review.id, prdId: prd.id, type: review.type },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return review;
   });
 
 export const getReview = (id: string) =>
@@ -123,7 +135,63 @@ export const startReview = (id: string) =>
     const rows = yield* dbQuery(() =>
       db.update(reviews).set({ status: "in_progress" }).where(eq(reviews.id, id)).returning(),
     );
-    return rows[0]!;
+    const started = rows[0]!;
+    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: started.prdId } }));
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdId: prd.id,
+        eventType: "review_started",
+        payload: { reviewId: started.id, prdId: prd.id },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return started;
+  });
+
+export const updateReview = (
+  id: string,
+  changes: {
+    userFeedback?: string | null;
+  },
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const review = yield* getReview(id);
+    if (!review) return yield* Effect.fail(new ReviewNotFoundError({ id }));
+
+    const fields = [changes.userFeedback !== undefined ? "userFeedback" : null].filter(
+      (field): field is string => field !== null,
+    );
+
+    if (fields.length === 0) {
+      return yield* Effect.fail(new ValidationError({ reason: "No review changes provided" }));
+    }
+
+    const rows = yield* dbQuery(() =>
+      db
+        .update(reviews)
+        .set({
+          userFeedback:
+            changes.userFeedback !== undefined ? changes.userFeedback : review.userFeedback,
+        })
+        .where(eq(reviews.id, id))
+        .returning(),
+    );
+
+    const updated = rows[0]!;
+    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: updated.prdId } }));
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdId: prd.id,
+        eventType: "review_updated",
+        payload: { reviewId: updated.id, prdId: prd.id, fields },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+
+    return updated;
   });
 
 export const doneReview = (id: string) =>
@@ -131,6 +199,19 @@ export const doneReview = (id: string) =>
     const db = yield* Db;
     const review = yield* getReview(id);
     if (!review) return yield* Effect.fail(new ReviewNotFoundError({ id }));
+
+    if (review.status === "draft") {
+      const existingTasks = yield* listReviewTasks(id);
+      if (existingTasks.length > 0) {
+        return yield* Effect.fail(
+          new ValidationError({
+            reason:
+              "Cannot mark a draft review as done after adding findings. Validate it first with `depot review begin <review-id>`.",
+          }),
+        );
+      }
+    }
+
     yield* checkReviewTransition(review.status, "done");
     const rows = yield* dbQuery(() =>
       db
@@ -144,7 +225,18 @@ export const doneReview = (id: string) =>
         db.update(prds).set({ auditCycles: 0 }).where(eq(prds.id, review.prdId)),
       );
     }
-    return rows[0]!;
+    const done = rows[0]!;
+    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: done.prdId } }));
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdId: prd.id,
+        eventType: "review_done",
+        payload: { reviewId: done.id, prdId: prd.id },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return done;
   });
 
 export const addReviewTask = (
@@ -168,17 +260,12 @@ export const addReviewTask = (
     const review = yield* getReview(reviewId);
     if (!review) return yield* Effect.fail(new ReviewNotFoundError({ id: reviewId }));
 
-    // Auto-transition draft → in_progress when the first task is added
-    if (review.status === "draft") {
-      yield* dbQuery(() =>
-        db.update(reviews).set({ status: "in_progress" }).where(eq(reviews.id, reviewId)),
-      );
-    } else if (review.status !== "in_progress") {
+    if (review.status !== "draft" && review.status !== "in_progress") {
       return yield* Effect.fail(
         new InvalidTransitionError({
           entity: "review",
           from: review.status,
-          to: "in_progress",
+          to: "draft|in_progress",
           allowed: [],
         }),
       );
@@ -215,7 +302,19 @@ export const addReviewTask = (
         })
         .returning(),
     );
-    return rows[0]!;
+    const task = rows[0]!;
+    const prd = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: prdId } }));
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdId: prd.id,
+        taskId: task.id,
+        eventType: "task_created",
+        payload: { taskId: task.id, title: task.title, kind: "review" },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return task;
   });
 
 export const listReviewTasks = (reviewId: string) =>
@@ -243,16 +342,12 @@ export const addReviewTaskBatch = (
     const review = yield* getReview(reviewId);
     if (!review) return yield* Effect.fail(new ReviewNotFoundError({ id: reviewId }));
 
-    if (review.status === "draft") {
-      yield* dbQuery(() =>
-        db.update(reviews).set({ status: "in_progress" }).where(eq(reviews.id, reviewId)),
-      );
-    } else if (review.status !== "in_progress") {
+    if (review.status !== "draft" && review.status !== "in_progress") {
       return yield* Effect.fail(
         new InvalidTransitionError({
           entity: "review",
           from: review.status,
-          to: "in_progress",
+          to: "draft|in_progress",
           allowed: [],
         }),
       );

@@ -62,6 +62,7 @@ The validator allows these status transitions:
 Key behaviors:
 
 - `depot prd create` creates a draft PRD.
+- `depot prd update` updates a draft PRD in place.
 - `depot prd ready` marks a draft PRD as ready.
 - `depot prd activate` moves a ready PRD to `in_progress` and attaches it to the current workspace.
 - only one PRD can be `in_progress` in a workspace at a time
@@ -162,7 +163,8 @@ Findings are not stored as separate blobs. They are stored as tasks with `review
 Important behaviors:
 
 - `depot review start` creates a review in `draft`
-- adding the first review task automatically moves the review to `in_progress`
+- findings can be added while the review stays in `draft`
+- `depot review begin` validates the review draft and moves it to `in_progress`
 - `depot review done` can close either an `in_progress` review or an empty `draft` review
 
 The schema also includes a `userFeedback` field for human context, but the CLI does not yet expose a direct write path for it.
@@ -174,6 +176,10 @@ The activity log stores structured events tied to the current project and, optio
 Current event types are:
 
 - `session_start`
+- `prd_created`
+- `prd_updated`
+- `task_created`
+- `task_updated`
 - `task_started`
 - `task_done`
 - `task_blocked`
@@ -183,6 +189,10 @@ Current event types are:
 - `prd_done`
 - `prd_canceled`
 - `prd_forked`
+- `review_created`
+- `review_updated`
+- `review_started`
+- `review_done`
 - `note`
 - `error`
 

@@ -1,6 +1,7 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
 import { tasksQuery } from "../lib/queries";
+import { relativeDate } from "../lib/format";
 import { StatusBadge } from "../components/ui/status-badge";
 import { Terminal, TerminalLine } from "../components/ui/terminal";
 import { FileChangeList } from "../components/file-change-list";
@@ -56,58 +57,102 @@ function TaskDetailPage() {
           </BreadcrumbList>
         </Breadcrumb>
 
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <StatusBadge status={task.status} />
-              <span className="font-mono text-sm text-muted-foreground bg-secondary border border-border px-2 py-0.5 rounded">
-                {task.effort}
-              </span>
-            </div>
+        {/* Header */}
+        <div className="space-y-2">
+          <div className="flex items-start gap-3">
             <h1 className="text-3xl font-bold tracking-tight">{task.title}</h1>
+            <StatusBadge status={task.status} />
           </div>
+          <p className="text-sm text-muted-foreground">
+            #{task.position}
+            {" · "}
+            <span className="font-mono text-xs bg-secondary border border-border px-2 py-0.5 rounded">
+              {task.effort}
+            </span>
+            {" · "}
+            <Link to="/prds/$id" params={{ id: prd.id }} className="text-primary hover:underline">
+              {prd.title}
+            </Link>
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left — terminal activity + file changes */}
-          <div className="lg:col-span-2 space-y-6">
-            <Terminal
-              label={`task #${task.position} — ${activity.lines.length > 0 ? "activity" : "context"}`}
-              height="max-h-[30rem]"
-            >
-              {activity.lines.length > 0 ? (
-                activity.lines.map((line, i) => (
-                  <TerminalLine key={i} variant={line.type === "command" ? "command" : "default"}>
-                    {line.text || "\u00a0"}
+        {/* Overview */}
+        <div className="space-y-6">
+          <p className="text-xs uppercase tracking-wider text-muted-foreground">Overview</p>
+          <TaskDetail task={task} />
+          {task.blockedReason && (
+            <div className="bg-card border border-destructive/30 rounded-xl p-5">
+              <h4 className="font-semibold text-sm mb-3 text-destructive">Blocked</h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">{task.blockedReason}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Activity */}
+        <div className="space-y-6">
+          <p className="text-xs uppercase tracking-wider text-muted-foreground">Activity</p>
+          <Terminal
+            label={`task #${task.position} — ${activity.lines.length > 0 ? "activity" : "context"}`}
+            height="max-h-[30rem]"
+          >
+            {activity.lines.length > 0 ? (
+              activity.lines.map((line, i) => (
+                <TerminalLine key={i} variant={line.type === "command" ? "command" : "default"}>
+                  {line.text || "\u00a0"}
+                </TerminalLine>
+              ))
+            ) : (
+              <>
+                <TerminalLine variant="muted">&gt; {task.description}</TerminalLine>
+                {task.status === "in_progress" && (
+                  <TerminalLine variant="command" className="animate-pulse">
+                    _
                   </TerminalLine>
-                ))
-              ) : (
-                <>
-                  <TerminalLine variant="muted">&gt; {task.description}</TerminalLine>
-                  {task.status === "in_progress" && (
-                    <TerminalLine variant="command" className="animate-pulse">
-                      _
-                    </TerminalLine>
-                  )}
-                </>
-              )}
-            </Terminal>
-
-            <FileChangeList files={activity.files} />
-          </div>
-
-          {/* Right — execution plan + blocked reason */}
-          <div className="space-y-6">
-            <TaskDetail task={task} />
-
-            {task.blockedReason && (
-              <div className="bg-card border border-destructive/30 rounded-xl p-5 shadow-sm">
-                <h4 className="font-semibold text-sm mb-3 text-destructive">Blocked</h4>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {task.blockedReason}
-                </p>
-              </div>
+                )}
+              </>
             )}
+          </Terminal>
+          {activity.files.length > 0 && <FileChangeList files={activity.files} />}
+        </div>
+
+        {/* Details */}
+        <div className="space-y-6">
+          <p className="text-xs uppercase tracking-wider text-muted-foreground">Details</p>
+          <div className="bg-card border border-border rounded-xl p-5 max-w-xl">
+            <div className="divide-y divide-border">
+              <div className="flex justify-between py-2 text-sm">
+                <span className="text-muted-foreground">Status</span>
+                <span className="font-medium">
+                  <StatusBadge status={task.status} />
+                </span>
+              </div>
+              <div className="flex justify-between py-2 text-sm">
+                <span className="text-muted-foreground">Effort</span>
+                <span className="font-mono text-xs font-medium">{task.effort}</span>
+              </div>
+              {task.severity != null && (
+                <div className="flex justify-between py-2 text-sm">
+                  <span className="text-muted-foreground">Severity</span>
+                  <span className="font-medium">{task.severity}</span>
+                </div>
+              )}
+              <div className="flex justify-between py-2 text-sm">
+                <span className="text-muted-foreground">Created</span>
+                <span className="font-medium">{relativeDate(task.createdAt)}</span>
+              </div>
+              <div className="flex justify-between py-2 text-sm">
+                <span className="text-muted-foreground">Started</span>
+                <span className="font-medium">
+                  {task.startedAt ? relativeDate(task.startedAt) : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between py-2 text-sm">
+                <span className="text-muted-foreground">Completed</span>
+                <span className="font-medium">
+                  {task.completedAt ? relativeDate(task.completedAt) : "—"}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

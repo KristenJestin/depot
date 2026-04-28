@@ -14,14 +14,15 @@ describe("context template registry", () => {
   it("returns embedded prd context content", () => {
     const content = getContextTemplate("prd");
     expect(content).toContain("Context: PRD Agent");
-    expect(content).toContain("Interview");
-    expect(content).toContain("Mark Ready");
+    expect(content).toContain("You own PRD authoring only");
+    expect(content).toContain("Keep A Draft Alive");
+    expect(content).toContain("Finish At Ready");
   });
 
   it("returns embedded dev context content", () => {
     const content = getContextTemplate("dev");
     expect(content).toContain("Context: Dev Orchestrator");
-    expect(content).toContain("depot context dev");
+    expect(content).toContain("depot prd activate");
     expect(content).toContain("depot context coder");
     expect(content).toContain("depot context auditor");
   });
@@ -31,8 +32,8 @@ describe("context template registry", () => {
     expect(content).toContain("Intent:");
     expect(content).toContain("Scope:");
     expect(content).toContain("Non-goals:");
-    expect(content).toContain("important execution ambiguity");
-    expect(content).toContain("Older tasks may remain as legacy freeform descriptions");
+    expect(content).toContain("do not leave execution ambiguity behind");
+    expect(content).toContain("The draft should evolve in real time");
   });
 
   it("throws on unknown context mode", () => {

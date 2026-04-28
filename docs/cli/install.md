@@ -28,13 +28,20 @@ Existing files are overwritten in place.
 
 ## Runtime Behavior
 
-The generated files do not embed static snapshots. They use native shell injection to call:
+The generated files are static slash-command files, but they inject live context output directly into the prompt body using the agent tool's native shell-injection syntax.
+
+They inject:
 
 - `depot context prd`
 - `depot context dev`
 
-That means the agent tool always loads fresh context from the `depot` binary on the `PATH` at invocation time.
+So the agent receives the rendered context itself, not an instruction telling it to run the command later.
 
-On Windows, the generated shell is `powershell`. On other platforms, it is `bash`.
+OpenCode uses markdown command files with a `description` field.
 
-The OpenCode format uses frontmatter with a `description` field. The Claude Code format adds `disable-model-invocation: true` and a `shell` field.
+Claude Code uses markdown command files with:
+
+- `disable-model-invocation: true`
+- `shell: powershell`
+
+This keeps the command file static while still embedding fresh depot state at invocation time.

@@ -103,10 +103,11 @@ depot task done <task-id>
 ```bash
 depot review start <prd-id> --type agent
 depot review task add <review-id> --title "Missing edge-case handling" --description "Handle the empty-state branch explicitly." --doneCriteria "Empty-state behavior is covered" --severity major
+depot review begin <review-id>
 depot review done <review-id>
 ```
 
-Adding the first review task automatically moves the review from `draft` to `in_progress`.
+Reviews now stay in `draft` while you are still collecting or refining findings. Use `depot review begin` once the review draft is validated and ready to drive the next implementation pass.
 
 ## Render Live Agent Context
 
@@ -126,7 +127,7 @@ depot context auditor <prd-id>
 depot install --all
 ```
 
-This writes `depot-prd.md` and `depot-dev.md` command files for supported agents. Those files call `depot context <mode>` at runtime, so they always load fresh state.
+This writes `depot-prd.md` and `depot-dev.md` command files for supported agents. Those files inject `depot context <mode>` output directly into the prompt, so the agent receives fresh depot state immediately.
 
 ## Start The Web UI
 
