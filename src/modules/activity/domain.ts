@@ -172,6 +172,17 @@ export const listActivityForTask = (taskId: string) =>
     );
   });
 
+export const listActivityForRevision = (prdRevisionId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    return yield* dbQuery(() =>
+      db.query.activityLog.findMany({
+        where: { prdRevisionId },
+        orderBy: { createdAt: "asc" },
+      }),
+    );
+  });
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 /**

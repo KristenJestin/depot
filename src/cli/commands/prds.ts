@@ -282,7 +282,11 @@ const forkCommand = command({
   run: async ({ args, output }) => {
     const forked = await runEffect(
       DomainPrds.forkPrd(args.prdId).pipe(
-        Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
+        Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null as null)),
+        Effect.catchTag("ValidationError", (e) => {
+          output.error("fork_not_allowed", e.message);
+          return Effect.succeed(null as null);
+        }),
       ),
     );
     if (!forked) return output.error("not_found", `PRD not found: ${args.prdId}`);

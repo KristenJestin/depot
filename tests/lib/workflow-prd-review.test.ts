@@ -106,7 +106,7 @@ describe("PRD workflow", () => {
 
   it("rejects forkPrd on non-ready PRD", async () => {
     const prd = await createPrd(db, { projectId, title: "PRD" });
-    await expect(forkPrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
+    await expect(forkPrd(db, prd.id)).rejects.toThrow(/cannot fork prd/i);
   });
 
   it("lists entire PRD family by rootId", async () => {

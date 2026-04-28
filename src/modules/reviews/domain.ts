@@ -405,8 +405,24 @@ export const addReviewTaskBatch = (
           })
           .returning(),
       );
-      createdTasks.push(rows[0]!);
+      const task = rows[0]!;
+      createdTasks.push(task);
       nextPosition++;
+
+      // Mirror the single-add path: emit a lifecycle entry for each created review task
+      const rev = yield* dbQuery(() =>
+        db.query.prdRevisions.findFirst({ where: { id: prdRevisionId } }),
+      );
+      if (rev) {
+        yield* logActivity({
+          projectId: rev.projectId,
+          workspaceId: rev.workspaceId ?? undefined,
+          prdRevisionId: rev.id,
+          taskId: task.id,
+          eventType: "task_created",
+          payload: { taskId: task.id, title: task.title, kind: "review" },
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      }
     }
 
     return createdTasks;

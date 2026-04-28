@@ -8,6 +8,16 @@ import {
   BotIcon,
   UserIcon,
   FlagIcon,
+  ZapIcon,
+  CheckCircleIcon,
+  CircleSlashIcon,
+  AlertCircleIcon,
+  GitForkIcon,
+  RefreshCwIcon,
+  PlayIcon,
+  SkipForwardIcon,
+  MessageSquareIcon,
+  ChevronsRightIcon,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import {
@@ -50,8 +60,7 @@ function PrdDetailPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
 
-  const { prd, tasks, reviews, revisions } = data;
-
+  const { prd, tasks, reviews, revisions, activity } = data;
   // Initialize accordion state: human reviews expanded, agent collapsed
   const [expandedReviews, setExpandedReviews] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(reviews.map((r) => [r.id, r.type === "human"])),
@@ -286,6 +295,7 @@ function PrdDetailPage() {
               prd={prd}
               reviews={reviews}
               revisions={revisions}
+              activity={activity}
               latestRevision={latestRevision}
               expandedReviews={expandedReviews}
               onToggleReview={toggleReview}
@@ -330,6 +340,7 @@ function OverviewTab({
   prd,
   reviews,
   revisions,
+  activity,
   latestRevision,
   expandedReviews,
   onToggleReview,
@@ -337,12 +348,16 @@ function OverviewTab({
   prd: ReturnType<typeof prdsQuery.detail.useSuspense>["data"]["prd"];
   reviews: PrdReview[];
   revisions: ReturnType<typeof prdsQuery.detail.useSuspense>["data"]["revisions"];
+  activity: ReturnType<typeof prdsQuery.detail.useSuspense>["data"]["activity"];
   latestRevision: (typeof revisions)[number] | undefined;
   expandedReviews: Record<string, boolean>;
   onToggleReview: (id: string) => void;
 }) {
-  // Reviews sorted newest first for timeline display
-  const timelineReviews = useMemo(() => [...reviews].reverse(), [reviews]);
+  // Build a review lookup for inline rendering in the activity timeline
+  const reviewById = useMemo(() => new Map(reviews.map((r) => [r.id, r])), [reviews]);
+
+  // Activity entries in reverse chronological order (newest first)
+  const timelineEntries = useMemo(() => [...activity].reverse(), [activity]);
 
   return (
     <div className="flex flex-col xl:flex-row gap-10 items-start">
@@ -382,92 +397,258 @@ function OverviewTab({
         <h4 className="text-sm font-semibold mb-5 text-muted-foreground uppercase tracking-wider">
           Lifecycle
         </h4>
-        <div className="relative space-y-0 before:absolute before:left-3 before:top-0 before:bottom-0 before:w-px before:bg-border">
-          {timelineReviews.map((review, idx) => {
-            const reviewNumber = reviews.length - idx;
-            const isExpanded = expandedReviews[review.id] ?? false;
-            return (
-              <div key={review.id} className="relative flex gap-4 pb-6">
-                <div
-                  className={cn(
-                    "shrink-0 size-5 rounded-full ring-2 ring-background z-10 flex items-center justify-center",
-                    review.type === "agent" ? "bg-chart-1" : "bg-chart-2",
-                  )}
-                >
-                  {review.type === "agent" ? (
-                    <BotIcon className="size-3 text-white" />
-                  ) : (
-                    <UserIcon className="size-3 text-white" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0 space-y-1">
-                  <p className="text-xs text-muted-foreground">{relativeDate(review.createdAt)}</p>
-                  <div className="bg-card border border-border rounded-xl overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => onToggleReview(review.id)}
-                      className="w-full flex items-center justify-between gap-3 p-4 hover:bg-secondary/40 transition-colors text-left"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-semibold text-sm">Review #{reviewNumber}</span>
-                        <span className="text-2xs uppercase tracking-wider px-2 py-0.5 rounded-sm border border-border font-medium shrink-0">
-                          {review.type}
-                        </span>
-                        <StatusBadge status={review.status} />
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Link
-                          to="/prds/$id/reviews/$reviewId"
-                          params={{ id: prd.id, reviewId: review.id }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-xs text-primary hover:underline"
-                        >
-                          View review →
-                        </Link>
-                        <ChevronDownIcon
-                          className={cn(
-                            "size-4 text-muted-foreground transition-transform",
-                            isExpanded && "rotate-180",
-                          )}
-                        />
-                      </div>
-                    </button>
-                    {isExpanded && (
-                      <div className="border-t border-border p-4 space-y-3">
-                        {review.userFeedback && (
-                          <p className="text-sm text-muted-foreground italic">
-                            Feedback: {review.userFeedback}
-                          </p>
-                        )}
-                        {review.findings.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">No findings.</p>
-                        ) : (
-                          <FindingsTable findings={review.findings} prdId={prd.id} />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+        {timelineEntries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No activity recorded yet.</p>
+        ) : (
+          <div className="relative space-y-0 before:absolute before:left-3 before:top-0 before:bottom-0 before:w-px before:bg-border">
+            {timelineEntries.map((entry) => (
+              <ActivityEntry
+                key={entry.id}
+                entry={entry}
+                prdId={prd.id}
+                reviewById={reviewById}
+                expandedReviews={expandedReviews}
+                onToggleReview={onToggleReview}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
-          {/* PRD created node — always last */}
-          <div className="relative flex gap-4 pb-6">
-            <div className="shrink-0 size-5 rounded-full bg-muted-foreground/60 ring-2 ring-background z-10 flex items-center justify-center">
-              <FlagIcon className="size-3 text-white" />
-            </div>
-            <div className="flex-1 min-w-0 space-y-1">
-              <p className="text-xs text-muted-foreground">{relativeDate(prd.createdAt)}</p>
-              <div className="bg-card border border-border rounded-xl p-4">
-                <p className="text-sm font-medium">Revision r{prd.revision} created</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {relativeDate(prd.createdAt)}
-                </p>
+// ── Activity timeline entry ───────────────────────────────────────────────────
+
+type ActivityEntryData = ReturnType<
+  typeof prdsQuery.detail.useSuspense
+>["data"]["activity"][number];
+
+function activityIcon(eventType: string): React.ReactNode {
+  switch (eventType) {
+    case "prd_created":
+      return <FlagIcon className="size-3 text-white" />;
+    case "prd_forked":
+      return <GitForkIcon className="size-3 text-white" />;
+    case "prd_updated":
+    case "prd_reload":
+      return <RefreshCwIcon className="size-3 text-white" />;
+    case "prd_ready":
+      return <CheckCircleIcon className="size-3 text-white" />;
+    case "prd_activated":
+      return <PlayIcon className="size-3 text-white" />;
+    case "prd_done":
+      return <CheckCircleIcon className="size-3 text-white" />;
+    case "prd_canceled":
+      return <CircleSlashIcon className="size-3 text-white" />;
+    case "phase_advanced":
+      return <ChevronsRightIcon className="size-3 text-white" />;
+    case "review_created":
+    case "review_started":
+    case "review_done":
+    case "review_updated":
+      return <UserIcon className="size-3 text-white" />;
+    case "task_created":
+    case "task_updated":
+      return <ZapIcon className="size-3 text-white" />;
+    case "task_started":
+      return <PlayIcon className="size-3 text-white" />;
+    case "task_done":
+      return <CheckCircleIcon className="size-3 text-white" />;
+    case "task_blocked":
+      return <AlertCircleIcon className="size-3 text-white" />;
+    case "task_skipped":
+      return <SkipForwardIcon className="size-3 text-white" />;
+    case "note":
+      return <MessageSquareIcon className="size-3 text-white" />;
+    default:
+      return <ZapIcon className="size-3 text-white" />;
+  }
+}
+
+function activityDotColor(eventType: string): string {
+  switch (eventType) {
+    case "prd_created":
+    case "prd_forked":
+      return "bg-muted-foreground/60";
+    case "prd_ready":
+    case "prd_done":
+    case "task_done":
+      return "bg-chart-5";
+    case "prd_activated":
+    case "task_started":
+    case "phase_advanced":
+      return "bg-primary";
+    case "prd_canceled":
+    case "task_blocked":
+      return "bg-destructive";
+    case "review_created":
+    case "review_started":
+    case "review_done":
+    case "review_updated":
+      return "bg-chart-2";
+    case "note":
+      return "bg-chart-3";
+    default:
+      return "bg-muted-foreground/40";
+  }
+}
+
+function activityLabel(eventType: string, payload: Record<string, unknown>): string {
+  switch (eventType) {
+    case "prd_created":
+      return `Revision created`;
+    case "prd_forked":
+      return `Forked to revision ${String(payload.revision ?? "")}`;
+    case "prd_updated":
+      return `PRD updated`;
+    case "prd_ready":
+      return `Marked ready`;
+    case "prd_activated":
+      return `Activated (in progress)`;
+    case "prd_done":
+      return `Marked done`;
+    case "prd_canceled":
+      return `Canceled`;
+    case "phase_advanced": {
+      const from = payload.fromPhase;
+      const to = payload.toPhase;
+      return to !== undefined
+        ? `Phase advanced: ${String(from)} → ${String(to)}`
+        : `Final phase completed (phase ${String(from)})`;
+    }
+    case "review_created":
+      return `Review created [${String(payload.type ?? "")}]`;
+    case "review_started":
+      return `Review started`;
+    case "review_done":
+      return `Review done`;
+    case "review_updated":
+      return `Review updated`;
+    case "task_created":
+      return `Task created: ${String(payload.title ?? "")}`;
+    case "task_updated":
+      return `Task updated: ${String(payload.title ?? "")}`;
+    case "task_started":
+      return `Task started: ${String(payload.title ?? "")}`;
+    case "task_done":
+      return `Task done: ${String(payload.title ?? "")}`;
+    case "task_blocked":
+      return `Task blocked: ${String(payload.title ?? "")}`;
+    case "task_skipped":
+      return `Task skipped: ${String(payload.title ?? "")}`;
+    case "note":
+      return String(payload.message ?? "");
+    default:
+      return eventType;
+  }
+}
+
+function ActivityEntry({
+  entry,
+  prdId,
+  reviewById,
+  expandedReviews,
+  onToggleReview,
+}: {
+  entry: ActivityEntryData;
+  prdId: string;
+  reviewById: Map<string, PrdReview>;
+  expandedReviews: Record<string, boolean>;
+  onToggleReview: (id: string) => void;
+}) {
+  const payload = entry.payload;
+
+  // For review events, render an expanded review card if the review exists
+  const reviewId = typeof payload.reviewId === "string" ? payload.reviewId : null;
+  const review = reviewId ? reviewById.get(reviewId) : undefined;
+
+  const isReviewEvent =
+    entry.eventType === "review_created" ||
+    entry.eventType === "review_started" ||
+    entry.eventType === "review_done";
+
+  if (isReviewEvent && review) {
+    const isExpanded = expandedReviews[review.id] ?? false;
+    return (
+      <div className="relative flex gap-4 pb-6">
+        <div
+          className={cn(
+            "shrink-0 size-5 rounded-full ring-2 ring-background z-10 flex items-center justify-center",
+            review.type === "agent" ? "bg-chart-1" : "bg-chart-2",
+          )}
+        >
+          {review.type === "agent" ? (
+            <BotIcon className="size-3 text-white" />
+          ) : (
+            <UserIcon className="size-3 text-white" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0 space-y-1">
+          <p className="text-xs text-muted-foreground">{relativeDate(entry.createdAt)}</p>
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => onToggleReview(review.id)}
+              className="w-full flex items-center justify-between gap-3 p-4 hover:bg-secondary/40 transition-colors text-left"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-semibold text-sm">Review ({review.type})</span>
+                <StatusBadge status={review.status} />
               </div>
-            </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Link
+                  to="/prds/$id/reviews/$reviewId"
+                  params={{ id: prdId, reviewId: review.id }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-xs text-primary hover:underline"
+                >
+                  View →
+                </Link>
+                <ChevronDownIcon
+                  className={cn(
+                    "size-4 text-muted-foreground transition-transform",
+                    isExpanded && "rotate-180",
+                  )}
+                />
+              </div>
+            </button>
+            {isExpanded && (
+              <div className="border-t border-border p-4 space-y-3">
+                {review.userFeedback && (
+                  <p className="text-sm text-muted-foreground italic">
+                    Feedback: {review.userFeedback}
+                  </p>
+                )}
+                {review.findings.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No findings.</p>
+                ) : (
+                  <FindingsTable findings={review.findings} prdId={prdId} />
+                )}
+              </div>
+            )}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  const label = activityLabel(entry.eventType, payload);
+  const dotColor = activityDotColor(entry.eventType);
+
+  return (
+    <div className="relative flex gap-4 pb-4">
+      <div
+        className={cn(
+          "shrink-0 size-5 rounded-full ring-2 ring-background z-10 flex items-center justify-center",
+          dotColor,
+        )}
+      >
+        {activityIcon(entry.eventType)}
+      </div>
+      <div className="flex-1 min-w-0 pt-0.5">
+        <p className="text-xs text-muted-foreground mb-0.5">{relativeDate(entry.createdAt)}</p>
+        <p className="text-sm leading-snug">{label}</p>
       </div>
     </div>
   );

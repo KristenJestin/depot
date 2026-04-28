@@ -184,6 +184,7 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
   prd_created: Schema.Struct({ prdId: Schema.optional(Schema.String), title: Schema.String }),
   prd_updated: Schema.Struct({
     prdId: Schema.optional(Schema.String),
+    prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
     fields: Schema.Array(Schema.String),
   }),

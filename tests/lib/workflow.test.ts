@@ -28,6 +28,7 @@ import {
   forkPrd,
   loadPrd,
   reloadPrd,
+  phaseAdvance,
   createTask,
   startTask,
   completeTask,
@@ -36,6 +37,7 @@ import {
   listTasks,
   logActivity,
   listActivity,
+  listActivityForRevision,
 } from "#/lib/workflow";
 
 let db: Database;
@@ -1205,5 +1207,60 @@ describe("resolveWorktreeMainPath", () => {
     await fs.writeFile(path.join(submoduleDir, ".git"), `gitdir: ${gitdir}\n`);
 
     expect(await Effect.runPromise(resolveWorktreeMainPath(submoduleDir))).toBeNull();
+  });
+});
+
+// ── phaseAdvance activity log ─────────────────────────────────────────────────
+
+describe("phaseAdvance activity log", () => {
+  it("emits a phase_advanced activity entry with fromPhase and toPhase", async () => {
+    const project = await createProject(db, { name: "phase-test" });
+    const ws = await addWorkspace(db, {
+      projectId: project.id,
+      label: "main",
+      path: "/tmp/phase-test",
+    });
+
+    // Create a phased PRD with two phases
+    const { prd: rev } = await loadPrd(db, {
+      projectId: project.id,
+      title: "Phased PRD",
+      ready: true,
+      tasks: [
+        {
+          title: "Phase 1 task",
+          description: "Do phase 1",
+          doneCriteria: "Phase 1 done",
+          effort: "s",
+          dependsOn: [],
+          phaseNumber: 1,
+        },
+        {
+          title: "Phase 2 task",
+          description: "Do phase 2",
+          doneCriteria: "Phase 2 done",
+          effort: "s",
+          dependsOn: [],
+          phaseNumber: 2,
+        },
+      ],
+    });
+
+    await activatePrd(db, rev.id, ws.id);
+
+    // Complete phase 1 task so phaseAdvance is allowed
+    const taskList = await listTasks(db, rev.id);
+    const phase1Task = taskList.find((t) => t.phaseNumber === 1)!;
+    await startTask(db, phase1Task.id);
+    await completeTask(db, phase1Task.id);
+
+    await phaseAdvance(db, rev.id);
+
+    const activity = await listActivityForRevision(db, rev.id);
+    const phaseEntry = activity.find((e) => e.eventType === "phase_advanced");
+    expect(phaseEntry).toBeDefined();
+    const payload = JSON.parse(phaseEntry!.payload) as { fromPhase: number; toPhase: number };
+    expect(payload.fromPhase).toBe(1);
+    expect(payload.toPhase).toBe(2);
   });
 });

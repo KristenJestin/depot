@@ -59,7 +59,18 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
 
     const revisions = await getRuntime().runPromise(DomainPrds.listPrdFamily(prd.prdId));
 
-    return c.json({ prd, tasks, reviews, revisions }, 200);
+    const activityRows = await getRuntime().runPromise(
+      DomainActivity.listActivityForRevision(prd.id),
+    );
+    const activity = activityRows.map((a) => ({
+      id: a.id,
+      eventType: a.eventType,
+      payload: JSON.parse(a.payload) as Record<string, unknown>,
+      taskId: a.taskId,
+      createdAt: a.createdAt,
+    }));
+
+    return c.json({ prd, tasks, reviews, revisions, activity }, 200);
   })
   .get("/prds/:id/tasks/:taskId", async (c) => {
     const { id, taskId } = c.req.param();

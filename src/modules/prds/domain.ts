@@ -292,12 +292,13 @@ export const forkPrd = (id: string) =>
     const rev = yield* getPrd(id);
     if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
     if (rev.status !== "ready") {
+      const hint =
+        rev.status === "draft"
+          ? " The revision is still in 'draft'. Modify it directly with 'depot prd update', 'depot task add', or 'depot task update'. Fork is only needed when a 'ready' revision must be revised."
+          : ` Revision status is '${rev.status}'. Forking is not allowed from this status — only 'ready' revisions can be forked.`;
       return yield* Effect.fail(
-        new InvalidTransitionError({
-          entity: "PRD",
-          from: rev.status,
-          to: "draft (fork)",
-          allowed: ["ready"],
+        new ValidationError({
+          reason: `Cannot fork PRD ${id}: current status is '${rev.status}'. Fork requires a 'ready' revision.${hint}`,
         }),
       );
     }
@@ -315,6 +316,7 @@ export const forkPrd = (id: string) =>
           context: rev.context,
           scope: rev.scope,
           status: "draft",
+          currentPhase: rev.currentPhase,
           readyAt: null,
           activatedAt: null,
         })
@@ -485,6 +487,23 @@ export const reloadPrdBatch = (input: ReloadPrdBatchInput) =>
       catch: (e) => new DatabaseError({ cause: e }),
     });
 
+    // Emit lifecycle events after the transaction commits
+    yield* logActivity({
+      projectId: result.prd.projectId,
+      prdRevisionId: result.prd.id,
+      eventType: "prd_updated",
+      payload: { prdRevisionId: result.prd.id, title: result.prd.title, fields: ["tasks"] },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+
+    for (const task of result.tasks) {
+      yield* logActivity({
+        projectId: result.prd.projectId,
+        prdRevisionId: result.prd.id,
+        eventType: "task_created",
+        payload: { taskId: task.id, title: task.title },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+
     return result;
   });
 
@@ -612,6 +631,23 @@ export const loadPrdBatch = (input: LoadPrdBatchInput) =>
         }),
       catch: (e) => new DatabaseError({ cause: e }),
     });
+
+    // Emit lifecycle events after the transaction commits
+    yield* logActivity({
+      projectId: result.prd.projectId,
+      prdRevisionId: result.prd.id,
+      eventType: "prd_created",
+      payload: { prdId: result.prd.prdId, title: result.prd.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+
+    for (const task of result.tasks) {
+      yield* logActivity({
+        projectId: result.prd.projectId,
+        prdRevisionId: result.prd.id,
+        eventType: "task_created",
+        payload: { taskId: task.id, title: task.title },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
 
     return result;
   });

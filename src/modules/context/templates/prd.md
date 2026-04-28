@@ -50,6 +50,10 @@ Use the CLI progressively:
 
 - create a draft with `depot prd create ...` when needed
 - revise a ready PRD with `depot prd fork <prd-id>`
+  - fork is the **only** way to create a new revision
+  - it clones the entire current revision: title, context, scope, phases, all tasks and their dependencies
+  - the new revision starts as `draft`; the old revision is superseded immediately
+  - fork is only allowed from `ready`; from `draft`, modify directly; from other statuses, fork is not permitted
 - update draft fields with `depot prd update <prd-id> ...`
 - create tasks with `depot task add ...`
 - refine tasks with `depot task update <task-id> ...`

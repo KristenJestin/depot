@@ -224,6 +224,10 @@ export function listActivity(
   return runWithDb(db, DomainActivity.listActivity(filter));
 }
 
+export function listActivityForRevision(db: Database, prdRevisionId: string) {
+  return runWithDb(db, DomainActivity.listActivityForRevision(prdRevisionId));
+}
+
 // ── Workspace status ──────────────────────────────────────────────────────────
 
 export function buildWorkspaceStatus(db: Database, workspaceId: string) {
@@ -290,6 +294,7 @@ export function loadPrd(
       doneCriteria: string;
       effort: Effort;
       dependsOn: number[];
+      phaseNumber?: number;
     }>;
   },
 ): Promise<{ prd: Awaited<ReturnType<typeof createPrd>>; tasks: TaskRow[] }> {
@@ -313,4 +318,8 @@ export function reloadPrd(
   },
 ): Promise<{ prd: Awaited<ReturnType<typeof createPrd>>; tasks: TaskRow[] }> {
   return runWithDb(db, DomainPrds.reloadPrdBatch(input));
+}
+
+export function phaseAdvance(db: Database, id: string) {
+  return runWithDb(db, DomainPrds.phaseAdvance(id));
 }
