@@ -64,6 +64,6 @@ Once the user has validated the risks and all ambiguities are resolved, move to 
 
 ## Phase 4 - Mark Ready
 
-Once the PRD is fully specified and reviewed, mark it ready for execution.
-
 Once the PRD is fully specified and reviewed, run `depot prd ready <prd-id>` to mark it ready for execution.
+
+Stop here. Do not run `depot prd activate`. Activation is the responsibility of the dev agent — it signals that execution has started. The PRD agent's job ends at `ready`.

@@ -40,18 +40,26 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
     if (!prd) return c.json({ error: "Not found" }, 404);
 
     const tasks = await getRuntime().runPromise(DomainTasks.listTasks(id, { prdTasksOnly: true }));
-    const latestReview = await getRuntime().runPromise(DomainReviews.getLatestReview(id));
-    const findings = latestReview
-      ? await getRuntime().runPromise(DomainReviews.listReviewTasks(latestReview.id))
-      : [];
+    const allReviews = await getRuntime().runPromise(DomainReviews.listReviews(id));
 
-    const review = latestReview
-      ? { id: latestReview.id, type: latestReview.type, status: latestReview.status, findings }
-      : null;
+    const reviews = await Promise.all(
+      allReviews.map(async (r) => {
+        const findings = await getRuntime().runPromise(DomainReviews.listReviewTasks(r.id));
+        return {
+          id: r.id,
+          type: r.type,
+          status: r.status,
+          createdAt: r.createdAt,
+          doneAt: r.doneAt,
+          userFeedback: r.userFeedback,
+          findings,
+        };
+      }),
+    );
 
     const revisions = await getRuntime().runPromise(DomainPrds.listPrdFamily(prd.rootId ?? prd.id));
 
-    return c.json({ prd, tasks, review, revisions }, 200);
+    return c.json({ prd, tasks, reviews, revisions }, 200);
   })
   .get("/prds/:id/tasks/:taskId", async (c) => {
     const { id, taskId } = c.req.param();

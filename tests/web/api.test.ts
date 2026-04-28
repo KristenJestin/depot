@@ -133,4 +133,35 @@ describe("web api", () => {
       expect(body.workspacePath).toBeNull();
     });
   });
+
+  describe("GET /api/workspaces", () => {
+    it("retourne { workspaces: [] } quand aucun workspace existe", async () => {
+      const res = await app.request("/api/workspaces");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(Array.isArray(body.workspaces)).toBe(true);
+    });
+  });
+
+  describe("PATCH /api/context", () => {
+    it("accepte workspaceId null et retourne workspaceId null", async () => {
+      const res = await app.request("/api/context", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: null }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.workspaceId).toBeNull();
+    });
+
+    it("rejette un body invalide avec 400", async () => {
+      const res = await app.request("/api/context", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: 42 }),
+      });
+      expect(res.status).toBe(400);
+    });
+  });
 });

@@ -7,11 +7,19 @@ export function relativeDate(value: number | string | Date | null | undefined): 
         ? new Date(value).getTime()
         : value;
   if (!ms || isNaN(ms)) return null;
-  const diff = Date.now() - ms;
-  const days = Math.floor(diff / 86_400_000);
-  if (days === 0) return "today";
-  if (days === 1) return "yesterday";
-  return `${days} days ago`;
+
+  const now = new Date();
+  const d = new Date(ms);
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const itemMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const calendarDays = Math.round((todayMidnight - itemMidnight) / 86_400_000);
+
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+
+  if (calendarDays === 0) return `today at ${hh}:${mm}`;
+  if (calendarDays === 1) return `yesterday at ${hh}:${mm}`;
+  return `${calendarDays} days ago`;
 }
 
 export function parseDesc(

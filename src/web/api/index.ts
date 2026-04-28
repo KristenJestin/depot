@@ -23,12 +23,19 @@ async function resolveWorkspaceHint(db: Database): Promise<string | null> {
   return best;
 }
 
+// In-memory override; undefined = fall back to cwd resolution, null = no workspace
+let workspaceOverride: string | null | undefined = undefined;
+
 const app = new Hono<{ Variables: Variables }>()
   .basePath("/api")
   .use("*", async (c, next) => {
     const db = await getDb();
     c.set("db", db);
-    c.set("currentWorkspaceId", await resolveWorkspaceHint(db).catch(() => null));
+    const wsId =
+      workspaceOverride !== undefined
+        ? workspaceOverride
+        : await resolveWorkspaceHint(db).catch(() => null);
+    c.set("currentWorkspaceId", wsId);
     await next();
   })
   .get("/ping", (c) => c.json({ ok: true }, 200))
@@ -37,15 +44,44 @@ const app = new Hono<{ Variables: Variables }>()
     const wsId = c.var.currentWorkspaceId;
 
     let workspacePath: string | null = null;
+    let workspaceLabel: string | null = null;
     if (wsId) {
       const ws = await db.query.workspaces.findFirst({
         where: { id: wsId },
-        columns: { path: true },
+        columns: { path: true, label: true },
       });
       workspacePath = ws?.path ?? null;
+      workspaceLabel = ws?.label ?? null;
     }
 
-    return c.json({ workspaceId: wsId, workspacePath }, 200);
+    return c.json({ workspaceId: wsId, workspacePath, workspaceLabel }, 200);
+  })
+  .patch("/context", async (c) => {
+    const body = await c.req.json<{ workspaceId: unknown }>();
+    const { workspaceId } = body ?? {};
+    if (workspaceId !== null && typeof workspaceId !== "string") {
+      return c.json({ error: "Invalid body" }, 400);
+    }
+    workspaceOverride = workspaceId as string | null;
+    return c.json({ workspaceId: workspaceOverride }, 200);
+  })
+  .get("/workspaces", async (c) => {
+    const db = c.var.db;
+    const wsRows = await db.query.workspaces.findMany({ orderBy: { createdAt: "asc" } });
+    const projectIds = [...new Set(wsRows.map((w) => w.projectId))];
+    const projectRows =
+      projectIds.length > 0
+        ? await db.query.projects.findMany({ columns: { id: true, name: true } })
+        : [];
+    const projectMap = new Map(projectRows.map((p) => [p.id, p.name]));
+    const workspaces = wsRows.map((ws) => ({
+      id: ws.id,
+      path: ws.path,
+      label: ws.label,
+      projectId: ws.projectId,
+      projectName: projectMap.get(ws.projectId) ?? ws.projectId,
+    }));
+    return c.json({ workspaces }, 200);
   })
   .get("/activity", async (c) => {
     const db = c.var.db;

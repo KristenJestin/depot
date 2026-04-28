@@ -1,13 +1,11 @@
-import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
 import { reviewsQuery } from "../lib/queries";
-import type { ReviewFinding } from "../lib/api-types";
-import type { Task } from "../lib/api-types";
 import { relativeDate } from "../lib/format";
 import { cn } from "../lib/utils";
 import { StatusBadge } from "../components/ui/status-badge";
 import { EmptyState } from "../components/ui/empty-state";
-import { TaskCard } from "../components/task-card";
+import { FindingsTable } from "../components/findings-table";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -35,13 +33,8 @@ function ReviewDetailPage() {
   const { id, reviewId } = Route.useParams();
   const { data } = reviewsQuery.detail.useSuspense(id, reviewId);
   const { review, prd, findings } = data;
-  const navigate = useNavigate();
 
   const countBySeverity = (sev: string) => findings.filter((f) => f.severity === sev).length;
-  const criticalCount = countBySeverity("critical");
-  const majorCount = countBySeverity("major");
-  const minorCount = countBySeverity("minor");
-  const infoCount = countBySeverity("info");
 
   return (
     <div className="h-full overflow-y-auto">
@@ -93,28 +86,15 @@ function ReviewDetailPage() {
 
             <section className="space-y-4">
               <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="text-xl font-semibold">Tasks</h3>
+                <h3 className="text-xl font-semibold">Findings</h3>
                 <span className="text-sm font-medium text-muted-foreground">
-                  {findings.length} task{findings.length !== 1 ? "s" : ""}
+                  {findings.length} finding{findings.length !== 1 ? "s" : ""}
                 </span>
               </div>
               {findings.length === 0 ? (
-                <EmptyState message="No tasks for this review." />
+                <EmptyState message="No findings for this review." />
               ) : (
-                <div className="space-y-3">
-                  {(findings as ReviewFinding[] as Task[]).map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      onClick={() =>
-                        navigate({
-                          to: "/prds/$id/tasks/$taskId",
-                          params: { id: prd.id, taskId: task.id },
-                        })
-                      }
-                    />
-                  ))}
-                </div>
+                <FindingsTable findings={findings} prdId={prd.id} />
               )}
             </section>
           </div>
@@ -125,14 +105,7 @@ function ReviewDetailPage() {
             <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
               <h4 className="font-semibold text-sm">Findings breakdown</h4>
               <div className="space-y-1 text-sm">
-                {(
-                  [
-                    ["critical", criticalCount],
-                    ["major", majorCount],
-                    ["minor", minorCount],
-                    ["info", infoCount],
-                  ] as const
-                ).map(([label, count]) => (
+                {(["critical", "major", "minor", "info"] as const).map((label) => (
                   <div key={label} className="flex items-center justify-between py-1">
                     <span
                       className={cn(
@@ -142,7 +115,7 @@ function ReviewDetailPage() {
                     >
                       {label}
                     </span>
-                    <span className="font-medium tabular-nums">{count}</span>
+                    <span className="font-medium tabular-nums">{countBySeverity(label)}</span>
                   </div>
                 ))}
               </div>

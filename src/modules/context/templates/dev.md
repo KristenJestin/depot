@@ -72,8 +72,9 @@ You are the orchestrator. You coordinate the coder and auditor sub-agents and re
 
 ```
 depot context dev             # Load this orchestrator context
-depot prd list                # Find the active PRD
-depot prd show <prd-id>       # Inspect the active PRD before starting
+depot prd list                # Find the ready PRD
+depot prd show <prd-id>       # Inspect the PRD before starting
+depot prd activate <prd-id>   # Move PRD from ready → in_progress (dev agent owns this step)
 ```
 
 ## Rules
