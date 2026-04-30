@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDetailSummary, buildStageCards } from "#/web/lib/prd-view-model";
+import { buildBoardColumns, buildDetailSummary, buildStageCards } from "#/web/lib/prd-view-model";
 
 describe("prd view model", () => {
   it("counts skipped base tasks as complete and keeps the current cycle on rework", () => {
@@ -127,8 +127,163 @@ describe("prd view model", () => {
       doneTasks: 2,
       skippedTasks: 1,
       blockedTasks: 0,
-      currentCycleLabel: "Rework #3",
+      currentCycleLabel: "Human Rework #3",
     });
+  });
+
+  it("keeps agent reviews in progress and reserves the review column for human review", () => {
+    const now = "2026-04-30T10:00:00.000Z";
+    const columns = buildBoardColumns([
+      {
+        id: "rev-agent",
+        prdId: "prd-agent",
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        revision: 1,
+        title: "Agent audit PRD",
+        context: null,
+        scope: null,
+        status: "in_progress",
+        auditCycles: 1,
+        currentPhase: null,
+        supersededAt: null,
+        createdAt: now,
+        updatedAt: now,
+        readyAt: now,
+        activatedAt: now,
+        totalTasks: 3,
+        doneTasks: 1,
+        blockedTasks: 0,
+        inProgressTasks: 1,
+        skippedTasks: 0,
+        latestReview: {
+          id: "review-agent",
+          prdRevisionId: "rev-agent",
+          type: "agent",
+          status: "in_progress",
+          createdAt: now,
+          doneAt: null,
+          findingsCount: 0,
+          resolvedCount: 0,
+          activeCount: 0,
+          pendingCount: 0,
+          criticalCount: 0,
+          majorCount: 0,
+          minorCount: 0,
+          infoCount: 0,
+        },
+        previewTasks: [],
+      },
+      {
+        id: "rev-human",
+        prdId: "prd-human",
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        revision: 1,
+        title: "Human review PRD",
+        context: null,
+        scope: null,
+        status: "in_progress",
+        auditCycles: 1,
+        currentPhase: null,
+        supersededAt: null,
+        createdAt: now,
+        updatedAt: now,
+        readyAt: now,
+        activatedAt: now,
+        totalTasks: 2,
+        doneTasks: 2,
+        blockedTasks: 0,
+        inProgressTasks: 0,
+        skippedTasks: 0,
+        latestReview: {
+          id: "review-human",
+          prdRevisionId: "rev-human",
+          type: "human",
+          status: "in_progress",
+          createdAt: now,
+          doneAt: null,
+          findingsCount: 0,
+          resolvedCount: 0,
+          activeCount: 0,
+          pendingCount: 0,
+          criticalCount: 0,
+          majorCount: 0,
+          minorCount: 0,
+          infoCount: 0,
+        },
+        previewTasks: [],
+      },
+    ]);
+
+    expect(
+      columns.find((column) => column.id === "in_progress")?.cards.map((card) => card.id),
+    ).toEqual(["rev-agent"]);
+    expect(columns.find((column) => column.id === "review")?.cards.map((card) => card.id)).toEqual([
+      "rev-human",
+    ]);
+  });
+
+  it("keeps the current cycle on agent audit until the review is closed", () => {
+    const now = "2026-04-30T10:00:00.000Z";
+    const data: Parameters<typeof buildDetailSummary>[0] = {
+      prd: {
+        id: "rev-agent-open",
+        prdId: "prd-agent-open",
+        projectId: "proj-1",
+        workspaceId: null,
+        revision: 1,
+        title: "Agent audit open",
+        context: null,
+        scope: null,
+        status: "in_progress",
+        auditCycles: 1,
+        currentPhase: 1,
+        supersededAt: null,
+        createdAt: now,
+        updatedAt: now,
+        readyAt: now,
+        activatedAt: now,
+      },
+      tasks: [],
+      reviews: [
+        {
+          id: "review-agent-open",
+          type: "agent",
+          status: "in_progress",
+          phaseNumber: 1,
+          createdAt: now,
+          doneAt: null,
+          userFeedback: null,
+          findings: [
+            {
+              id: "finding-agent-open",
+              prdRevisionId: "rev-agent-open",
+              position: 1,
+              title: "Tighten the copy",
+              description: "Intent:\nTighten the copy",
+              descriptionFormat: "structured_v1",
+              doneCriteria: "Copy tightened",
+              dependsOn: "[]",
+              effort: "xs",
+              phaseNumber: 1,
+              status: "pending",
+              reviewId: "review-agent-open",
+              severity: "minor",
+              blockedReason: null,
+              skipReason: null,
+              createdAt: now,
+              startedAt: null,
+              completedAt: null,
+            },
+          ],
+        },
+      ],
+      revisions: [],
+      activity: [],
+    };
+
+    expect(buildDetailSummary(data).currentCycleLabel).toBe("Agent Audit #1");
   });
 
   it("builds canceled review stages with stopped rework items", () => {
@@ -234,7 +389,7 @@ describe("prd view model", () => {
 
     expect(currentStage).toMatchObject({
       id: "rework-review-2",
-      title: "Rework #2",
+      title: "Human Rework #2",
       current: true,
       canceled: true,
       meta: "0 / 1 fixes · canceled",
@@ -245,5 +400,97 @@ describe("prd view model", () => {
       title: "Human Review #2",
       complete: true,
     });
+  });
+
+  it("folds agent follow-ups into the audit stage", () => {
+    const now = "2026-04-30T10:00:00.000Z";
+    const data: Parameters<typeof buildStageCards>[0] = {
+      prd: {
+        id: "rev-3",
+        prdId: "prd-3",
+        projectId: "proj-1",
+        workspaceId: null,
+        revision: 1,
+        title: "Agent follow-up PRD",
+        context: null,
+        scope: null,
+        status: "in_progress",
+        auditCycles: 1,
+        currentPhase: 1,
+        supersededAt: null,
+        createdAt: now,
+        updatedAt: now,
+        readyAt: now,
+        activatedAt: now,
+      },
+      tasks: [
+        {
+          id: "task-4",
+          prdRevisionId: "rev-3",
+          position: 1,
+          title: "Initial task",
+          description: "Intent:\nBuild the feature",
+          descriptionFormat: "structured_v1",
+          doneCriteria: "Feature built",
+          dependsOn: "[]",
+          effort: "m",
+          phaseNumber: null,
+          status: "done",
+          reviewId: null,
+          severity: null,
+          blockedReason: null,
+          skipReason: null,
+          createdAt: now,
+          startedAt: now,
+          completedAt: now,
+        },
+      ],
+      reviews: [
+        {
+          id: "review-3",
+          type: "agent",
+          status: "done",
+          phaseNumber: 1,
+          createdAt: now,
+          doneAt: now,
+          userFeedback: null,
+          findings: [
+            {
+              id: "finding-3",
+              prdRevisionId: "rev-3",
+              position: 2,
+              title: "Tighten validation",
+              description: "Intent:\nTighten validation",
+              descriptionFormat: "structured_v1",
+              doneCriteria: "Validation tightened",
+              dependsOn: "[]",
+              effort: "s",
+              phaseNumber: 1,
+              status: "pending",
+              reviewId: "review-3",
+              severity: "minor",
+              blockedReason: null,
+              skipReason: null,
+              createdAt: now,
+              startedAt: null,
+              completedAt: null,
+            },
+          ],
+        },
+      ],
+      revisions: [],
+      activity: [],
+    };
+
+    const stages = buildStageCards(data);
+
+    expect(stages).toHaveLength(2);
+    expect(stages[0]).toMatchObject({
+      id: "review-review-3",
+      title: "Agent Audit #1",
+      reviewType: "agent",
+      current: true,
+    });
+    expect(stages.map((stage) => stage.id)).not.toContain("rework-review-3");
   });
 });

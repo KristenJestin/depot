@@ -7,6 +7,7 @@ import {
   CirclePlayIcon,
   CircleSlash2Icon,
   Clock3Icon,
+  RefreshCcwDotIcon,
 } from "lucide-react";
 
 import { Badge } from "#/web/components/ui/badge";
@@ -14,8 +15,9 @@ import { cn } from "#/web/lib/utils";
 import type { PrdStatus, TaskStatus } from "#/shared/validator";
 
 type AllStatus = PrdStatus | TaskStatus;
+type DisplayStatus = AllStatus | "review";
 
-const statusLabel: Record<AllStatus, string> = {
+const statusLabel: Record<DisplayStatus, string> = {
   draft: "Draft",
   ready: "Ready",
   canceled: "Canceled",
@@ -24,9 +26,10 @@ const statusLabel: Record<AllStatus, string> = {
   skipped: "Skipped",
   in_progress: "In Progress",
   done: "Done",
+  review: "Review",
 };
 
-const statusVariant: Record<AllStatus, React.ComponentProps<typeof Badge>["variant"]> = {
+const statusVariant: Record<DisplayStatus, React.ComponentProps<typeof Badge>["variant"]> = {
   draft: "statusDraft",
   ready: "statusReady",
   canceled: "statusCanceled",
@@ -35,11 +38,12 @@ const statusVariant: Record<AllStatus, React.ComponentProps<typeof Badge>["varia
   skipped: "outline",
   in_progress: "statusInProgress",
   done: "statusDone",
+  review: "severityInfo",
 };
 
 type IconComponent = React.ComponentType<{ className?: string }>;
 
-const statusIcon: Record<AllStatus, IconComponent> = {
+const statusIcon: Record<DisplayStatus, IconComponent> = {
   draft: CircleDashedIcon,
   ready: CirclePlayIcon,
   canceled: CircleSlash2Icon,
@@ -48,14 +52,15 @@ const statusIcon: Record<AllStatus, IconComponent> = {
   skipped: CircleSlash2Icon,
   in_progress: Clock3Icon,
   done: CircleCheckIcon,
+  review: RefreshCcwDotIcon,
 };
 
 export interface StatusBadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
-  status: AllStatus | string | null | undefined;
+  status: DisplayStatus | string | null | undefined;
 }
 
 export function StatusBadge({ status, className, ...props }: StatusBadgeProps) {
-  const knownStatus = status as AllStatus;
+  const knownStatus = status as DisplayStatus;
   const Icon = statusIcon[knownStatus];
 
   if (!Icon) {

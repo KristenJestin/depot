@@ -25,6 +25,17 @@ describe("context template registry", () => {
     expect(content).toContain("depot prd activate");
     expect(content).toContain("depot context coder");
     expect(content).toContain("depot context auditor");
+    expect(content).toContain("depot task block <task-id> <reason>");
+    expect(content).toContain("web UI");
+  });
+
+  it("returns embedded coder context live-status guidance", () => {
+    const content = getContextTemplate("coder");
+    expect(content).toContain("Context: Coder Agent");
+    expect(content).toContain("depot review show <review-id> --json");
+    expect(content).toContain("depot task start <task_id>");
+    expect(content).toContain("depot task block <task-id> <reason>");
+    expect(content).toContain("The web UI and the dev flow use stored task transitions");
   });
 
   it("returns embedded prd context task-spec guidance", () => {

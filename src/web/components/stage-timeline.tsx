@@ -46,9 +46,31 @@ export function StageTimeline({ cards }: { cards: StageCard[] }) {
                       <div className="space-y-1">
                         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                           {card.kind === "rework" ? (
-                            <RefreshCcwDotIcon className="size-4 text-muted-foreground" />
+                            <RefreshCcwDotIcon
+                              className={[
+                                "size-4",
+                                card.reviewType === "human"
+                                  ? "text-severity-info"
+                                  : "text-muted-foreground",
+                              ].join(" ")}
+                            />
                           ) : null}
-                          <span>{card.title}</span>
+                          <span
+                            className={
+                              card.kind === "rework" && card.reviewType === "agent"
+                                ? "text-muted-foreground"
+                                : undefined
+                            }
+                          >
+                            {card.title}
+                          </span>
+                          {card.kind === "rework" && card.reviewType ? (
+                            <Badge
+                              variant={card.reviewType === "human" ? "severityInfo" : "subtle"}
+                            >
+                              {card.reviewType}
+                            </Badge>
+                          ) : null}
                         </div>
                         <div className="text-xs text-muted-foreground">{card.meta}</div>
                       </div>

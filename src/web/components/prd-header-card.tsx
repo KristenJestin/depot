@@ -5,14 +5,16 @@ import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
 import { StatusBadge } from "#/web/components/ui/status-badge";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
-import type { DetailSummary } from "#/web/lib/prd-view-model";
+import { resolvePrdDisplayStatus, type DetailSummary } from "#/web/lib/prd-view-model";
 import { formatMetaDate } from "#/web/lib/view-format";
 
 type DetailPrd = PrdDetailResponse["prd"];
 
 export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: DetailSummary }) {
   const isSuperseded = prd.supersededAt !== null;
-  const showActiveFooter = prd.status === "in_progress";
+  const displayStatus = resolvePrdDisplayStatus(prd, summary.activeReview);
+  const showReviewFooter = displayStatus === "review";
+  const showActiveFooter = prd.status === "in_progress" && !showReviewFooter;
   const showDoneFooter = prd.status === "done";
   const showCanceledFooter = prd.status === "canceled";
 
@@ -43,7 +45,7 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
           </div>
 
           <div className="flex items-center gap-2">
-            <StatusBadge status={prd.status} />
+            <StatusBadge status={displayStatus} />
             {isSuperseded && <Badge variant="outline">superseded</Badge>}
           </div>
         </div>
@@ -55,6 +57,13 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
           <SpecBlock label="Scope" value={prd.scope} muted={prd.status === "canceled"} />
         )}
       </div>
+
+      {showReviewFooter && (
+        <Card.Footer className="mt-0 border-card-border bg-severity-info-soft px-4 py-3 text-xs text-severity-info">
+          <span>{summary.currentCycleLabel ?? "Awaiting human review"}</span>
+          <span className="ml-auto">Waiting on feedback</span>
+        </Card.Footer>
+      )}
 
       {showActiveFooter && (
         <Card.Footer className="mt-0 border-card-border px-4 py-3 text-xs text-status-in-progress-foreground">

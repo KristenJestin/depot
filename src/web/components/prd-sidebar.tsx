@@ -6,7 +6,11 @@ import { Card } from "#/web/components/ui/card";
 import { StatusBadge } from "#/web/components/ui/status-badge";
 import { StatusDot } from "#/web/components/ui/status-dot";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
-import type { DetailSummary, RevisionEntry } from "#/web/lib/prd-view-model";
+import {
+  resolvePrdDisplayStatus,
+  type DetailSummary,
+  type RevisionEntry,
+} from "#/web/lib/prd-view-model";
 import { formatMetaDate } from "#/web/lib/view-format";
 
 type DetailPrd = PrdDetailResponse["prd"];
@@ -85,81 +89,85 @@ export function PrdSidebar({
         </div>
       </SidebarWidget>
 
-      <SidebarWidget title="Reviews">
-        <div className="space-y-4">
-          {[...reviews].reverse().map((review, index) => (
-            <div
-              key={review.id}
-              className="space-y-3 border-b border-card-border pb-4 last:border-b-0 last:pb-0"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-foreground">
-                  Review #{reviews.length - index}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {formatMetaDate(review.doneAt ?? review.createdAt)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <Badge variant={review.type === "human" ? "severityInfo" : "subtle"}>
-                  {review.type}
-                </Badge>
-                {review.status === "done" ? (
-                  <Badge variant="statusDone">Closed</Badge>
-                ) : (
-                  <StatusBadge status={review.status} />
-                )}
-              </div>
-              {review.userFeedback ? (
-                <blockquote className="rounded-r-lg border-l-2 border-card-border bg-panel-muted px-3 py-2 text-xs italic leading-6 text-secondary-foreground">
-                  {review.userFeedback}
-                </blockquote>
-              ) : null}
-              <div className="space-y-2">
-                {review.findings.map((finding) => (
-                  <div key={finding.id} className="flex items-start gap-2">
-                    <StatusDot
-                      tone={
-                        finding.status === "done"
-                          ? "done"
-                          : finding.status === "in_progress"
-                            ? "active"
-                            : "pending"
-                      }
-                    />
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="text-xs leading-5 text-secondary-foreground">{finding.title}</p>
-                      <div className="flex items-center gap-2">
-                        {finding.severity ? (
-                          <Badge
-                            variant={
-                              finding.severity === "critical"
-                                ? "severityCritical"
-                                : finding.severity === "major"
-                                  ? "severityMajor"
-                                  : finding.severity === "minor"
-                                    ? "severityMinor"
-                                    : "severityInfo"
-                            }
-                          >
-                            {finding.severity}
-                          </Badge>
-                        ) : null}
-                        <span className="text-xs text-muted-foreground">
-                          {finding.status.replace("_", " ")}
-                        </span>
+      {reviews.length > 0 ? (
+        <SidebarWidget title="Reviews">
+          <div className="space-y-4">
+            {[...reviews].reverse().map((review, index) => (
+              <div
+                key={review.id}
+                className="space-y-3 border-b border-card-border pb-4 last:border-b-0 last:pb-0"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-foreground">
+                    Review #{reviews.length - index}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {formatMetaDate(review.doneAt ?? review.createdAt)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <Badge variant={review.type === "human" ? "severityInfo" : "subtle"}>
+                    {review.type}
+                  </Badge>
+                  {review.status === "done" ? (
+                    <Badge variant="statusDone">Closed</Badge>
+                  ) : (
+                    <StatusBadge status={review.status} />
+                  )}
+                </div>
+                {review.userFeedback ? (
+                  <blockquote className="rounded-r-lg border-l-2 border-card-border bg-panel-muted px-3 py-2 text-xs italic leading-6 text-secondary-foreground">
+                    {review.userFeedback}
+                  </blockquote>
+                ) : null}
+                <div className="space-y-2">
+                  {review.findings.map((finding) => (
+                    <div key={finding.id} className="flex items-start gap-2">
+                      <StatusDot
+                        tone={
+                          finding.status === "done"
+                            ? "done"
+                            : finding.status === "in_progress"
+                              ? "active"
+                              : "pending"
+                        }
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-xs leading-5 text-secondary-foreground">
+                          {finding.title}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          {finding.severity ? (
+                            <Badge
+                              variant={
+                                finding.severity === "critical"
+                                  ? "severityCritical"
+                                  : finding.severity === "major"
+                                    ? "severityMajor"
+                                    : finding.severity === "minor"
+                                      ? "severityMinor"
+                                      : "severityInfo"
+                              }
+                            >
+                              {finding.severity}
+                            </Badge>
+                          ) : null}
+                          <span className="text-xs text-muted-foreground">
+                            {finding.status.replace("_", " ")}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </SidebarWidget>
+            ))}
+          </div>
+        </SidebarWidget>
+      ) : null}
 
       <SidebarWidget title="Activity">
-        <div className="space-y-4">
+        <div className="max-h-96 space-y-4 overflow-y-auto pr-1">
           {[...activity].reverse().map((entry, index, entries) => (
             <div key={entry.id} className="flex gap-3">
               <div className="flex w-3 shrink-0 flex-col items-center pt-1">
@@ -202,8 +210,9 @@ function InfoRows({
   workspace: DetailWorkspace;
   summary: DetailSummary;
 }) {
+  const displayStatus = resolvePrdDisplayStatus(prd, summary.activeReview);
   const rows = [
-    ["Status", <StatusBadge key="status" status={prd.status} />],
+    ["Status", <StatusBadge key="status" status={displayStatus} />],
     [
       "Revision",
       <Badge key="revision" variant="subtle">

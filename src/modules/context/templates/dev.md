@@ -39,6 +39,14 @@ Launch the coder sub-agent with:
 
 The coder owns code changes, task execution, and implementation logs.
 
+The coder must keep task state current while work is happening:
+
+- `depot task start <task-id>` when real work begins
+- `depot task block <task-id> <reason>` as soon as work is blocked or waiting on clarification
+- `depot task done <task-id>` only after validation passes
+
+Stale task state makes the web UI misleading. A task that is being worked on should not remain `pending`.
+
 ### 3. Delegate Audit
 
 After every coder pass, launch the auditor sub-agent with:
@@ -90,6 +98,7 @@ Do not launch the coder from a review draft that still requires guessing.
 - Never skip human validation
 - Never write code yourself
 - Always enter sub-agents through `depot context coder` and `depot context auditor`
+- Verify that coder task transitions match the real implementation state before treating a coding pass as complete
 - Ask the user when constraints conflict or the PRD is under-specified
 - Keep the review state updated as the conversation evolves instead of waiting for the full answer
 

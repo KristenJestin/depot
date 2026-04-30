@@ -81,8 +81,9 @@ depot context coder <prd-id> [--review <review-id>]
 
 `prd-id` is required.
 
-- without `--review`, the command shows pending PRD tasks
-- with `--review`, it shows pending tasks for that review, including severity when present
+- without `--review`, the embedded instructions tell the coder to load the live PRD task list and keep task state current with `task start`, `task done`, `task block`, and `task skip`
+- with `--review`, the header includes the review ID and the embedded instructions tell the coder to inspect review tasks with `depot review show <review-id> --json`
+- these task transitions are the live execution signal used by the web UI
 
 ## `depot context auditor`
 

@@ -11,6 +11,16 @@ import type {
 import { rpc } from "./client";
 import { queryClient } from "./query-client";
 
+const LIVE_PAGE_REFETCH_INTERVAL = 5_000;
+
+const liveQueryOptions = {
+  staleTime: 0,
+  refetchOnMount: "always" as const,
+  refetchOnWindowFocus: "always" as const,
+  refetchInterval: LIVE_PAGE_REFETCH_INTERVAL,
+  refetchIntervalInBackground: true,
+};
+
 export const prdsQuery = {
   list: {
     options: () =>
@@ -21,7 +31,7 @@ export const prdsQuery = {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json() as Promise<PrdListResponse>;
         },
-        refetchInterval: 15_000,
+        ...liveQueryOptions,
       }),
     useSuspense: () => useSuspenseQuery(prdsQuery.list.options()),
     ensureQueryData: () => queryClient.ensureQueryData(prdsQuery.list.options()),
@@ -35,7 +45,7 @@ export const prdsQuery = {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json() as Promise<PrdDetailResponse>;
         },
-        refetchInterval: 10_000,
+        ...liveQueryOptions,
       }),
     useSuspense: (id: string) => useSuspenseQuery(prdsQuery.detail.options(id)),
     ensureQueryData: (id: string) => queryClient.ensureQueryData(prdsQuery.detail.options(id)),
@@ -54,7 +64,7 @@ export const reviewsQuery = {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json() as Promise<ReviewDetailResponse>;
         },
-        refetchInterval: 15_000,
+        ...liveQueryOptions,
       }),
     useSuspense: (prdId: string, reviewId: string) =>
       useSuspenseQuery(reviewsQuery.detail.options(prdId, reviewId)),
@@ -75,7 +85,7 @@ export const tasksQuery = {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json() as Promise<TaskDetailResponse>;
         },
-        refetchInterval: 5_000,
+        ...liveQueryOptions,
       }),
     useSuspense: (prdId: string, taskId: string) =>
       useSuspenseQuery(tasksQuery.detail.options(prdId, taskId)),
@@ -93,7 +103,7 @@ export const contextQuery = {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<ContextResponse>;
       },
-      refetchInterval: 30_000,
+      ...liveQueryOptions,
     }),
   useSuspense: () => useSuspenseQuery(contextQuery.options()),
   ensureQueryData: () => queryClient.ensureQueryData(contextQuery.options()),
