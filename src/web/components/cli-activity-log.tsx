@@ -18,7 +18,7 @@ function CliActivityLog({ lines, className }: CliActivityLogProps) {
   return (
     <div
       className={cn(
-        "font-mono text-2xs text-muted-foreground bg-background/50 border border-border rounded-md p-2 space-y-1 overflow-y-auto",
+        "space-y-1 overflow-y-auto rounded-md border border-border bg-background/50 p-2 font-mono text-xs text-muted-foreground",
         className,
       )}
     >

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { Layer, ManagedRuntime } from "effect";
 import type { Database } from "#/db/client";
-import { projects, prds, prdRevisions } from "#/db/schema";
+import { projects, prds, prdRevisions, reviews, tasks, workspaces } from "#/db/schema";
 import { createTestDb } from "../helpers/db";
 
 vi.mock("#/services/database", async (importOriginal) => {
@@ -18,10 +18,124 @@ import { getDb, getRuntime, Db } from "#/services/database";
 import app from "#/web/api";
 
 const { db } = createTestDb();
+const projectId = "proj-test-1";
 
-beforeAll(() => {
+beforeAll(async () => {
   vi.mocked(getDb).mockResolvedValue(db);
   vi.mocked(getRuntime).mockReturnValue(ManagedRuntime.make(Layer.succeed(Db, db)));
+
+  await db.insert(projects).values({
+    id: projectId,
+    name: "Test Project",
+  });
+  await db.insert(prds).values([
+    { id: "prd-1", projectId },
+    { id: "prd-2", projectId },
+  ]);
+  await db.insert(workspaces).values({
+    id: "ws-1",
+    projectId,
+    path: "D:\\Projects\\depot\\.depot-dev",
+    label: "Dev workspace",
+  });
+  await db.insert(prdRevisions).values([
+    {
+      id: "rev-1",
+      prdId: "prd-1",
+      projectId,
+      title: "First PRD",
+      status: "draft",
+      updatedAt: new Date(1000),
+      revision: 1,
+    },
+    {
+      id: "rev-2",
+      prdId: "prd-2",
+      projectId,
+      workspaceId: "ws-1",
+      title: "Second PRD",
+      status: "in_progress",
+      updatedAt: new Date(2000),
+      revision: 1,
+      auditCycles: 1,
+      currentPhase: 2,
+      activatedAt: new Date(1500),
+    },
+  ]);
+  await db.update(prds).set({ currentRevisionId: "rev-1" }).where(eq(prds.id, "prd-1"));
+  await db.update(prds).set({ currentRevisionId: "rev-2" }).where(eq(prds.id, "prd-2"));
+  await db.insert(reviews).values({
+    id: "review-1",
+    prdRevisionId: "rev-2",
+    type: "human",
+    status: "in_progress",
+    phaseNumber: 2,
+    userFeedback: "Address the migration edge case.",
+    createdAt: new Date(2500),
+    updatedAt: new Date(2500),
+  });
+  await db.insert(tasks).values([
+    {
+      id: "task-1",
+      prdRevisionId: "rev-2",
+      position: 1,
+      title: "Ship the redesign",
+      description: "Intent:\nShip the redesign",
+      descriptionFormat: "structured_v1",
+      doneCriteria: "Redesign is shipped",
+      dependsOn: "[]",
+      effort: "m",
+      status: "done",
+      createdAt: new Date(2100),
+      startedAt: new Date(2200),
+      completedAt: new Date(2300),
+    },
+    {
+      id: "task-2",
+      prdRevisionId: "rev-2",
+      position: 2,
+      title: "Polish the drawer flow",
+      description: "Intent:\nPolish the drawer flow",
+      descriptionFormat: "structured_v1",
+      doneCriteria: "Drawer flow is polished",
+      dependsOn: "[]",
+      effort: "s",
+      status: "in_progress",
+      createdAt: new Date(2400),
+      startedAt: new Date(2450),
+    },
+    {
+      id: "finding-1",
+      prdRevisionId: "rev-2",
+      position: 3,
+      title: "Handle the blocked review path",
+      description: "Intent:\nHandle the blocked review path",
+      descriptionFormat: "structured_v1",
+      doneCriteria: "Blocked review path handled",
+      dependsOn: "[]",
+      effort: "s",
+      status: "pending",
+      reviewId: "review-1",
+      severity: "major",
+      createdAt: new Date(2550),
+    },
+    {
+      id: "finding-2",
+      prdRevisionId: "rev-2",
+      position: 4,
+      title: "Close the empty state gap",
+      description: "Intent:\nClose the empty state gap",
+      descriptionFormat: "structured_v1",
+      doneCriteria: "Empty state gap closed",
+      dependsOn: "[]",
+      effort: "xs",
+      status: "done",
+      reviewId: "review-1",
+      severity: "minor",
+      createdAt: new Date(2600),
+      completedAt: new Date(2650),
+    },
+  ]);
 });
 
 describe("web api", () => {
@@ -40,40 +154,6 @@ describe("web api", () => {
   });
 
   describe("GET /api/prds", () => {
-    beforeAll(async () => {
-      const projectId = "proj-test-1";
-      await db.insert(projects).values({
-        id: projectId,
-        name: "Test Project",
-      });
-      await db.insert(prds).values([
-        { id: "prd-1", projectId },
-        { id: "prd-2", projectId },
-      ]);
-      await db.insert(prdRevisions).values([
-        {
-          id: "rev-1",
-          prdId: "prd-1",
-          projectId,
-          title: "First PRD",
-          status: "draft",
-          updatedAt: new Date(1000),
-          revision: 1,
-        },
-        {
-          id: "rev-2",
-          prdId: "prd-2",
-          projectId,
-          title: "Second PRD",
-          status: "in_progress",
-          updatedAt: new Date(2000),
-          revision: 1,
-        },
-      ]);
-      await db.update(prds).set({ currentRevisionId: "rev-1" }).where(eq(prds.id, "prd-1"));
-      await db.update(prds).set({ currentRevisionId: "rev-2" }).where(eq(prds.id, "prd-2"));
-    });
-
     it("returns 200 with prds array", async () => {
       const res = await app.request("/api/prds");
       expect(res.status).toBe(200);
@@ -109,11 +189,69 @@ describe("web api", () => {
       const res = await app.request("/api/prds");
       expect(res.status).toBe(200);
       const { prds } = await res.json();
-      expect(prds.length).toBeGreaterThan(0);
-      expect(typeof prds[0].totalTasks).toBe("number");
-      expect(typeof prds[0].doneTasks).toBe("number");
-      expect(prds[0].totalTasks).toBe(0);
-      expect(prds[0].doneTasks).toBe(0);
+      const draftPrd = prds.find((prd: { id: string }) => prd.id === "rev-1");
+      expect(draftPrd).toBeDefined();
+      expect(typeof draftPrd.totalTasks).toBe("number");
+      expect(typeof draftPrd.doneTasks).toBe("number");
+      expect(draftPrd.totalTasks).toBe(0);
+      expect(draftPrd.doneTasks).toBe(0);
+    });
+
+    it("inclut latestReview et previewTasks pour les PRD en review", async () => {
+      const res = await app.request("/api/prds");
+      expect(res.status).toBe(200);
+      const { prds } = await res.json();
+      const activePrd = prds.find((prd: { id: string }) => prd.id === "rev-2");
+
+      expect(activePrd).toMatchObject({
+        totalTasks: 2,
+        doneTasks: 1,
+        inProgressTasks: 1,
+        blockedTasks: 0,
+        skippedTasks: 0,
+        latestReview: {
+          id: "review-1",
+          status: "in_progress",
+          findingsCount: 2,
+          resolvedCount: 1,
+          pendingCount: 1,
+          majorCount: 1,
+          minorCount: 1,
+        },
+      });
+      expect(activePrd.previewTasks).toEqual([
+        {
+          id: "finding-2",
+          title: "Close the empty state gap",
+          status: "done",
+        },
+        {
+          id: "finding-1",
+          title: "Handle the blocked review path",
+          status: "pending",
+        },
+      ]);
+    });
+  });
+
+  describe("GET /api/prds/:id (enrichi)", () => {
+    it("retourne workspace et phaseNumber pour les reviews", async () => {
+      const res = await app.request("/api/prds/rev-2");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.workspace).toMatchObject({
+        id: "ws-1",
+        path: "D:\\Projects\\depot\\.depot-dev",
+        label: "Dev workspace",
+      });
+      expect(body.reviews).toContainEqual(
+        expect.objectContaining({
+          id: "review-1",
+          phaseNumber: 2,
+          userFeedback: "Address the migration edge case.",
+        }),
+      );
     });
   });
 

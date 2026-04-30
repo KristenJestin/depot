@@ -1,3 +1,5 @@
+import { MinusIcon } from "lucide-react";
+
 import { getTaskDescriptionSections } from "#/modules/tasks/spec";
 
 interface TaskLike {
@@ -20,7 +22,7 @@ export function TaskDetail({ task }: { task: TaskLike }) {
               <ul className="space-y-0.5 text-xs text-muted-foreground">
                 {section.lines.map((line, i) => (
                   <li key={i} className="flex gap-1.5 leading-normal">
-                    <span className="shrink-0">—</span>
+                    <MinusIcon className="mt-0.5 size-3 shrink-0" />
                     <span>{line}</span>
                   </li>
                 ))}

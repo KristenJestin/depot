@@ -65,5 +65,12 @@ export const PRESETS: Record<DotLoaderPreset, Partial<DotLoaderProps>> = {
     speed: 8,
     shape: "rounded",
   },
-  terminal: { rows: 5, cols: 5, pattern: "fill", color: "#22c55e", speed: 6, shape: "square" },
+  terminal: {
+    rows: 5,
+    cols: 5,
+    pattern: "fill",
+    color: "var(--color-success)",
+    speed: 6,
+    shape: "square",
+  },
 };

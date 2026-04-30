@@ -1,30 +1,19 @@
 import * as React from "react";
 import {
+  BadgeXIcon,
   CircleCheckIcon,
   CircleDashedIcon,
-  CircleDotIcon,
-  CircleMinusIcon,
-  CircleXIcon,
+  CircleIcon,
+  CirclePlayIcon,
+  CircleSlash2Icon,
+  Clock3Icon,
 } from "lucide-react";
 
+import { Badge } from "#/web/components/ui/badge";
 import { cn } from "#/web/lib/utils";
 import type { PrdStatus, TaskStatus } from "#/shared/validator";
 
 type AllStatus = PrdStatus | TaskStatus;
-
-const statusColor: Record<AllStatus, string> = {
-  // PRD
-  draft: "bg-foreground/10 text-muted-foreground",
-  ready: "bg-chart-3/15 text-chart-3",
-  canceled: "bg-destructive/15 text-destructive",
-  // Task
-  pending: "bg-foreground/10 text-muted-foreground",
-  blocked: "bg-chart-4/15 text-chart-4",
-  skipped: "bg-foreground/10 text-muted-foreground",
-  // Common
-  in_progress: "bg-chart-1/15 text-chart-1",
-  done: "bg-chart-5/15 text-chart-5",
-};
 
 const statusLabel: Record<AllStatus, string> = {
   draft: "Draft",
@@ -33,20 +22,31 @@ const statusLabel: Record<AllStatus, string> = {
   pending: "Pending",
   blocked: "Blocked",
   skipped: "Skipped",
-  in_progress: "In progress",
+  in_progress: "In Progress",
   done: "Done",
+};
+
+const statusVariant: Record<AllStatus, React.ComponentProps<typeof Badge>["variant"]> = {
+  draft: "statusDraft",
+  ready: "statusReady",
+  canceled: "statusCanceled",
+  pending: "outline",
+  blocked: "statusInProgress",
+  skipped: "outline",
+  in_progress: "statusInProgress",
+  done: "statusDone",
 };
 
 type IconComponent = React.ComponentType<{ className?: string }>;
 
 const statusIcon: Record<AllStatus, IconComponent> = {
   draft: CircleDashedIcon,
-  ready: CircleCheckIcon,
-  canceled: CircleXIcon,
-  pending: CircleDashedIcon,
-  blocked: CircleXIcon,
-  skipped: CircleMinusIcon,
-  in_progress: CircleDotIcon,
+  ready: CirclePlayIcon,
+  canceled: CircleSlash2Icon,
+  pending: CircleIcon,
+  blocked: BadgeXIcon,
+  skipped: CircleSlash2Icon,
+  in_progress: Clock3Icon,
   done: CircleCheckIcon,
 };
 
@@ -54,27 +54,22 @@ export interface StatusBadgeProps extends React.HTMLAttributes<HTMLSpanElement> 
   status: AllStatus | string | null | undefined;
 }
 
-function StatusBadge({ status, className, ...props }: StatusBadgeProps) {
+export function StatusBadge({ status, className, ...props }: StatusBadgeProps) {
   const knownStatus = status as AllStatus;
   const Icon = statusIcon[knownStatus];
 
-  if (!Icon) return null;
-
-  const isActive = knownStatus === "in_progress";
+  if (!Icon) {
+    return null;
+  }
 
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium",
-        statusColor[knownStatus],
-        className,
-      )}
+    <Badge
+      className={cn("rounded-lg px-2 py-1 text-xs", className)}
+      variant={statusVariant[knownStatus]}
       {...props}
     >
-      <Icon className={cn("size-3 shrink-0", isActive && "animate-pulse")} />
+      <Icon className={cn("size-3 shrink-0", knownStatus === "in_progress" && "animate-pulse")} />
       {statusLabel[knownStatus]}
-    </span>
+    </Badge>
   );
 }
-
-export { StatusBadge };

@@ -10,7 +10,7 @@ export const Route = createFileRoute("/prds/$id")({
     return data;
   },
   pendingComponent: () => (
-    <div className="flex items-center justify-center h-full">
+    <div className="flex h-full items-center justify-center bg-app-gradient">
       <DotLoader preset="thinking" label="Loading…" />
     </div>
   ),

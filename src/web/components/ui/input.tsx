@@ -9,9 +9,9 @@ function Input({ className, ...props }: InputProps) {
   return (
     <BaseInput
       className={cn(
-        "w-full rounded-md border border-border bg-input px-3 py-1.5 text-sm text-foreground",
+        "w-full rounded-lg border border-card-border bg-input px-3 py-2 text-sm text-foreground shadow-sm",
         "placeholder:text-muted-foreground",
-        "focus:outline-none focus:ring-1 focus:ring-ring",
+        "focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-primary",
         "disabled:cursor-not-allowed disabled:opacity-50",
         "transition-shadow",
         className,

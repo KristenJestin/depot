@@ -10,9 +10,9 @@ export type FileChange = {
 
 function fileIconColor(path: string): string {
   const ext = path.split(".").pop() ?? "";
-  if (["ts", "tsx"].includes(ext)) return "text-blue-400";
-  if (["js", "jsx"].includes(ext)) return "text-amber-400";
-  if (["json", "yaml", "yml"].includes(ext)) return "text-emerald-400";
+  if (["ts", "tsx"].includes(ext)) return "text-primary";
+  if (["js", "jsx"].includes(ext)) return "text-warning";
+  if (["json", "yaml", "yml"].includes(ext)) return "text-success";
   return "text-muted-foreground";
 }
 

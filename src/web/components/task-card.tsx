@@ -43,7 +43,7 @@ export function TaskCard({ task, onClick }: { task: Task; onClick?: () => void }
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1.5">
-          <span className="font-mono text-2xs uppercase text-muted-foreground tracking-wider">
+          <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
             #{task.position}
           </span>
           <StatusBadge status={task.status} />

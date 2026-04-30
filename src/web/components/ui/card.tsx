@@ -1,25 +1,19 @@
-import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 
 import { cn } from "#/web/lib/utils";
 
-const cardVariants = cva("rounded-xl border border-border bg-card text-card-foreground", {
-  variants: {
-    size: {
-      default: "p-6",
-      sm: "p-4",
-    },
-  },
-  defaultVariants: {
-    size: "default",
-  },
-});
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {}
 
-export interface CardProps
-  extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof cardVariants> {}
-
-function CardRoot({ className, size, ...props }: CardProps) {
-  return <div className={cn(cardVariants({ size }), className)} {...props} />;
+function CardRoot({ className, ...props }: CardProps) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border border-card-border bg-card text-card-foreground shadow-card",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
@@ -49,7 +43,7 @@ function CardFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-2 mt-4 pt-4 border-t border-border",
+        "mt-4 flex items-center justify-between gap-2 border-t border-card-border pt-4",
         className,
       )}
       {...props}
@@ -70,4 +64,4 @@ const Card = Object.assign(CardRoot, {
   Action: CardAction,
 });
 
-export { Card, cardVariants };
+export { Card };

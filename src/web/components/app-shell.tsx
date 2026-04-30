@@ -55,9 +55,9 @@ function WorkspaceSwitcher() {
       >
         <FolderOpen className="size-3.5 shrink-0 text-sidebar-foreground/60" />
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium truncate text-sidebar-accent-foreground">{label}</div>
+          <div className="truncate text-xs font-medium text-sidebar-accent-foreground">{label}</div>
           {projectName && (
-            <div className="text-2xs text-sidebar-foreground/50 truncate">{projectName}</div>
+            <div className="truncate text-xs text-sidebar-foreground/50">{projectName}</div>
           )}
         </div>
         <ChevronsUpDownIcon className="size-3 shrink-0 text-sidebar-foreground/40" />
@@ -87,8 +87,8 @@ function WorkspaceSwitcher() {
                     className={cn("size-3 shrink-0", isSelected ? "opacity-100" : "opacity-0")}
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{workspaceDisplayName(ws)}</div>
-                    <div className="text-2xs text-muted-foreground truncate">{ws.projectName}</div>
+                    <div className="truncate text-xs font-medium">{workspaceDisplayName(ws)}</div>
+                    <div className="truncate text-xs text-muted-foreground">{ws.projectName}</div>
                   </div>
                 </button>
               );
@@ -104,16 +104,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
-      <aside className="flex flex-col shrink-0 w-(--sidebar-width) bg-sidebar border-r border-sidebar-border">
+      <aside className="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
         {/* Logo */}
         <div className="px-3 pt-3 pb-2">
           <div className="flex items-center gap-2">
-            <div className="shrink-0 size-5.5 rounded-md depot-logo-gradient" />
+            <div className="size-6 shrink-0 rounded-md depot-logo-gradient" />
             <div>
               <div className="text-sm font-semibold text-sidebar-accent-foreground leading-tight">
                 depot
               </div>
-              <div className="text-2xs text-sidebar-foreground/60 leading-tight">serve</div>
+              <div className="text-xs leading-tight text-sidebar-foreground/60">serve</div>
             </div>
           </div>
         </div>
@@ -145,7 +145,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Version */}
         <div className="px-3 pt-1.5 pb-2.5 border-t border-sidebar-border">
-          <span className="font-mono text-2xs text-sidebar-foreground/60">v0.1.0 · serve</span>
+          <span className="font-mono text-xs text-sidebar-foreground/60">v0.1.0 · serve</span>
         </div>
       </aside>
 

@@ -20,7 +20,7 @@ export function FindingRow({ finding }: { finding: FindingTask }) {
       <div className="flex-1 min-w-0">
         <div
           className={cn(
-            "font-mono text-2xs tracking-wider mb-0.5",
+            "mb-0.5 font-mono text-xs tracking-wider",
             finding.severity === "critical" ? "text-destructive" : "text-warning",
           )}
         >

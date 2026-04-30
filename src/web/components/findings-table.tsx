@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRightIcon } from "lucide-react";
+import { ArrowRightIcon, ChevronRightIcon } from "lucide-react";
 
+import { Badge } from "./ui/badge";
 import { StatusBadge } from "./ui/status-badge";
 
 interface Finding {
@@ -16,11 +17,11 @@ interface FindingsTableProps {
   onViewAll?: () => void;
 }
 
-const severityIcon: Record<string, { icon: string; className: string }> = {
-  critical: { icon: "●", className: "text-destructive" },
-  major: { icon: "▲", className: "text-chart-4" },
-  minor: { icon: "–", className: "text-chart-3" },
-  info: { icon: "ℹ", className: "text-muted-foreground" },
+const severityVariant: Record<string, React.ComponentProps<typeof Badge>["variant"]> = {
+  critical: "severityCritical",
+  major: "severityMajor",
+  minor: "severityMinor",
+  info: "severityInfo",
 };
 
 export function FindingsTable({ findings, prdId, onViewAll }: FindingsTableProps) {
@@ -34,28 +35,28 @@ export function FindingsTable({ findings, prdId, onViewAll }: FindingsTableProps
           <button
             type="button"
             onClick={onViewAll}
-            className="text-xs text-primary hover:underline"
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
           >
-            View all findings →
+            <span>View all findings</span>
+            <ArrowRightIcon className="size-3" />
           </button>
         )}
       </div>
       <div className="divide-y divide-border">
         {findings.map((f, i) => {
-          const sev =
-            (f.severity !== null ? severityIcon[f.severity] : undefined) ?? severityIcon["info"]!;
+          const severity = f.severity ?? "info";
           return (
             <div
               key={f.id}
               className="flex items-center gap-2 px-2 py-1.5 hover:bg-secondary/40 cursor-pointer"
               onClick={() =>
-                navigate({ to: "/prds/$id/tasks/$taskId", params: { id: prdId, taskId: f.id } })
+                navigate({ to: "/prds/$id", params: { id: prdId }, search: { taskId: f.id } })
               }
             >
-              <span className={`w-4 text-center text-xs shrink-0 ${sev.className}`}>
-                {sev.icon}
+              <span className="shrink-0">
+                <Badge variant={severityVariant[severity]}>{severity}</Badge>
               </span>
-              <span className="font-mono text-xs text-muted-foreground w-9 shrink-0">
+              <span className="w-9 shrink-0 font-mono text-xs text-muted-foreground">
                 F-{i + 1}
               </span>
               <span className="shrink-0">

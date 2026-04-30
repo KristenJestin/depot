@@ -14,21 +14,182 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
     prdList.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
     const allTaskRows = await db.query.tasks.findMany({
-      columns: { prdRevisionId: true, status: true, reviewId: true },
+      columns: {
+        id: true,
+        prdRevisionId: true,
+        title: true,
+        position: true,
+        status: true,
+        reviewId: true,
+        severity: true,
+      },
+      orderBy: { position: "asc" },
     });
-    const taskRows = allTaskRows.filter((t) => t.reviewId === null);
+    const reviewRows = await db.query.reviews.findMany({
+      columns: {
+        id: true,
+        prdRevisionId: true,
+        type: true,
+        status: true,
+        createdAt: true,
+        doneAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
 
-    const taskCounts = new Map<string, { total: number; done: number }>();
-    for (const task of taskRows) {
-      const entry = taskCounts.get(task.prdRevisionId) ?? { total: 0, done: 0 };
-      entry.total++;
-      if (task.status === "done" || task.status === "skipped") entry.done++;
-      taskCounts.set(task.prdRevisionId, entry);
+    const taskCounts = new Map<
+      string,
+      {
+        totalTasks: number;
+        doneTasks: number;
+        inProgressTasks: number;
+        blockedTasks: number;
+        skippedTasks: number;
+      }
+    >();
+    const baseTaskMap = new Map<string, typeof allTaskRows>();
+    const reviewTaskMap = new Map<string, typeof allTaskRows>();
+    const reviewsByRevision = new Map<string, typeof reviewRows>();
+    const reviewTaskCounts = new Map<
+      string,
+      {
+        findingsCount: number;
+        resolvedCount: number;
+        activeCount: number;
+        pendingCount: number;
+        criticalCount: number;
+        majorCount: number;
+        minorCount: number;
+        infoCount: number;
+      }
+    >();
+
+    for (const review of reviewRows) {
+      const entry = reviewsByRevision.get(review.prdRevisionId) ?? [];
+      entry.push(review);
+      reviewsByRevision.set(review.prdRevisionId, entry);
+    }
+
+    for (const task of allTaskRows) {
+      if (task.reviewId === null) {
+        const entry = taskCounts.get(task.prdRevisionId) ?? {
+          totalTasks: 0,
+          doneTasks: 0,
+          inProgressTasks: 0,
+          blockedTasks: 0,
+          skippedTasks: 0,
+        };
+
+        entry.totalTasks++;
+        if (task.status === "done" || task.status === "skipped") {
+          entry.doneTasks++;
+        }
+        if (task.status === "in_progress") {
+          entry.inProgressTasks++;
+        }
+        if (task.status === "blocked") {
+          entry.blockedTasks++;
+        }
+        if (task.status === "skipped") {
+          entry.skippedTasks++;
+        }
+
+        taskCounts.set(task.prdRevisionId, entry);
+        const tasksForRevision = baseTaskMap.get(task.prdRevisionId) ?? [];
+        tasksForRevision.push(task);
+        baseTaskMap.set(task.prdRevisionId, tasksForRevision);
+        continue;
+      }
+
+      const tasksForReview = reviewTaskMap.get(task.reviewId) ?? [];
+      tasksForReview.push(task);
+      reviewTaskMap.set(task.reviewId, tasksForReview);
+
+      const entry = reviewTaskCounts.get(task.reviewId) ?? {
+        findingsCount: 0,
+        resolvedCount: 0,
+        activeCount: 0,
+        pendingCount: 0,
+        criticalCount: 0,
+        majorCount: 0,
+        minorCount: 0,
+        infoCount: 0,
+      };
+
+      entry.findingsCount++;
+
+      if (task.status === "done" || task.status === "skipped") {
+        entry.resolvedCount++;
+      } else if (task.status === "in_progress" || task.status === "blocked") {
+        entry.activeCount++;
+      } else {
+        entry.pendingCount++;
+      }
+
+      if (task.severity === "critical") {
+        entry.criticalCount++;
+      } else if (task.severity === "major") {
+        entry.majorCount++;
+      } else if (task.severity === "minor") {
+        entry.minorCount++;
+      } else if (task.severity === "info") {
+        entry.infoCount++;
+      }
+
+      reviewTaskCounts.set(task.reviewId, entry);
     }
 
     const prds = prdList.map((p) => {
-      const counts = taskCounts.get(p.id) ?? { total: 0, done: 0 };
-      return { ...p, totalTasks: counts.total, doneTasks: counts.done };
+      const counts = taskCounts.get(p.id) ?? {
+        totalTasks: 0,
+        doneTasks: 0,
+        inProgressTasks: 0,
+        blockedTasks: 0,
+        skippedTasks: 0,
+      };
+      const reviewsForRevision = reviewsByRevision.get(p.id) ?? [];
+      const latestReviewRow = reviewsForRevision.at(-1) ?? null;
+      const latestReviewWithOpenFindings = [...reviewsForRevision].reverse().find((review) => {
+        const counts = reviewTaskCounts.get(review.id);
+        return counts ? counts.activeCount + counts.pendingCount > 0 : false;
+      });
+
+      const latestReview = latestReviewRow
+        ? {
+            ...latestReviewRow,
+            ...(reviewTaskCounts.get(latestReviewRow.id) ?? {
+              findingsCount: 0,
+              resolvedCount: 0,
+              activeCount: 0,
+              pendingCount: 0,
+              criticalCount: 0,
+              majorCount: 0,
+              minorCount: 0,
+              infoCount: 0,
+            }),
+          }
+        : null;
+
+      const previewTasksSource =
+        p.status === "in_progress" && latestReviewWithOpenFindings
+          ? (reviewTaskMap.get(latestReviewWithOpenFindings.id) ?? [])
+          : (baseTaskMap.get(p.id) ?? []);
+
+      const previewTasks = [...previewTasksSource]
+        .sort((a, b) => compareTaskStatus(a.status, b.status) || a.position - b.position)
+        .slice(0, 5)
+        .map((task) => ({
+          id: task.id,
+          title: task.title,
+          status: task.status,
+        }));
+
+      return {
+        ...p,
+        ...counts,
+        latestReview,
+        previewTasks,
+      };
     });
 
     return c.json({ prds }, 200);
@@ -49,6 +210,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
           id: r.id,
           type: r.type,
           status: r.status,
+          phaseNumber: r.phaseNumber,
           createdAt: r.createdAt,
           doneAt: r.doneAt,
           userFeedback: r.userFeedback,
@@ -58,6 +220,12 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
     );
 
     const revisions = await getRuntime().runPromise(DomainPrds.listPrdFamily(prd.prdId));
+    const workspace = prd.workspaceId
+      ? await c.var.db.query.workspaces.findFirst({
+          where: { id: prd.workspaceId },
+          columns: { id: true, path: true, label: true },
+        })
+      : null;
 
     const activityRows = await getRuntime().runPromise(
       DomainActivity.listActivityForRevision(prd.id),
@@ -70,7 +238,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       createdAt: a.createdAt,
     }));
 
-    return c.json({ prd, tasks, reviews, revisions, activity }, 200);
+    return c.json({ prd, tasks, reviews, revisions, activity, workspace }, 200);
   })
   .get("/prds/:id/tasks/:taskId", async (c) => {
     const { id, taskId } = c.req.param();
@@ -113,3 +281,17 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       200,
     );
   });
+
+function compareTaskStatus(statusA: string, statusB: string): number {
+  const order = {
+    done: 0,
+    skipped: 1,
+    in_progress: 2,
+    blocked: 3,
+    pending: 4,
+  } as const;
+
+  return (
+    (order[statusA as keyof typeof order] ?? 99) - (order[statusB as keyof typeof order] ?? 99)
+  );
+}

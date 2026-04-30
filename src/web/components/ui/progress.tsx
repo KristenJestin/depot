@@ -12,14 +12,14 @@ export interface ProgressBarProps {
 function ProgressBar({ value, showLabel = false, className }: ProgressBarProps) {
   return (
     <Progress.Root value={value} className={cn("flex items-center gap-3 w-full", className)}>
-      <Progress.Track className="flex-1 h-1.5 rounded-full bg-secondary overflow-hidden">
+      <Progress.Track className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
         <Progress.Indicator
-          className="bg-primary h-full rounded-full transition-[width] duration-500 ease-out"
+          className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
           style={{ width: `${value ?? 0}%` }}
         />
       </Progress.Track>
       {showLabel && (
-        <Progress.Value className="text-xs text-muted-foreground w-8 text-right font-medium shrink-0" />
+        <Progress.Value className="w-8 shrink-0 text-right text-xs font-medium text-muted-foreground" />
       )}
     </Progress.Root>
   );
