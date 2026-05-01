@@ -414,6 +414,8 @@ export const reloadPrdBatch = (input: ReloadPrdBatchInput) =>
       );
     }
 
+    yield* validatePhaseSequence(input.tasks);
+
     const result = yield* Effect.try({
       try: () =>
         db.transaction((tx) => {
@@ -532,6 +534,8 @@ export type LoadPrdBatchInput = {
 export const loadPrdBatch = (input: LoadPrdBatchInput) =>
   Effect.gen(function* () {
     const db = yield* Db;
+
+    yield* validatePhaseSequence(input.tasks);
 
     const result = yield* Effect.try({
       try: () =>
@@ -766,3 +770,44 @@ export const phaseAdvance = (id: string) =>
       return { prd: rows[0]!, advanced: false as const };
     }
   });
+
+function validatePhaseSequence(tasksInput: BatchTaskInput[]) {
+  const phaseNumbers = tasksInput.map((task) => task.phaseNumber ?? null);
+  const hasPhases = phaseNumbers.some((phaseNumber) => phaseNumber !== null);
+
+  if (!hasPhases) {
+    return Effect.succeed(undefined);
+  }
+
+  const unphasedTaskIndex = phaseNumbers.findIndex((phaseNumber) => phaseNumber === null);
+  if (unphasedTaskIndex !== -1) {
+    return Effect.fail(
+      new ValidationError({
+        reason: `Invalid phase plan: task at index ${unphasedTaskIndex} has no phaseNumber while other tasks are phased. Either phase every task or leave every task unphased.`,
+      }),
+    );
+  }
+
+  const uniquePhases = [...new Set(phaseNumbers as number[])].sort((a, b) => a - b);
+  if (uniquePhases[0] !== 1) {
+    return Effect.fail(
+      new ValidationError({
+        reason: `Invalid phase plan: phases must start at 1, found ${uniquePhases[0]}.`,
+      }),
+    );
+  }
+
+  for (let i = 0; i < uniquePhases.length; i++) {
+    const expectedPhase = i + 1;
+    const actualPhase = uniquePhases[i]!;
+    if (actualPhase !== expectedPhase) {
+      return Effect.fail(
+        new ValidationError({
+          reason: `Invalid phase plan: phases must be contiguous starting at 1, missing phase ${expectedPhase}.`,
+        }),
+      );
+    }
+  }
+
+  return Effect.succeed(undefined);
+}

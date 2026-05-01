@@ -220,6 +220,115 @@ describe("e2e prd lifecycle", () => {
     );
   });
 
+  it("rejects mixed phased and unphased PRD task plans", async () => {
+    const project = await runE(Projects.createProject({ name: "e2e-phase-mixed-plan" }));
+
+    await expect(
+      runE(
+        Prds.loadPrdBatch({
+          projectId: project.id,
+          title: "Mixed Phase PRD",
+          ready: true,
+          tasks: [
+            {
+              title: "Phase 1 task",
+              description: "Implement phase 1",
+              doneCriteria: "Phase 1 implemented",
+              effort: "s",
+              dependsOn: [],
+              phaseNumber: 1,
+            },
+            {
+              title: "Unphased task",
+              description: "This task has no phase",
+              doneCriteria: "Task completed",
+              effort: "s",
+              dependsOn: [],
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/has no phaseNumber while other tasks are phased/i);
+  });
+
+  it("rejects non-contiguous PRD task phase plans", async () => {
+    const project = await runE(Projects.createProject({ name: "e2e-phase-gapped-plan" }));
+
+    await expect(
+      runE(
+        Prds.loadPrdBatch({
+          projectId: project.id,
+          title: "Gapped Phase PRD",
+          ready: true,
+          tasks: [
+            {
+              title: "Phase 1 task",
+              description: "Implement phase 1",
+              doneCriteria: "Phase 1 implemented",
+              effort: "s",
+              dependsOn: [],
+              phaseNumber: 1,
+            },
+            {
+              title: "Phase 3 task",
+              description: "Implement phase 3",
+              doneCriteria: "Phase 3 implemented",
+              effort: "s",
+              dependsOn: [],
+              phaseNumber: 3,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/missing phase 2/i);
+  });
+
+  it("rejects invalid phase plans when reloading draft PRDs", async () => {
+    const project = await runE(Projects.createProject({ name: "e2e-phase-reload-invalid" }));
+    const { prd } = await runE(
+      Prds.loadPrdBatch({
+        projectId: project.id,
+        title: "Draft Reload PRD",
+        tasks: [
+          {
+            title: "Initial task",
+            description: "Draft task",
+            doneCriteria: "Draft task complete",
+            effort: "s",
+            dependsOn: [],
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      runE(
+        Prds.reloadPrdBatch({
+          prdRevisionId: prd.id,
+          title: "Draft Reload PRD",
+          tasks: [
+            {
+              title: "Phase 1 task",
+              description: "Implement phase 1",
+              doneCriteria: "Phase 1 implemented",
+              effort: "s",
+              dependsOn: [],
+              phaseNumber: 1,
+            },
+            {
+              title: "Phase 3 task",
+              description: "Implement phase 3",
+              doneCriteria: "Phase 3 implemented",
+              effort: "s",
+              dependsOn: [],
+              phaseNumber: 3,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/missing phase 2/i);
+  });
+
   it("advances phases and closes the PRD after the last phase when reviews and tasks are complete", async () => {
     const project = await runE(Projects.createProject({ name: "e2e-phase-advance-happy" }));
     const workspace = await createTestWorkspace(project.id, "/tmp/depot-e2e-phase-advance-happy");

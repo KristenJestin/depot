@@ -1,5 +1,7 @@
 import { Hono } from "hono";
+import { asc, inArray } from "drizzle-orm";
 
+import { reviews, tasks } from "#/db/schema";
 import { getRuntime } from "#/services/database";
 import * as DomainPrds from "#/modules/prds/domain";
 import * as DomainTasks from "#/modules/tasks/domain";
@@ -13,29 +15,38 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
     const prdList = await getRuntime().runPromise(DomainPrds.listPrds({ latestOnly: true }));
     prdList.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
-    const allTaskRows = await db.query.tasks.findMany({
-      columns: {
-        id: true,
-        prdRevisionId: true,
-        title: true,
-        position: true,
-        status: true,
-        reviewId: true,
-        severity: true,
-      },
-      orderBy: { position: "asc" },
-    });
-    const reviewRows = await db.query.reviews.findMany({
-      columns: {
-        id: true,
-        prdRevisionId: true,
-        type: true,
-        status: true,
-        createdAt: true,
-        doneAt: true,
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    const prdRevisionIds = prdList.map((prd) => prd.id);
+    const allTaskRows =
+      prdRevisionIds.length === 0
+        ? []
+        : await db
+            .select({
+              id: tasks.id,
+              prdRevisionId: tasks.prdRevisionId,
+              title: tasks.title,
+              position: tasks.position,
+              status: tasks.status,
+              reviewId: tasks.reviewId,
+              severity: tasks.severity,
+            })
+            .from(tasks)
+            .where(inArray(tasks.prdRevisionId, prdRevisionIds))
+            .orderBy(asc(tasks.position));
+    const reviewRows =
+      prdRevisionIds.length === 0
+        ? []
+        : await db
+            .select({
+              id: reviews.id,
+              prdRevisionId: reviews.prdRevisionId,
+              type: reviews.type,
+              status: reviews.status,
+              createdAt: reviews.createdAt,
+              doneAt: reviews.doneAt,
+            })
+            .from(reviews)
+            .where(inArray(reviews.prdRevisionId, prdRevisionIds))
+            .orderBy(asc(reviews.createdAt));
 
     const taskCounts = new Map<
       string,
