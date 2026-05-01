@@ -227,8 +227,10 @@ Representative log item shape:
   "kind": "success",
   "payload": {
     "items": [
-      { "target": "opencode", "mode": "prd", "filePath": "..." },
-      { "target": "opencode", "mode": "dev", "filePath": "..." }
+      { "target": "opencode", "mode": "prd", "kind": "command", "filePath": "..." },
+      { "target": "opencode", "mode": "dev", "kind": "command", "filePath": "..." },
+      { "target": "codex", "mode": "prd", "kind": "skill", "filePath": ".../SKILL.md" },
+      { "target": "codex", "mode": "prd", "kind": "skill", "filePath": ".../agents/openai.yaml" }
     ]
   }
 }

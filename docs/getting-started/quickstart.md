@@ -121,13 +121,13 @@ depot context auditor <prd-id>
 
 `depot context` turns stored workflow state into agent-ready prompts.
 
-## Install Slash Commands
+## Install Agent Integrations
 
 ```bash
 depot install --all
 ```
 
-This writes `depot-prd.md` and `depot-dev.md` command files for supported agents. Those files inject `depot context <mode>` output directly into the prompt, so the agent receives fresh depot state immediately.
+This writes `depot-prd` and `depot-dev` integrations for supported agents. OpenCode and Claude Code receive slash-command files; Codex receives explicitly invoked skills in `~/.agents/skills`. Each integration loads `depot context <mode>` so the agent receives fresh depot state immediately.
 
 ## Start The Web UI
 

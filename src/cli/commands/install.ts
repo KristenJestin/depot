@@ -4,7 +4,7 @@ import { command } from "#/cli/command";
 import { buildInstallWrites, resolveInstallTargets } from "#/modules/install/agent";
 
 export const installCommand = command({
-  meta: { name: "install", description: "Install depot slash commands for supported agents" },
+  meta: { name: "install", description: "Install depot agent integrations for supported tools" },
   args: {
     opencode: {
       schema: Schema.Boolean,
@@ -18,11 +18,17 @@ export const installCommand = command({
       default: false,
       description: "Install Claude Code commands",
     },
+    codex: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      default: false,
+      description: "Install Codex skills",
+    },
     all: {
       schema: Schema.Boolean,
       type: "boolean",
       default: false,
-      description: "Install commands for all supported agents",
+      description: "Install integrations for all supported agents",
     },
   },
   run: async ({ args, output }) => {
@@ -33,6 +39,7 @@ export const installCommand = command({
         {
           opencode: args.opencode,
           claudeCode: args["claude-code"],
+          codex: args.codex,
           all: args.all,
         },
         {
@@ -54,13 +61,18 @@ export const installCommand = command({
       }
       await fs.writeFile(write.filePath, write.content, "utf-8");
       if (!output.isJson()) {
-        output.print(`Wrote ${write.target} command ${write.mode}: ${write.filePath}`);
+        output.print(`Wrote ${write.target} ${write.kind} ${write.mode}: ${write.filePath}`);
       }
     }
 
     if (output.isJson()) {
       output.success({
-        items: writes.map((w) => ({ target: w.target, mode: w.mode, filePath: w.filePath })),
+        items: writes.map((w) => ({
+          target: w.target,
+          mode: w.mode,
+          kind: w.kind,
+          filePath: w.filePath,
+        })),
       });
     }
   },

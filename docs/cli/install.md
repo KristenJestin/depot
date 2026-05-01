@@ -1,21 +1,22 @@
 # Install Command
 
-`depot install` writes slash-command files for supported agent tools.
+`depot install` writes integration files for supported agent tools.
 
 ## Usage
 
 ```bash
-depot install [--opencode] [--claude-code] [--all]
+depot install [--opencode] [--claude-code] [--codex] [--all]
 ```
 
 ## Targets
 
 - OpenCode: `~/.config/opencode/commands/`
 - Claude Code: `~/.claude/commands/`
+- Codex: `~/.agents/skills/`
 
-Without an explicit flag, `depot install` scans the canonical directories and writes files to whichever ones already exist. If neither exists, the command errors and tells you to use an explicit flag.
+Without an explicit flag, `depot install` scans the canonical directories and writes files to whichever ones already exist. If none exist, the command errors and tells you to use an explicit flag.
 
-With `--opencode`, `--claude-code`, or `--all`, depot creates the missing canonical directory before writing files.
+With `--opencode`, `--claude-code`, `--codex`, or `--all`, depot creates the missing canonical directory before writing files.
 
 ## Files Written
 
@@ -24,11 +25,18 @@ For each selected target, depot writes:
 - `depot-prd.md`
 - `depot-dev.md`
 
+For Codex, depot writes skills instead:
+
+- `depot-prd/SKILL.md`
+- `depot-prd/agents/openai.yaml`
+- `depot-dev/SKILL.md`
+- `depot-dev/agents/openai.yaml`
+
 Existing files are overwritten in place.
 
 ## Runtime Behavior
 
-The generated files are static slash-command files, but they inject live context output directly into the prompt body using the agent tool's native shell-injection syntax.
+OpenCode and Claude Code receive static slash-command files that inject live context output directly into the prompt body using the agent tool's native shell-injection syntax.
 
 They inject:
 
@@ -44,4 +52,6 @@ Claude Code uses markdown command files with:
 - `disable-model-invocation: true`
 - `shell: powershell`
 
-This keeps the command file static while still embedding fresh depot state at invocation time.
+Codex custom prompts are deprecated by OpenAI. Depot installs Codex skills instead, following the current Codex guidance that reusable prompts should be packaged as skills. The generated skills disable implicit invocation, so Codex should not select them automatically. Invoke them explicitly with `$depot-prd` or `$depot-dev`, or through the Codex skill/slash-command UI. When invoked, the skill instructs Codex to run `depot context prd` or `depot context dev` immediately and use that rendered output as the working context.
+
+This keeps generated integrations static while still loading fresh depot state at invocation time.

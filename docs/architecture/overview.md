@@ -184,9 +184,9 @@ The renderer builds context documents from live database state, including PRD su
 
 ## Install Flow
 
-`src/modules/install/agent.ts` generates slash-command files for OpenCode and Claude Code.
+`src/modules/install/agent.ts` generates slash-command files for OpenCode and Claude Code, plus Codex skills.
 
-Those files do not embed snapshots. They shell out to `depot context prd` or `depot context dev` at invocation time, so the loaded context always reflects the current database state.
+Those integrations do not embed snapshots. OpenCode and Claude Code commands shell out to `depot context prd` or `depot context dev` at invocation time. Codex skills disable implicit invocation and instruct Codex to run the same context command when explicitly invoked, so the loaded context reflects the current database state.
 
 On Windows the generated shell is `powershell`. On other platforms it is `bash`.
 

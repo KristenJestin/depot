@@ -1,6 +1,6 @@
 import path from "node:path";
 
-export type InstallTarget = "opencode" | "claude-code";
+export type InstallTarget = "opencode" | "claude-code" | "codex";
 export type InstallMode = "prd" | "dev";
 export type CommandShell = "powershell" | "bash";
 
@@ -14,16 +14,20 @@ export function getInstallDirectory(target: InstallTarget, homeDir: string): str
     return path.join(homeDir, ".config", "opencode", "commands");
   }
 
-  return path.join(homeDir, ".claude", "commands");
+  if (target === "claude-code") {
+    return path.join(homeDir, ".claude", "commands");
+  }
+
+  return path.join(homeDir, ".agents", "skills");
 }
 
 export async function resolveInstallTargets(
-  flags: { opencode?: boolean; claudeCode?: boolean; all?: boolean },
+  flags: { opencode?: boolean; claudeCode?: boolean; codex?: boolean; all?: boolean },
   options: ResolveInstallTargetsOptions = {},
 ): Promise<Array<{ target: InstallTarget; directory: string; ensureDirectory: boolean }>> {
   const homeDir = options.homeDir ?? getHomeDirectory();
   const existsCheck = options.existsSync ?? (() => false);
-  const allTargets: InstallTarget[] = ["opencode", "claude-code"];
+  const allTargets: InstallTarget[] = ["opencode", "claude-code", "codex"];
 
   if (flags.all) {
     return allTargets.map((target) => ({
@@ -39,6 +43,9 @@ export async function resolveInstallTargets(
   }
   if (flags.claudeCode) {
     explicitTargets.push("claude-code");
+  }
+  if (flags.codex) {
+    explicitTargets.push("codex");
   }
 
   if (explicitTargets.length > 0) {
@@ -59,7 +66,7 @@ export async function resolveInstallTargets(
 
   if (detectedTargets.length === 0) {
     throw new Error(
-      "No supported command directories found. Use --opencode, --claude-code, or --all to create them.",
+      "No supported install directories found. Use --opencode, --claude-code, --codex, or --all to create them.",
     );
   }
 
@@ -67,6 +74,10 @@ export async function resolveInstallTargets(
 }
 
 export function buildCommandFileContent(target: InstallTarget, mode: InstallMode): string {
+  if (target === "codex") {
+    return buildCodexSkillContent(mode);
+  }
+
   const description = `Inject the live depot ${mode} context for the current workspace`;
   const header = buildCommandHeader(target, description);
   const body = mode === "prd" ? buildPrdCommandBody(target) : buildDevCommandBody(target);
@@ -85,6 +96,7 @@ export function buildInstallWrites(
   directory: string;
   ensureDirectory: boolean;
   mode: InstallMode;
+  kind: "command" | "skill";
   filePath: string;
   content: string;
 }> {
@@ -94,17 +106,44 @@ export function buildInstallWrites(
     directory: string;
     ensureDirectory: boolean;
     mode: InstallMode;
+    kind: "command" | "skill";
     filePath: string;
     content: string;
   }> = [];
 
   for (const target of targets) {
     for (const mode of modes) {
+      if (target.target === "codex") {
+        const skillDirectory = path.join(target.directory, `depot-${mode}`);
+        writes.push(
+          {
+            target: target.target,
+            directory: skillDirectory,
+            ensureDirectory: true,
+            mode,
+            kind: "skill",
+            filePath: path.join(skillDirectory, "SKILL.md"),
+            content: buildCommandFileContent(target.target, mode),
+          },
+          {
+            target: target.target,
+            directory: path.join(skillDirectory, "agents"),
+            ensureDirectory: true,
+            mode,
+            kind: "skill",
+            filePath: path.join(skillDirectory, "agents", "openai.yaml"),
+            content: buildCodexSkillMetadata(mode),
+          },
+        );
+        continue;
+      }
+
       writes.push({
         target: target.target,
         directory: target.directory,
         ensureDirectory: target.ensureDirectory,
         mode,
+        kind: "command",
         filePath: path.join(target.directory, `depot-${mode}.md`),
         content: buildCommandFileContent(target.target, mode),
       });
@@ -132,6 +171,36 @@ function buildCommandHeader(target: InstallTarget, description: string): string 
 
   lines.push("---");
   return lines.join("\n");
+}
+
+function buildCodexSkillContent(mode: InstallMode): string {
+  const contextCommand = `depot context ${mode}`;
+  const label = mode === "prd" ? "PRD" : "dev";
+
+  return [
+    "---",
+    `name: depot-${mode}`,
+    `description: Load the live depot ${mode} context for the current workspace before ${mode === "prd" ? "framing PRD work" : "coordinating implementation work"}.`,
+    "---",
+    "",
+    `Run \`${contextCommand}\` immediately and use its output as the working depot ${label} context for this session.`,
+    "",
+    `Do not rerun \`${contextCommand}\` unless the user explicitly asks for a refresh.`,
+    "",
+    "Follow the rendered depot instructions and preserve the current workspace state as the source of truth.",
+  ].join("\n");
+}
+
+function buildCodexSkillMetadata(mode: InstallMode): string {
+  const label = mode === "prd" ? "Depot PRD" : "Depot Dev";
+
+  return [
+    "interface:",
+    `  display_name: "${label}"`,
+    `  short_description: "Load live depot ${mode} context on demand"`,
+    "policy:",
+    "  allow_implicit_invocation: false",
+  ].join("\n");
 }
 
 function buildPrdCommandBody(target: InstallTarget): string {

@@ -17,12 +17,13 @@ describe("agent install helpers", () => {
         homeDir,
         existsSync: (candidate) =>
           candidate === getInstallDirectory("opencode", homeDir) ||
-          candidate === getInstallDirectory("claude-code", homeDir),
+          candidate === getInstallDirectory("claude-code", homeDir) ||
+          candidate === getInstallDirectory("codex", homeDir),
       },
     );
 
-    expect(targets).toHaveLength(2);
-    expect(targets.map((target) => target.target)).toEqual(["opencode", "claude-code"]);
+    expect(targets).toHaveLength(3);
+    expect(targets.map((target) => target.target)).toEqual(["opencode", "claude-code", "codex"]);
     expect(targets.every((target) => target.ensureDirectory === false)).toBe(true);
   });
 
@@ -78,6 +79,15 @@ describe("agent install helpers", () => {
     expect(content).toContain("shell: powershell");
   });
 
+  it("builds codex skills that tell Codex to load live context", () => {
+    const content = buildCommandFileContent("codex", "dev");
+
+    expect(content).toContain("name: depot-dev");
+    expect(content).toContain("description: Load the live depot dev context");
+    expect(content).toContain("Run `depot context dev` immediately");
+    expect(content).toContain("Do not rerun `depot context dev`");
+  });
+
   it("detects the shell from the platform", () => {
     expect(detectCommandShell("win32")).toBe("powershell");
     expect(detectCommandShell("linux")).toBe("bash");
@@ -102,5 +112,39 @@ describe("agent install helpers", () => {
       expect(write.content).toContain("!`depot context");
       expect(write.content).not.toContain("--ws");
     }
+  });
+
+  it("writes codex modes as skills", () => {
+    const writes = buildInstallWrites([
+      {
+        target: "codex",
+        directory: "/home/tester/.agents/skills",
+        ensureDirectory: true,
+      },
+    ]);
+
+    expect(writes).toHaveLength(4);
+    expect(writes.map((write) => write.kind)).toEqual(["skill", "skill", "skill", "skill"]);
+    expect(writes.map((write) => write.filePath.replace(/\\/g, "/"))).toEqual([
+      "/home/tester/.agents/skills/depot-prd/SKILL.md",
+      "/home/tester/.agents/skills/depot-prd/agents/openai.yaml",
+      "/home/tester/.agents/skills/depot-dev/SKILL.md",
+      "/home/tester/.agents/skills/depot-dev/agents/openai.yaml",
+    ]);
+    expect(writes.map((write) => write.directory.replace(/\\/g, "/"))).toEqual([
+      "/home/tester/.agents/skills/depot-prd",
+      "/home/tester/.agents/skills/depot-prd/agents",
+      "/home/tester/.agents/skills/depot-dev",
+      "/home/tester/.agents/skills/depot-dev/agents",
+    ]);
+    expect(writes.map((write) => write.content)).toContain(
+      [
+        "interface:",
+        '  display_name: "Depot PRD"',
+        '  short_description: "Load live depot prd context on demand"',
+        "policy:",
+        "  allow_implicit_invocation: false",
+      ].join("\n"),
+    );
   });
 });
