@@ -206,20 +206,19 @@ function ReviewDetailPage() {
           />
         </div>
 
-        {selectedTask ? (
-          <TaskDrawer
-            task={selectedTask}
-            reviews={data.reviews}
-            allTasks={allTasks}
-            onClose={() =>
-              navigate({
-                to: ".",
-                params: { id, reviewId },
-                search: {},
-              })
-            }
-          />
-        ) : null}
+        <TaskDrawer
+          task={selectedTask}
+          open={selectedTask !== null}
+          reviews={data.reviews}
+          allTasks={allTasks}
+          onClose={() =>
+            navigate({
+              to: ".",
+              params: { id, reviewId },
+              search: {},
+            })
+          }
+        />
       </div>
     </div>
   );

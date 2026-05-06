@@ -1,8 +1,10 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import { PrdHeaderCard } from "#/web/components/prd-header-card";
 import { PrdNoticeBanner } from "#/web/components/prd-notice-banner";
 import { PrdSidebar } from "#/web/components/prd-sidebar";
+import { ReviewDrawer } from "#/web/components/review-drawer";
 import { StageTimeline } from "#/web/components/stage-timeline";
 import { TaskDrawer } from "#/web/components/task-drawer";
 import {
@@ -22,6 +24,7 @@ import {
 export const Route = createFileRoute("/prds/$id/")({
   validateSearch: (search: Record<string, unknown>) => ({
     taskId: typeof search.taskId === "string" ? search.taskId : undefined,
+    reviewId: typeof search.reviewId === "string" ? search.reviewId : undefined,
   }),
   component: PrdDetailRoute,
 });
@@ -42,6 +45,24 @@ function PrdDetailRoute() {
     data.reviews.flatMap((review) => review.findings).find((task) => task.id === search.taskId) ??
     null;
   const allTasks = [...data.tasks, ...data.reviews.flatMap((review) => review.findings)];
+  const selectedReview = search.reviewId
+    ? (data.reviews.find((review) => review.id === search.reviewId) ?? null)
+    : null;
+
+  // Retain the last opened task / review during the close-out animation so the
+  // drawer content does not vanish before its slide-out transition completes.
+  const [lastTask, setLastTask] = useState(selectedTask);
+  const [lastReview, setLastReview] = useState(selectedReview);
+  useEffect(() => {
+    if (selectedTask) setLastTask(selectedTask);
+  }, [selectedTask]);
+  useEffect(() => {
+    if (selectedReview) setLastReview(selectedReview);
+  }, [selectedReview]);
+
+  const lastReviewIndex = lastReview
+    ? data.reviews.findIndex((r) => r.id === lastReview.id) + 1
+    : 0;
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-app-gradient">
@@ -63,7 +84,22 @@ function PrdDetailRoute() {
         </Breadcrumb>
       </div>
 
-      <div className="min-h-0 overflow-y-auto px-8 py-6">
+      <div
+        className="min-h-0 overflow-y-auto px-8 py-6"
+        onClickCapture={(event) => {
+          const target = event.target as HTMLElement | null;
+          const reviewId = target?.closest<HTMLElement>("[data-review-id]")?.dataset.reviewId;
+          if (reviewId) {
+            event.stopPropagation();
+            navigate({ to: ".", params: { id }, search: { reviewId } });
+            return;
+          }
+          const taskId = target?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
+          if (taskId) {
+            navigate({ to: ".", params: { id }, search: { taskId } });
+          }
+        }}
+      >
         <div className="mx-auto flex max-w-7xl items-start gap-6">
           <main
             className={["min-w-0 flex-1 space-y-4", selectedTask ? "opacity-60" : undefined]
@@ -86,23 +122,7 @@ function PrdDetailRoute() {
             ) : null}
 
             <PrdHeaderCard prd={data.prd} summary={summary} />
-            <div
-              onClickCapture={(event) => {
-                const target = event.target as HTMLElement | null;
-                const taskId = target?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
-                if (!taskId) {
-                  return;
-                }
-
-                navigate({
-                  to: ".",
-                  params: { id },
-                  search: { taskId },
-                });
-              }}
-            >
-              <StageTimeline cards={stages} />
-            </div>
+            <StageTimeline cards={stages} />
           </main>
 
           <PrdSidebar
@@ -115,20 +135,39 @@ function PrdDetailRoute() {
           />
         </div>
 
-        {selectedTask ? (
-          <TaskDrawer
-            task={selectedTask}
-            reviews={data.reviews}
-            allTasks={allTasks}
-            onClose={() =>
-              navigate({
-                to: ".",
-                params: { id },
-                search: {},
-              })
-            }
-          />
-        ) : null}
+        <TaskDrawer
+          task={selectedTask ?? lastTask}
+          open={selectedTask !== null}
+          reviews={data.reviews}
+          allTasks={allTasks}
+          onClose={() =>
+            navigate({
+              to: ".",
+              params: { id },
+              search: {},
+            })
+          }
+        />
+
+        <ReviewDrawer
+          review={selectedReview ?? lastReview}
+          open={selectedReview !== null}
+          index={lastReviewIndex}
+          onClose={() =>
+            navigate({
+              to: ".",
+              params: { id },
+              search: {},
+            })
+          }
+          onSelectFinding={(taskId) =>
+            navigate({
+              to: ".",
+              params: { id },
+              search: { taskId },
+            })
+          }
+        />
       </div>
     </div>
   );

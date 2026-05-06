@@ -11,7 +11,7 @@ import type {
 import { rpc } from "./client";
 import { queryClient } from "./query-client";
 
-const LIVE_PAGE_REFETCH_INTERVAL = 5_000;
+const LIVE_PAGE_REFETCH_INTERVAL = 4_000;
 
 const liveQueryOptions = {
   staleTime: 0,
@@ -46,6 +46,10 @@ export const prdsQuery = {
           return r.json() as Promise<PrdDetailResponse>;
         },
         ...liveQueryOptions,
+        refetchInterval: (query) => {
+          const status = (query.state.data as PrdDetailResponse | undefined)?.prd.status;
+          return status === "in_progress" ? LIVE_PAGE_REFETCH_INTERVAL : false;
+        },
       }),
     useSuspense: (id: string) => useSuspenseQuery(prdsQuery.detail.options(id)),
     ensureQueryData: (id: string) => queryClient.ensureQueryData(prdsQuery.detail.options(id)),

@@ -11,6 +11,12 @@ type ResolveTextInputOptions = {
   expected?: string;
 };
 
+export async function resolveTextInput(
+  options: ResolveTextInputOptions & { required: true },
+): Promise<string>;
+export async function resolveTextInput(
+  options: ResolveTextInputOptions,
+): Promise<string | undefined>;
 export async function resolveTextInput({
   output,
   value,

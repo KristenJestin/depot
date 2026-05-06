@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildBoardColumns, buildDetailSummary, buildStageCards } from "#/web/lib/prd-view-model";
 
 describe("prd view model", () => {
-  it("counts skipped base tasks as complete and keeps the current cycle on rework", () => {
+  it("counts skipped base tasks as complete and keeps the current cycle on the latest review", () => {
     const now = "2026-04-30T10:00:00.000Z";
     const data: Parameters<typeof buildDetailSummary>[0] = {
       prd: {
@@ -127,7 +127,7 @@ describe("prd view model", () => {
       doneTasks: 2,
       skippedTasks: 1,
       blockedTasks: 0,
-      currentCycleLabel: "Human Rework #3",
+      currentCycleLabel: "Human Review #3",
     });
   });
 
@@ -286,7 +286,7 @@ describe("prd view model", () => {
     expect(buildDetailSummary(data).currentCycleLabel).toBe("Agent Audit #1");
   });
 
-  it("builds canceled review stages with stopped rework items", () => {
+  it("builds canceled review stages and marks the latest review as the current cycle", () => {
     const now = "2026-04-30T10:00:00.000Z";
     const data: Parameters<typeof buildStageCards>[0] = {
       prd: {
@@ -385,20 +385,17 @@ describe("prd view model", () => {
       activity: [],
     };
 
-    const [currentStage, reviewStage] = buildStageCards(data);
+    const stages = buildStageCards(data);
 
-    expect(currentStage).toMatchObject({
-      id: "rework-review-2",
-      title: "Human Rework #2",
-      current: true,
-      canceled: true,
-      meta: "0 / 1 fixes · canceled",
-    });
-    expect(currentStage.items[0]?.status).toBe("stopped");
+    expect(stages).toHaveLength(2);
+    expect(stages.map((s) => s.id)).not.toContain("rework-review-2");
+
+    const reviewStage = stages.find((s) => s.id === "review-review-2");
     expect(reviewStage).toMatchObject({
       id: "review-review-2",
       title: "Human Review #2",
       complete: true,
+      current: true,
     });
   });
 

@@ -29,7 +29,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 describe("KanbanBoard", () => {
-  it("opens task previews by default only for ready and in progress columns", () => {
+  it("collapses task previews by default and toggles them open on click", () => {
     const columns: BoardColumn[] = [
       {
         id: "ready",
@@ -87,22 +87,22 @@ describe("KanbanBoard", () => {
     expect(readySection).not.toBeNull();
     expect(doneSection).not.toBeNull();
 
-    expect(within(readySection as HTMLElement).getByText("Ready preview")).toBeVisible();
+    expect(
+      within(readySection as HTMLElement).queryByText("Ready preview"),
+    ).not.toBeInTheDocument();
     expect(within(doneSection as HTMLElement).queryByText("Done preview")).not.toBeInTheDocument();
+
+    const readyToggle = within(readySection as HTMLElement).getByRole("button", { name: "Tasks" });
+    fireEvent.click(readyToggle);
+
+    expect(readyToggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(readySection as HTMLElement).getByText("Ready preview")).toBeVisible();
 
     const doneToggle = within(doneSection as HTMLElement).getByRole("button", { name: "Tasks" });
     fireEvent.click(doneToggle);
 
     expect(doneToggle).toHaveAttribute("aria-expanded", "true");
     expect(within(doneSection as HTMLElement).getByText("Done preview")).toBeVisible();
-
-    const readyToggle = within(readySection as HTMLElement).getByRole("button", { name: "Tasks" });
-    fireEvent.click(readyToggle);
-
-    expect(readyToggle).toHaveAttribute("aria-expanded", "false");
-    expect(
-      within(readySection as HTMLElement).queryByText("Ready preview"),
-    ).not.toBeInTheDocument();
   });
 
   it("does not render the footer timestamp for done cards", () => {

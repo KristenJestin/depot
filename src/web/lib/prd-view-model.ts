@@ -52,7 +52,7 @@ export type StageItem = {
 
 export type StageCard = {
   id: string;
-  kind: "initial" | "review" | "rework";
+  kind: "initial" | "review";
   title: string;
   meta: string;
   items: StageItem[];
@@ -180,7 +180,7 @@ function buildAnimatedLabel(prd: ListPrd): string | null {
   }
 
   if (prd.latestReview && prd.latestReview.findingsCount > 0) {
-    return prd.latestReview.type === "human" ? "Reworking" : "Fixing";
+    return prd.latestReview.type === "human" ? "Addressing review" : "Addressing audit";
   }
 
   return "Writing";
@@ -201,8 +201,8 @@ function buildBoardFooterLabel(prd: ListPrd): string {
 
   if (prd.status === "in_progress" && prd.latestReview && prd.latestReview.findingsCount > 0) {
     return prd.latestReview.type === "human"
-      ? "in progress · human rework"
-      : "in progress · agent follow-ups";
+      ? "in progress · addressing review"
+      : "in progress · addressing audit";
   }
 
   return prd.status.replace("_", " ");
@@ -265,26 +265,6 @@ export function buildStageCards(data: DetailData): StageCard[] {
     };
 
     reviewCards.push(reviewCard);
-
-    const reworkTasks = findings.filter(
-      (task) => task.status !== "pending" || task.severity !== null,
-    );
-    if (review.type === "human" && reworkTasks.length > 0) {
-      reviewCards.push({
-        id: `rework-${review.id}`,
-        kind: "rework",
-        title:
-          review.type === "human"
-            ? `Human Rework #${cycleNumber}`
-            : `Agent Follow-ups #${cycleNumber}`,
-        meta: buildReworkMeta(reworkTasks, data.prd.status, review.type),
-        items: reworkTasks,
-        reviewType: review.type,
-        current: false,
-        complete: reworkTasks.every((task) => task.status === "done" || task.status === "skipped"),
-        canceled: data.prd.status === "canceled",
-      });
-    }
   }
 
   const cards = [
@@ -346,11 +326,7 @@ function buildCurrentCycleLabel({
   );
 
   if (openFindings.length > 0) {
-    if (lastReview.type === "human") {
-      return `Human Rework #${lastReview.phaseNumber ?? reviews.length}`;
-    }
-
-    return "Initial run";
+    return `${lastReview.type === "human" ? "Human Review" : "Agent Audit"} #${lastReview.phaseNumber ?? reviews.length}`;
   }
 
   const activeBaseTask = tasks.find(
@@ -408,24 +384,4 @@ function buildInitialMeta(tasks: DetailTask[], prdStatus: DetailPrd["status"]): 
 
 function buildReviewMeta(review: DetailReview): string {
   return `${review.findings.length} findings${review.doneAt ? " · Closed" : ""}`;
-}
-
-function buildReworkMeta(
-  tasks: StageItem[],
-  prdStatus: DetailPrd["status"],
-  reviewType: DetailReview["type"],
-): string {
-  const doneCount = tasks.filter(
-    (task) => task.status === "done" || task.status === "skipped",
-  ).length;
-  const label = reviewType === "human" ? "fixes" : "follow-ups";
-  if (prdStatus === "canceled") {
-    return `${doneCount} / ${tasks.length} ${label} · canceled`;
-  }
-
-  if (doneCount === tasks.length) {
-    return `${doneCount} / ${tasks.length} ${label} · Complete`;
-  }
-
-  return `${doneCount} / ${tasks.length} ${label}`;
 }

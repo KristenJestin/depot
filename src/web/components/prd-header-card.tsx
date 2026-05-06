@@ -1,6 +1,7 @@
 import { Clock3Icon } from "lucide-react";
 
 import { AgentBars } from "#/web/components/agent-bars";
+import { Markdown } from "#/web/components/markdown";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
 import { StatusBadge } from "#/web/components/ui/status-badge";
@@ -103,14 +104,13 @@ function SpecBlock({ label, value, muted }: { label: string; value: string; mute
       <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         {label}
       </p>
-      <p
+      <Markdown
+        source={value}
         className={[
           "text-sm leading-6",
           muted ? "text-muted-foreground" : "text-secondary-foreground",
         ].join(" ")}
-      >
-        {value}
-      </p>
+      />
     </section>
   );
 }

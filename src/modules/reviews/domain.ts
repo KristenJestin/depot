@@ -203,6 +203,41 @@ export const updateReview = (
     return updated;
   });
 
+export const reopenReview = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const review = yield* getReview(id);
+    if (!review) return yield* Effect.fail(new ReviewNotFoundError({ id }));
+    if (review.status !== "done") {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Cannot reopen review ${id}: status is '${review.status}', expected 'done'.`,
+        }),
+      );
+    }
+    const rows = yield* dbQuery(() =>
+      db
+        .update(reviews)
+        .set({ status: "in_progress", doneAt: null })
+        .where(eq(reviews.id, id))
+        .returning(),
+    );
+    const reopened = rows[0]!;
+    const rev = yield* dbQuery(() =>
+      db.query.prdRevisions.findFirst({ where: { id: reopened.prdRevisionId } }),
+    );
+    if (rev) {
+      yield* logActivity({
+        projectId: rev.projectId,
+        workspaceId: rev.workspaceId ?? undefined,
+        prdRevisionId: rev.id,
+        eventType: "review_reopened",
+        payload: { reviewId: reopened.id, prdRevisionId: rev.id },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return reopened;
+  });
+
 export const doneReview = (id: string) =>
   Effect.gen(function* () {
     const db = yield* Db;

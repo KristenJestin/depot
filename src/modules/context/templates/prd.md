@@ -62,6 +62,26 @@ Prefer `prd load` or file flags such as `--context-file`, `--scope-file`, `--des
 
 The draft should evolve in real time. Every meaningful clarification should move the stored PRD closer to an implementation-ready spec.
 
+### Length guidance for PRD fields
+
+Keep top-level PRD fields scannable. The web UI renders them as Markdown; long, dense walls of text are hard to read even when rendered well.
+
+- `context`: 200–800 chars. The "why" plus the principal constraints. Not a dump of all decisions.
+- `scope`: 100–500 chars. Only the boundary (in / out). Do **not** restate the task list — `task list` does that.
+- `task.description`: keep long when needed (Intent / Scope / Non-goals can be substantial).
+- `task.doneCriteria`: prefer short bullet lines; precise testable conditions.
+
+Use Markdown freely (bullets, paragraphs, code blocks, links). Keep lines that start with `-` indented with at least two spaces or use `*` markers if you hit shell-parsing edge cases — file flags (`--context-file`, etc.) sidestep that issue entirely.
+
+### Useful aggregated commands during framing
+
+```
+depot prd validate <prd-id>      # Pre-ready readiness checks (criteria, deps, cycles, phase plan)
+depot prd status <prd-id>        # Compact summary while iterating
+depot prd list --status draft    # Find your active drafts
+depot prd discard <prd-id>       # Discard an unwanted draft (alias of cancel for drafts)
+```
+
 ### 3. Task Quality Bar
 
 Every task must be precise enough that a later dev agent can delegate implementation without guessing.
@@ -116,16 +136,28 @@ Resolve them with the user.
 
 For large PRDs where reviewing a full diff at once would be impractical, split tasks into explicit phases. This is a **manual decision** — phases are never inferred automatically from file counts, diff size, or task categories.
 
+A phase is the unit at which **both** human review and coder execution happen. The dev orchestrator delegates one coder per phase as a batch (see `depot context dev`). Sizing the phases right is therefore critical: too large and the coder drifts, too small and the round-trip cost dominates.
+
+**Phase sizing rules:**
+
+- Target **~3 to 7 tasks** of mixed effort per phase. This keeps each phase implementable by a single coder pass without context drift, and reviewable by a human in one focused session (~15–30 min).
+- A task with effort `xl`, or a "gate" task (smoke test, validation, security check, frozen user decision), should be in **its own phase** (1 task = 1 phase). The risk of drift on these tasks is high enough that they deserve a dedicated checkpoint.
+- A run of `xs`/`s` tasks that are mechanically related (renames, config swaps, doc updates) can be grouped into one phase even if there are 7+ of them, as long as they all touch the same conceptual area.
+- Open a new phase whenever it improves human review clarity, gives the user a meaningful intermediate validation point, or isolates risk.
+- Avoid micro-phases of 1 small task each — that's pure overhead unless the task is high-risk per the rule above.
+
 **Phase formation rules:**
 
 - Group tasks that are logically coupled or that produce a more coherent diff together.
-- Open a new phase when it improves review clarity, user control, or risk management.
-- Avoid phases that are too small (artificial round-trips, little material) or too large (painful validation).
 - Number phases contiguously starting at 1. No gaps.
 - No task may depend on a task in a future phase.
 - Phases and tasks are frozen at `ready`. No new phases or tasks may be added after that.
 - A PRD in `ready`, `in_progress`, `done`, or `canceled` status cannot receive new tasks or phases.
 - Feedback or issues discovered after `ready` must be handled as reviews/findings, or by forking to a new revision if the scope itself must change.
+
+**Validation before marking ready:**
+
+For each phase, sanity-check that a coder receiving only this phase as scope, with the PRD context and the existing codebase, would have everything needed to execute end-to-end without re-asking the user. If any phase fails this check, either tighten the spec or split the phase.
 
 **How to set phases:**
 

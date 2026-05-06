@@ -18,6 +18,10 @@ process.on("warning", (warning) => {
   process.stderr.write(`${warning.name}: ${warning.message}\n`);
 });
 
+if (!process.stdout.isTTY && !process.env["NO_COLOR"] && !process.env["FORCE_COLOR"]) {
+  process.env["NO_COLOR"] = "1";
+}
+
 const main = command({
   meta: {
     name: "depot",

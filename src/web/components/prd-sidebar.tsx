@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRightIcon } from "lucide-react";
+import { ArrowRightIcon, ChevronRightIcon } from "lucide-react";
+import { useState } from "react";
 
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
@@ -39,7 +40,7 @@ export function PrdSidebar({
         <InfoRows prd={prd} workspace={workspace} summary={summary} />
       </SidebarWidget>
 
-      <SidebarWidget title="Revisions">
+      <SidebarWidget title="Revisions" maxHeight>
         <div className="space-y-3">
           {revisions.map((revision) => (
             <div key={revision.id} className="flex items-start gap-3">
@@ -90,84 +91,22 @@ export function PrdSidebar({
       </SidebarWidget>
 
       {reviews.length > 0 ? (
-        <SidebarWidget title="Reviews">
-          <div className="space-y-4">
+        <SidebarWidget title="Reviews" maxHeight>
+          <div className="space-y-3">
             {[...reviews].reverse().map((review, index) => (
-              <div
+              <ReviewItem
                 key={review.id}
-                className="space-y-3 border-b border-card-border pb-4 last:border-b-0 last:pb-0"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-foreground">
-                    Review #{reviews.length - index}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {formatMetaDate(review.doneAt ?? review.createdAt)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <Badge variant={review.type === "human" ? "severityInfo" : "subtle"}>
-                    {review.type}
-                  </Badge>
-                  {review.status === "done" ? (
-                    <Badge variant="statusDone">Closed</Badge>
-                  ) : (
-                    <StatusBadge status={review.status} />
-                  )}
-                </div>
-                {review.userFeedback ? (
-                  <blockquote className="rounded-r-lg border-l-2 border-card-border bg-panel-muted px-3 py-2 text-xs italic leading-6 text-secondary-foreground">
-                    {review.userFeedback}
-                  </blockquote>
-                ) : null}
-                <div className="space-y-2">
-                  {review.findings.map((finding) => (
-                    <div key={finding.id} className="flex items-start gap-2">
-                      <StatusDot
-                        tone={
-                          finding.status === "done"
-                            ? "done"
-                            : finding.status === "in_progress"
-                              ? "active"
-                              : "pending"
-                        }
-                      />
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <p className="text-xs leading-5 text-secondary-foreground">
-                          {finding.title}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          {finding.severity ? (
-                            <Badge
-                              variant={
-                                finding.severity === "critical"
-                                  ? "severityCritical"
-                                  : finding.severity === "major"
-                                    ? "severityMajor"
-                                    : finding.severity === "minor"
-                                      ? "severityMinor"
-                                      : "severityInfo"
-                              }
-                            >
-                              {finding.severity}
-                            </Badge>
-                          ) : null}
-                          <span className="text-xs text-muted-foreground">
-                            {finding.status.replace("_", " ")}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+                review={review}
+                index={reviews.length - index}
+                defaultOpen={index === 0}
+              />
             ))}
           </div>
         </SidebarWidget>
       ) : null}
 
-      <SidebarWidget title="Activity">
-        <div className="max-h-96 space-y-4 overflow-y-auto pr-1">
+      <SidebarWidget title="Activity" maxHeight>
+        <div className="space-y-4">
           {[...activity].reverse().map((entry, index, entries) => (
             <div key={entry.id} className="flex gap-3">
               <div className="flex w-3 shrink-0 flex-col items-center pt-1">
@@ -190,13 +129,115 @@ export function PrdSidebar({
   );
 }
 
-function SidebarWidget({ title, children }: { title: string; children: React.ReactNode }) {
+function ReviewItem({
+  review,
+  index,
+  defaultOpen,
+}: {
+  review: DetailReview;
+  index: number;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-b border-card-border pb-3 last:border-b-0 last:pb-0">
+      <div className="flex w-full items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex flex-1 items-center gap-2 text-left"
+        >
+          <ChevronRightIcon
+            className={["size-3 transition-transform", open ? "rotate-90" : ""].join(" ")}
+          />
+          <span
+            data-review-id={review.id}
+            className="text-sm font-semibold text-foreground hover:underline"
+          >
+            Review #{index}
+          </span>
+          <Badge variant={review.type === "human" ? "severityInfo" : "subtle"}>{review.type}</Badge>
+        </button>
+        <span className="text-xs text-muted-foreground">
+          {formatMetaDate(review.doneAt ?? review.createdAt)}
+        </span>
+      </div>
+      {open ? (
+        <div className="mt-3 space-y-3 pl-5">
+          <div className="flex items-center justify-between gap-2">
+            {review.status === "done" ? (
+              <Badge variant="statusDone">Closed</Badge>
+            ) : (
+              <StatusBadge status={review.status} />
+            )}
+            <span className="text-xs text-muted-foreground">
+              {review.findings.length} finding{review.findings.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          {review.userFeedback ? (
+            <blockquote className="rounded-r-lg border-l-2 border-card-border bg-panel-muted px-3 py-2 text-xs italic leading-6 text-secondary-foreground">
+              {review.userFeedback}
+            </blockquote>
+          ) : null}
+          <div className="space-y-2">
+            {review.findings.map((finding) => (
+              <div key={finding.id} className="flex items-start gap-2">
+                <StatusDot
+                  tone={
+                    finding.status === "done"
+                      ? "done"
+                      : finding.status === "in_progress"
+                        ? "active"
+                        : "pending"
+                  }
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-xs leading-5 text-secondary-foreground">{finding.title}</p>
+                  <div className="flex items-center gap-2">
+                    {finding.severity ? (
+                      <Badge
+                        variant={
+                          finding.severity === "critical"
+                            ? "severityCritical"
+                            : finding.severity === "major"
+                              ? "severityMajor"
+                              : finding.severity === "minor"
+                                ? "severityMinor"
+                                : "severityInfo"
+                        }
+                      >
+                        {finding.severity}
+                      </Badge>
+                    ) : null}
+                    <span className="text-xs text-muted-foreground">
+                      {finding.status.replace("_", " ")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SidebarWidget({
+  title,
+  children,
+  maxHeight,
+}: {
+  title: string;
+  children: React.ReactNode;
+  maxHeight?: boolean;
+}) {
   return (
     <section className="space-y-2">
       <h2 className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
         {title}
       </h2>
-      <Card className="p-4">{children}</Card>
+      <Card className={`p-4${maxHeight ? " max-h-[420px] overflow-y-auto" : ""}`}>{children}</Card>
     </section>
   );
 }
@@ -304,6 +345,29 @@ function activityLabel(entry: DetailActivity) {
       return `Task blocked — ${String(payload.title ?? "")}`;
     case "task_skipped":
       return `Task skipped — ${String(payload.title ?? "")}`;
+    case "coder_progress": {
+      const stage = String(payload.stage ?? "");
+      const tool = payload.tool ? `[${String(payload.tool)}] ` : "";
+      const msg = String(payload.message ?? "");
+      const sourceTag = payload.source === "plugin" ? " (plugin)" : "";
+      return `${tool}${stage}: ${msg}${sourceTag}`;
+    }
+    case "prd_approved": {
+      const by = payload.approvedBy ? ` by ${String(payload.approvedBy)}` : "";
+      return `PRD approved${by}`;
+    }
+    case "review_reopened":
+      return "Review reopened";
+    case "task_reactivated":
+      return `Task reactivated — ${String(payload.title ?? "")}`;
+    case "task_deleted":
+      return `Task deleted — ${String(payload.title ?? "")}`;
+    case "phase_advanced": {
+      const to = payload.toPhase;
+      return to !== undefined && to !== null
+        ? `Advanced to phase ${String(to)}`
+        : "Final phase complete";
+    }
     default:
       return entry.eventType.replaceAll("_", " ");
   }

@@ -79,9 +79,6 @@ describe("PrdSidebar", () => {
         activity={[
           {
             id: "activity-1",
-            projectId: "proj-1",
-            workspaceId: "ws-1",
-            prdRevisionId: "rev-1",
             taskId: null,
             eventType: "prd_activated",
             payload: {},
@@ -95,7 +92,9 @@ describe("PrdSidebar", () => {
     expect(screen.queryByRole("heading", { name: "Reviews" })).not.toBeInTheDocument();
 
     const activityHeading = screen.getByRole("heading", { name: "Activity" });
-    const activityCard = activityHeading.parentElement?.querySelector(".max-h-96.overflow-y-auto");
+    const activityCard = activityHeading.parentElement?.querySelector(
+      ".max-h-\\[420px\\].overflow-y-auto",
+    );
 
     expect(activityCard).not.toBeNull();
   });

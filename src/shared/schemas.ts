@@ -219,6 +219,12 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
   }),
   prd_ready: Schema.Struct({ prdRevisionId: Schema.optional(Schema.String), title: Schema.String }),
   prd_done: Schema.Struct({ prdRevisionId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_approved: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    approvedBy: Schema.optional(Schema.NullOr(Schema.String)),
+    comment: Schema.optional(Schema.NullOr(Schema.String)),
+    approvedAt: Schema.String,
+  }),
   prd_canceled: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
@@ -246,10 +252,32 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     reviewId: Schema.String,
     prdRevisionId: Schema.optional(Schema.String),
   }),
+  review_reopened: Schema.Struct({
+    reviewId: Schema.String,
+    prdRevisionId: Schema.optional(Schema.String),
+  }),
+  task_reactivated: Schema.Struct({
+    taskId: Schema.String,
+    title: Schema.String,
+    previousSkipReason: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  task_deleted: Schema.Struct({
+    taskId: Schema.String,
+    title: Schema.String,
+  }),
   phase_advanced: Schema.Struct({
     prdRevisionId: Schema.String,
     fromPhase: Schema.Number,
     toPhase: Schema.optional(Schema.Number),
+  }),
+  coder_progress: Schema.Struct({
+    stage: Schema.Literal("start", "edit", "verify", "tool", "note"),
+    message: Schema.String,
+    taskId: Schema.optional(Schema.String),
+    file: Schema.optional(Schema.String),
+    tool: Schema.optional(Schema.String),
+    command: Schema.optional(Schema.String),
+    source: Schema.optional(Schema.Literal("agent", "plugin")),
   }),
   note: Schema.Struct({ message: Schema.String }),
   error: Schema.Struct({ message: Schema.String, details: Schema.optional(Schema.String) }),

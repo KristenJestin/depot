@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { command } from "#/cli/command";
 import { runEffect } from "#/cli/runtime";
 import * as DomainReviews from "#/modules/reviews/domain";
-import { formatDate } from "#/shared/utils";
+import { formatDate, formatRelativeTime } from "#/shared/utils";
 import { parseJsonSchema } from "#/lib/json";
 
 const startCommand = command({
@@ -38,6 +38,28 @@ const startCommand = command({
   },
 });
 
+function makeBeginRunner() {
+  return async ({
+    args,
+    output,
+  }: {
+    args: { reviewId: string };
+    output: import("#/cli/command").CommandOutput;
+  }) => {
+    const review = await runEffect(
+      DomainReviews.startReview(args.reviewId).pipe(
+        Effect.catchTag("ReviewNotFoundError", () => Effect.succeed(null)),
+      ),
+    );
+    if (!review) return output.error("not_found", `Review not found: ${args.reviewId}`);
+    if (output.isJson()) {
+      output.success({ item: review });
+    } else {
+      output.print(`Started review ${review.id} [in_progress]`);
+    }
+  };
+}
+
 const beginCommand = command({
   meta: { name: "begin", description: "Validate a review draft and move it to in_progress" },
   workspace: true,
@@ -49,17 +71,56 @@ const beginCommand = command({
       description: "Review ID",
     },
   },
+  run: makeBeginRunner(),
+});
+
+const activateCommand = command({
+  meta: {
+    name: "activate",
+    description: "Validate a review draft and move it to in_progress (alias for `review begin`)",
+  },
+  workspace: true,
+  args: {
+    reviewId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Review ID",
+    },
+  },
+  run: makeBeginRunner(),
+});
+
+const reopenCommand = command({
+  meta: {
+    name: "reopen",
+    description:
+      "Reopen a closed review (status done → in_progress) so a late finding can be added",
+  },
+  workspace: true,
+  args: {
+    reviewId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Review ID",
+    },
+  },
   run: async ({ args, output }) => {
     const review = await runEffect(
-      DomainReviews.startReview(args.reviewId).pipe(
+      DomainReviews.reopenReview(args.reviewId).pipe(
         Effect.catchTag("ReviewNotFoundError", () => Effect.succeed(null)),
+        Effect.catchTag("ValidationError", (e) => {
+          output.error("invalid_status", e.message);
+          return Effect.succeed(null);
+        }),
       ),
     );
-    if (!review) return output.error("not_found", `Review not found: ${args.reviewId}`);
+    if (!review) return;
     if (output.isJson()) {
       output.success({ item: review });
     } else {
-      output.print(`Started review ${review.id} [in_progress]`);
+      output.print(`Reopened review ${review.id} [in_progress]`);
     }
   },
 });
@@ -215,11 +276,52 @@ const taskAddBatchCommand = command({
   },
 });
 
+const taskListCommand = command({
+  meta: { name: "list", description: "List tasks for a review" },
+  workspace: true,
+  args: {
+    reviewId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Review ID",
+    },
+    status: {
+      schema: Schema.Literal("pending", "in_progress", "blocked", "done", "skipped"),
+      expected: "one of pending, in_progress, blocked, done, skipped",
+      description: "Filter by task status",
+    },
+  },
+  run: async ({ args, output }) => {
+    const review = await runEffect(DomainReviews.getReview(args.reviewId));
+    if (!review) return output.error("not_found", `Review not found: ${args.reviewId}`);
+
+    let reviewTasks = await runEffect(DomainReviews.listReviewTasks(args.reviewId));
+    if (args.status) {
+      reviewTasks = reviewTasks.filter((t) => t.status === args.status);
+    }
+
+    if (output.isJson()) {
+      output.success({ items: reviewTasks });
+      return;
+    }
+    if (reviewTasks.length === 0) {
+      output.print("No tasks found.");
+      return;
+    }
+    for (const task of reviewTasks) {
+      const sev = task.severity ? ` [${task.severity}]` : "";
+      output.print(`${task.id}  #${task.position}  ${task.title}${sev}  [${task.status}]`);
+    }
+  },
+});
+
 const taskCommand = command({
   meta: { name: "task", description: "Manage review tasks" },
   subCommands: {
     add: taskAddCommand,
     "add-batch": taskAddBatchCommand,
+    list: taskListCommand,
   },
 });
 
@@ -311,8 +413,28 @@ const listCommand = command({
       output.print("No reviews found.");
       return;
     }
-    for (const r of reviewList) {
-      output.print(`${r.id}  [${r.type}]  [${r.status}]  PRD: ${r.prdRevisionId}`);
+
+    const summaries = await Promise.all(
+      reviewList.map(async (r) => {
+        const tasks = await runEffect(DomainReviews.listReviewTasks(r.id));
+        const counts: Record<string, number> = {};
+        for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
+        const breakdown = Object.entries(counts)
+          .map(([s, n]) => `${n}${s[0]}`)
+          .join("/");
+        return { review: r, taskCount: tasks.length, breakdown };
+      }),
+    );
+
+    output.print(
+      `${"ID".padEnd(28)} ${"TYPE".padEnd(7)} ${"STATUS".padEnd(13)} ${"TASKS".padEnd(14)} CREATED`,
+    );
+    for (const { review, taskCount, breakdown } of summaries) {
+      const created = formatRelativeTime(review.createdAt);
+      const tasks = breakdown ? `${taskCount} (${breakdown})` : `${taskCount}`;
+      output.print(
+        `${review.id.padEnd(28)} ${review.type.padEnd(7)} ${review.status.padEnd(13)} ${tasks.padEnd(14)} ${created}`,
+      );
     }
   },
 });
@@ -322,6 +444,8 @@ export const reviewCommand = command({
   subCommands: {
     start: startCommand,
     begin: beginCommand,
+    activate: activateCommand,
+    reopen: reopenCommand,
     update: updateCommand,
     task: taskCommand,
     done: doneCommand,

@@ -3,7 +3,12 @@ import { eq } from "drizzle-orm";
 import { tasks } from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
-import { VALID_TASK_TRANSITIONS, type TaskStatus, type Effort } from "#/shared/validator";
+import {
+  VALID_TASK_TRANSITIONS,
+  type TaskStatus,
+  type Effort,
+  type SeverityLevel,
+} from "#/shared/validator";
 import { Db } from "#/services/database";
 import {
   TaskNotFoundError,
@@ -99,6 +104,10 @@ export const updateTask = (
     doneCriteria?: string;
     effort?: Effort;
     phaseNumber?: number | null;
+    dependsOn?: string[];
+    addDependsOn?: string[];
+    removeDependsOn?: string[];
+    severity?: SeverityLevel | null;
   },
 ) =>
   Effect.gen(function* () {
@@ -112,6 +121,12 @@ export const updateTask = (
       changes.doneCriteria !== undefined ? "doneCriteria" : null,
       changes.effort !== undefined ? "effort" : null,
       changes.phaseNumber !== undefined ? "phaseNumber" : null,
+      changes.dependsOn !== undefined ||
+      changes.addDependsOn !== undefined ||
+      changes.removeDependsOn !== undefined
+        ? "dependsOn"
+        : null,
+      changes.severity !== undefined ? "severity" : null,
     ].filter((field): field is string => field !== null);
 
     if (fields.length === 0) {
@@ -122,6 +137,48 @@ export const updateTask = (
       return yield* Effect.fail(
         new ValidationError({ reason: "Task must have non-empty done_criteria" }),
       );
+    }
+
+    if (changes.severity !== undefined && changes.severity !== null && !task.reviewId) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: "Severity can only be set on review tasks (tasks with a reviewId).",
+        }),
+      );
+    }
+
+    let nextDependsOn: string | undefined;
+    if (
+      changes.dependsOn !== undefined ||
+      changes.addDependsOn !== undefined ||
+      changes.removeDependsOn !== undefined
+    ) {
+      let resolved: string[];
+      if (changes.dependsOn !== undefined) {
+        resolved = [...changes.dependsOn];
+      } else {
+        resolved = JSON.parse(task.dependsOn) as string[];
+        if (changes.addDependsOn) {
+          for (const depId of changes.addDependsOn) {
+            if (!resolved.includes(depId)) resolved.push(depId);
+          }
+        }
+        if (changes.removeDependsOn) {
+          const toRemove = new Set(changes.removeDependsOn);
+          resolved = resolved.filter((d) => !toRemove.has(d));
+        }
+      }
+
+      for (const depId of resolved) {
+        if (depId === id) {
+          return yield* Effect.fail(
+            new ValidationError({ reason: "A task cannot depend on itself." }),
+          );
+        }
+        const dep = yield* getTask(depId);
+        if (!dep) return yield* Effect.fail(new TaskNotFoundError({ id: depId }));
+      }
+      nextDependsOn = JSON.stringify(resolved);
     }
 
     const storedDescription =
@@ -139,6 +196,8 @@ export const updateTask = (
           doneCriteria: changes.doneCriteria ?? task.doneCriteria,
           effort: changes.effort ?? task.effort,
           phaseNumber: changes.phaseNumber !== undefined ? changes.phaseNumber : task.phaseNumber,
+          dependsOn: nextDependsOn ?? task.dependsOn,
+          severity: changes.severity !== undefined ? changes.severity : task.severity,
         })
         .where(eq(tasks.id, id))
         .returning(),
@@ -294,6 +353,69 @@ export const blockTask = (id: string, reason: string) =>
         taskId: id,
         eventType: "task_blocked",
         payload: { taskId: task.id, title: task.title, reason },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return rows[0]!;
+  });
+
+export const deleteTask = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const task = yield* getTask(id);
+    if (!task) return yield* Effect.fail(new TaskNotFoundError({ id }));
+    if (task.status !== "pending") {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Cannot delete task: status is '${task.status}', only 'pending' is allowed.`,
+        }),
+      );
+    }
+    const prd = yield* getPrd(task.prdRevisionId);
+    yield* dbQuery(() => db.delete(tasks).where(eq(tasks.id, id)));
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdRevisionId: prd.id,
+        eventType: "task_deleted",
+        payload: { taskId: id, title: task.title },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return task;
+  });
+
+export const reactivateTask = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const task = yield* getTask(id);
+    if (!task) return yield* Effect.fail(new TaskNotFoundError({ id }));
+    if (task.status !== "skipped") {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Cannot reactivate task: status is '${task.status}', expected 'skipped'.`,
+        }),
+      );
+    }
+    const rows = yield* dbQuery(() =>
+      db
+        .update(tasks)
+        .set({ status: "pending", skipReason: null, completedAt: null })
+        .where(eq(tasks.id, id))
+        .returning(),
+    );
+    const prd = yield* getPrd(task.prdRevisionId);
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdRevisionId: prd.id,
+        taskId: id,
+        eventType: "task_reactivated",
+        payload: {
+          taskId: id,
+          title: task.title,
+          previousSkipReason: task.skipReason ?? null,
+        },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return rows[0]!;

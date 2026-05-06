@@ -230,7 +230,29 @@ export function summarizeActivityPayload(
       return `${String(payload.reviewId ?? "")} — ${formatFieldList(payload.fields)}`;
     case "review_started":
     case "review_done":
+    case "review_reopened":
       return String(payload.reviewId ?? "");
+    case "task_reactivated":
+      return String(payload.title ?? "");
+    case "task_deleted":
+      return String(payload.title ?? "");
+    case "prd_approved": {
+      const by = payload.approvedBy ? String(payload.approvedBy) : null;
+      const cmt = payload.comment ? String(payload.comment) : null;
+      return [by ? `by ${by}` : null, cmt].filter(Boolean).join(" — ");
+    }
+    case "coder_progress": {
+      const stage = String(payload.stage ?? "");
+      const msg = String(payload.message ?? "");
+      const file = payload.file ? ` (${String(payload.file)})` : "";
+      const tool = payload.tool ? `[${String(payload.tool)}] ` : "";
+      return `${tool}${stage}: ${msg}${file}`;
+    }
+    case "phase_advanced": {
+      const from = payload.fromPhase;
+      const to = payload.toPhase;
+      return to !== undefined ? `phase ${from} → ${to}` : `phase ${from} (final)`;
+    }
     case "error":
       return String(payload.message ?? "");
     default:

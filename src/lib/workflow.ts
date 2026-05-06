@@ -164,6 +164,7 @@ export function createTask(
     doneCriteria: string;
     effort: Effort;
     dependsOn?: string[];
+    phaseNumber?: number;
   },
 ) {
   return runWithDb(db, DomainTasks.createTask(input));
@@ -172,7 +173,17 @@ export function createTask(
 export function updateTask(
   db: Database,
   id: string,
-  changes: { title?: string; description?: string; doneCriteria?: string; effort?: Effort },
+  changes: {
+    title?: string;
+    description?: string;
+    doneCriteria?: string;
+    effort?: Effort;
+    phaseNumber?: number | null;
+    dependsOn?: string[];
+    addDependsOn?: string[];
+    removeDependsOn?: string[];
+    severity?: SeverityLevel | null;
+  },
 ) {
   return runWithDb(db, DomainTasks.updateTask(id, changes));
 }

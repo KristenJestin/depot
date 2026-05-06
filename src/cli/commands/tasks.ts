@@ -5,6 +5,7 @@ import { runEffect } from "#/cli/runtime";
 import type { TaskRow } from "#/db/schema";
 import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainPrds from "#/modules/prds/domain";
+import * as DomainReviews from "#/modules/reviews/domain";
 import { effortSchema } from "#/shared/schemas";
 import { getTaskDescriptionSections } from "#/modules/tasks/spec";
 import { formatDate } from "#/shared/utils";
@@ -19,6 +20,66 @@ function serializeTask(task: TaskRow) {
     ...task,
     dependsOn: JSON.parse(task.dependsOn) as string[],
   };
+}
+
+/**
+ * Resolve a task identifier passed via the CLI.
+ *
+ * Accepted forms:
+ *   - Full task ULID (returned as-is)
+ *   - `#N` shorthand where N is the task position in the active PRD of the workspace
+ *   - `#last` for the highest-position task in the active PRD
+ *
+ * For shorthand forms the workspace must have an active (in_progress) PRD.
+ */
+async function findTaskByRef(
+  ref: string,
+  ws: { id: string },
+  output: CommandOutput,
+): Promise<TaskRow> {
+  const resolved = await resolveTaskId(ref, ws);
+  if (!resolved.ok) return output.error("not_found", resolved.message);
+  const task = await runEffect(DomainTasks.getTask(resolved.id));
+  if (!task) return output.error("not_found", `Task not found: ${ref}`);
+  return task;
+}
+
+async function resolveTaskId(
+  ref: string,
+  ws: { id: string },
+): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  if (!ref.startsWith("#")) return { ok: true, id: ref };
+  const remainder = ref.slice(1).trim();
+  const prdList = await runEffect(DomainPrds.listPrds({ workspaceId: ws.id }));
+  const activePrd = prdList.find((p) => p.status === "in_progress");
+  if (!activePrd) {
+    return {
+      ok: false,
+      message: `Cannot resolve '${ref}': no active PRD in current workspace.`,
+    };
+  }
+  const taskList = await runEffect(DomainTasks.listTasks(activePrd.id, { prdTasksOnly: true }));
+  if (taskList.length === 0) {
+    return { ok: false, message: `Cannot resolve '${ref}': active PRD has no tasks.` };
+  }
+  if (remainder.toLowerCase() === "last") {
+    return { ok: true, id: taskList[taskList.length - 1]!.id };
+  }
+  const n = Number.parseInt(remainder, 10);
+  if (!Number.isFinite(n) || `${n}` !== remainder || n <= 0) {
+    return {
+      ok: false,
+      message: `Cannot resolve '${ref}': expected '#<N>' or '#last' (got '${remainder}').`,
+    };
+  }
+  const found = taskList.find((t) => t.position === n);
+  if (!found) {
+    return {
+      ok: false,
+      message: `Cannot resolve '${ref}': active PRD has no task at position ${n}.`,
+    };
+  }
+  return { ok: true, id: found.id };
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -147,12 +208,28 @@ const listCommand = command({
       positional: true,
       description: "PRD ID (defaults to active PRD in current workspace)",
     },
+    status: {
+      schema: Schema.String,
+      expected: "comma-separated list of pending|in_progress|blocked|done|skipped",
+      description: "Filter by task status (comma-separated)",
+    },
+    allPhases: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      default: false,
+      description: "Show tasks for all phases (default: current phase only when in_progress)",
+    },
+    hideSkipped: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      default: false,
+      description: "Hide skipped tasks",
+    },
   },
   run: async ({ args, ws, output }) => {
     let targetPrdId = args.prdId;
 
     if (!targetPrdId) {
-      // Default to the active PRD in this workspace
       const prdList = await runEffect(DomainPrds.listPrds({ workspaceId: ws.id }));
       const activePrd = prdList.find((p) => p.status === "in_progress");
       if (!activePrd) {
@@ -164,20 +241,57 @@ const listCommand = command({
       targetPrdId = activePrd.id;
     } else {
       const prd = await runEffect(DomainPrds.getPrd(targetPrdId));
-      if (!prd) return output.error("not_found", `PRD not found: ${targetPrdId}`);
+      if (!prd) {
+        const review = await runEffect(DomainReviews.getReview(targetPrdId));
+        if (review) {
+          return output.error(
+            "review_id_passed",
+            `'${targetPrdId}' is a review ID, not a PRD ID. Use \`depot review task list ${targetPrdId}\` to list its tasks.`,
+          );
+        }
+        return output.error("not_found", `PRD not found: ${targetPrdId}`);
+      }
       targetPrdId = prd.id;
     }
 
     const prd = await runEffect(DomainPrds.getPrd(targetPrdId));
     if (!prd) return output.error("not_found", `PRD not found: ${targetPrdId}`);
 
-    // For multi-phase in_progress PRDs, only show tasks for the current phase
     const phaseFilter =
-      prd.status === "in_progress" && prd.currentPhase !== null && prd.currentPhase !== undefined
+      !args.allPhases &&
+      prd.status === "in_progress" &&
+      prd.currentPhase !== null &&
+      prd.currentPhase !== undefined
         ? prd.currentPhase
         : undefined;
 
-    const taskList = await runEffect(DomainTasks.listTasks(targetPrdId, { phase: phaseFilter }));
+    let taskList = await runEffect(
+      DomainTasks.listTasks(targetPrdId, { phase: phaseFilter, prdTasksOnly: true }),
+    );
+
+    if (args.status) {
+      const wanted = new Set(
+        args.status
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      );
+      const valid = new Set(["pending", "in_progress", "blocked", "done", "skipped"]);
+      for (const s of wanted) {
+        if (!valid.has(s)) {
+          return output.error(
+            "validation_error",
+            `--status: '${s}' is not a valid task status. Expected pending, in_progress, blocked, done, or skipped.`,
+          );
+        }
+      }
+      taskList = taskList.filter((t) => wanted.has(t.status));
+    }
+
+    if (args.hideSkipped) {
+      taskList = taskList.filter((t) => t.status !== "skipped");
+    }
+
     if (output.isJson()) {
       output.success({ items: taskList.map(serializeTask) });
       return;
@@ -194,6 +308,110 @@ const listCommand = command({
   },
 });
 
+const treeCommand = command({
+  meta: {
+    name: "tree",
+    description: "Print an ASCII dependency tree of PRD tasks",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      positional: true,
+      description: "PRD ID (defaults to active PRD in current workspace)",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    let targetPrdId = args.prdId;
+    if (!targetPrdId) {
+      const prdList = await runEffect(DomainPrds.listPrds({ workspaceId: ws.id }));
+      const activePrd = prdList.find((p) => p.status === "in_progress");
+      if (!activePrd) {
+        return output.error(
+          "no_active_prd",
+          "No active PRD found for current workspace. Specify a PRD ID.",
+        );
+      }
+      targetPrdId = activePrd.id;
+    }
+
+    const prd = await runEffect(DomainPrds.getPrd(targetPrdId));
+    if (!prd) return output.error("not_found", `PRD not found: ${targetPrdId}`);
+
+    const taskList = await runEffect(DomainTasks.listTasks(prd.id, { prdTasksOnly: true }));
+
+    if (taskList.length === 0) {
+      output.print("No tasks found.");
+      return;
+    }
+
+    type Node = { id: string; pos: number; title: string; status: string; deps: string[] };
+    const nodes = new Map<string, Node>();
+    for (const t of taskList) {
+      nodes.set(t.id, {
+        id: t.id,
+        pos: t.position,
+        title: t.title,
+        status: t.status,
+        deps: JSON.parse(t.dependsOn) as string[],
+      });
+    }
+
+    const childrenOf = new Map<string, string[]>();
+    for (const n of nodes.values()) childrenOf.set(n.id, []);
+    for (const n of nodes.values()) {
+      for (const dep of n.deps) {
+        if (childrenOf.has(dep)) childrenOf.get(dep)!.push(n.id);
+      }
+    }
+
+    const roots = [...nodes.values()].filter((n) => n.deps.length === 0);
+
+    if (output.isJson()) {
+      output.success({
+        prd: { id: prd.id, title: prd.title },
+        nodes: [...nodes.values()],
+        roots: roots.map((r) => r.id),
+      });
+      return;
+    }
+
+    const seen = new Set<string>();
+    function render(id: string, prefix: string, isLast: boolean): void {
+      const n = nodes.get(id);
+      if (!n) return;
+      const branch = prefix.length === 0 ? "" : isLast ? "└── " : "├── ";
+      const marker = seen.has(id) ? " (↺)" : "";
+      output.print(`${prefix}${branch}#${n.pos} ${n.title} [${n.status}]${marker}`);
+      if (seen.has(id)) return;
+      seen.add(id);
+      const kids = (childrenOf.get(id) ?? []).slice().sort((a, b) => {
+        const aPos = nodes.get(a)?.pos ?? 0;
+        const bPos = nodes.get(b)?.pos ?? 0;
+        return aPos - bPos;
+      });
+      const nextPrefix = prefix + (prefix.length === 0 ? "" : isLast ? "    " : "│   ");
+      kids.forEach((kid, i) => render(kid, nextPrefix, i === kids.length - 1));
+    }
+
+    if (roots.length === 0) {
+      output.print("No root tasks (every task depends on something — possible cycle).");
+      return;
+    }
+    roots.sort((a, b) => a.pos - b.pos);
+    roots.forEach((r, i) => render(r.id, "", i === roots.length - 1));
+
+    const orphans = [...nodes.values()].filter((n) => !seen.has(n.id));
+    if (orphans.length > 0) {
+      output.print("");
+      output.print("Tasks not reachable from any root (likely cycle members):");
+      for (const o of orphans) {
+        output.print(`  #${o.pos} ${o.title} [${o.status}]`);
+      }
+    }
+  },
+});
+
 const showCommand = command({
   meta: { name: "show", description: "Show task details" },
   workspace: true,
@@ -205,9 +423,8 @@ const showCommand = command({
       description: "Task ID",
     },
   },
-  run: async ({ args, output }) => {
-    const task = await runEffect(DomainTasks.getTask(args.taskId));
-    if (!task) return output.error("not_found", `Task not found: ${args.taskId}`);
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
     if (output.isJson()) {
       output.success({ item: serializeTask(task) });
       return;
@@ -292,10 +509,26 @@ const updateCommand = command({
       alias: "p",
       description: "New phase number (multi-phase PRDs only)",
     },
+    depends: {
+      schema: Schema.String,
+      description: "Comma-separated list of dependency task IDs (replaces existing)",
+    },
+    addDepends: {
+      schema: Schema.String,
+      description: "Comma-separated list of dependency task IDs to add",
+    },
+    removeDepends: {
+      schema: Schema.String,
+      description: "Comma-separated list of dependency task IDs to remove",
+    },
+    severity: {
+      schema: Schema.Literal("critical", "major", "minor", "info"),
+      expected: "one of critical, major, minor, info",
+      description: "Finding severity (review tasks only)",
+    },
   },
-  run: async ({ args, output }) => {
-    const task = await runEffect(DomainTasks.getTask(args.taskId));
-    if (!task) return output.error("not_found", `Task not found: ${args.taskId}`);
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
 
     // Only PRD tasks (not review tasks) are subject to the draft-only guard
     if (!task.reviewId) {
@@ -320,13 +553,35 @@ const updateCommand = command({
       args.criteria === undefined &&
       args.criteriaFile === undefined &&
       args.effort === undefined &&
-      args.phase === undefined
+      args.phase === undefined &&
+      args.depends === undefined &&
+      args.addDepends === undefined &&
+      args.removeDepends === undefined &&
+      args.severity === undefined
     ) {
       return output.error(
         "no_changes",
-        "No changes provided. Use --title, --desc, --desc-file, --criteria, --criteria-file, --effort, or --phase.",
+        "No changes provided. Use --title, --desc, --desc-file, --criteria, --criteria-file, --effort, --phase, --depends, --add-depends, --remove-depends, or --severity.",
       );
     }
+
+    if (
+      args.depends !== undefined &&
+      (args.addDepends !== undefined || args.removeDepends !== undefined)
+    ) {
+      return output.error(
+        "conflicting_input",
+        "Use either --depends (replace) or --add-depends / --remove-depends (incremental), not both.",
+      );
+    }
+
+    const splitIds = (raw: string | undefined): string[] | undefined => {
+      if (raw === undefined) return undefined;
+      return raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+    };
 
     const description = await resolveTextInput({
       output,
@@ -350,6 +605,10 @@ const updateCommand = command({
         doneCriteria,
         effort: args.effort,
         phaseNumber: args.phase,
+        dependsOn: splitIds(args.depends),
+        addDependsOn: splitIds(args.addDepends),
+        removeDependsOn: splitIds(args.removeDepends),
+        severity: args.severity,
       }),
     );
 
@@ -372,9 +631,8 @@ const startCommand = command({
       description: "Task ID",
     },
   },
-  run: async ({ args, output }) => {
-    const task = await runEffect(DomainTasks.getTask(args.taskId));
-    if (!task) return output.error("not_found", `Task not found: ${args.taskId}`);
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
     const started = await runEffect(DomainTasks.startTask(task.id));
     if (output.isJson()) {
       output.success({ item: serializeTask(started) });
@@ -398,9 +656,8 @@ const doneCommand = command({
       description: "Task ID",
     },
   },
-  run: async ({ args, output }) => {
-    const task = await runEffect(DomainTasks.getTask(args.taskId));
-    if (!task) return output.error("not_found", `Task not found: ${args.taskId}`);
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
     const completed = await runEffect(DomainTasks.completeTask(task.id));
     if (output.isJson()) {
       output.success({ item: serializeTask(completed) });
@@ -430,9 +687,8 @@ const blockCommand = command({
       description: "Block reason",
     },
   },
-  run: async ({ args, output }) => {
-    const task = await runEffect(DomainTasks.getTask(args.taskId));
-    if (!task) return output.error("not_found", `Task not found: ${args.taskId}`);
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
     const blocked = await runEffect(DomainTasks.blockTask(task.id, args.reason));
     if (output.isJson()) {
       output.success({ item: serializeTask(blocked) });
@@ -462,9 +718,8 @@ const skipCommand = command({
       description: "Skip reason",
     },
   },
-  run: async ({ args, output }) => {
-    const task = await runEffect(DomainTasks.getTask(args.taskId));
-    if (!task) return output.error("not_found", `Task not found: ${args.taskId}`);
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
     const skipped = await runEffect(DomainTasks.skipTask(task.id, args.reason));
     if (output.isJson()) {
       output.success({ item: serializeTask(skipped) });
@@ -474,17 +729,99 @@ const skipCommand = command({
   },
 });
 
+const deleteCommand = command({
+  meta: {
+    name: "delete",
+    description:
+      "Delete a pending task that has never been started (for cleanup of test/draft tasks)",
+  },
+  workspace: true,
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
+    if (task.status !== "pending") {
+      return output.error(
+        "invalid_status",
+        `Cannot delete task '${task.title}' (status: '${task.status}'). Only pending tasks can be deleted; use \`task skip\` for tasks already in motion.`,
+      );
+    }
+    if (task.startedAt) {
+      return output.error(
+        "invalid_status",
+        `Cannot delete task '${task.title}': it has been started before. Use \`task skip\` instead to preserve audit trail.`,
+      );
+    }
+    if (!task.reviewId) {
+      const prd = await runEffect(DomainPrds.getPrd(task.prdRevisionId));
+      if (prd && prd.status !== "draft") {
+        return output.error(
+          "prd_not_draft",
+          `Cannot delete task: parent PRD '${prd.title}' is '${prd.status}' (only draft allows deletions).`,
+        );
+      }
+    }
+    await runEffect(DomainTasks.deleteTask(task.id));
+    if (output.isJson()) {
+      output.success({ deleted: { id: task.id } });
+    } else {
+      output.print(`Deleted task '${task.title}' (${task.id})`);
+    }
+  },
+});
+
+const reactivateCommand = command({
+  meta: {
+    name: "reactivate",
+    description:
+      "Reset a skipped task back to pending (use sparingly — preserves no audit of the previous skip reason)",
+  },
+  workspace: true,
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
+    if (task.status !== "skipped") {
+      return output.error(
+        "invalid_status",
+        `Cannot reactivate task '${task.title}': status is '${task.status}', expected 'skipped'.`,
+      );
+    }
+    const reactivated = await runEffect(DomainTasks.reactivateTask(task.id));
+    if (output.isJson()) {
+      output.success({ item: serializeTask(reactivated) });
+    } else {
+      output.print(`Reactivated task '${reactivated.title}' (${reactivated.id}) [pending]`);
+    }
+  },
+});
+
 export const taskCommand = command({
   meta: { name: "task", description: "Task management" },
   subCommands: {
     add: addCommand,
     list: listCommand,
+    tree: treeCommand,
     show: showCommand,
     update: updateCommand,
     start: startCommand,
     done: doneCommand,
     block: blockCommand,
     skip: skipCommand,
+    delete: deleteCommand,
+    reactivate: reactivateCommand,
   },
 });
 

@@ -1,11 +1,12 @@
+import { useState } from "react";
 import {
   BadgeXIcon,
+  ChevronRightIcon,
   CircleCheckIcon,
   CircleEllipsisIcon,
   CircleSlash2Icon,
   CircleStopIcon,
-  Clock3Icon,
-  RefreshCcwDotIcon,
+  ExternalLinkIcon,
 } from "lucide-react";
 
 import {
@@ -16,6 +17,7 @@ import {
   AccordionTrigger,
 } from "#/web/components/ui/accordion";
 import { Badge } from "#/web/components/ui/badge";
+import { Spinner } from "#/web/components/loading-overlay";
 import { StatusDot } from "#/web/components/ui/status-dot";
 import type { StageCard, StageItem } from "#/web/lib/prd-view-model";
 import { formatMetaDate } from "#/web/lib/view-format";
@@ -26,79 +28,129 @@ export function StageTimeline({ cards }: { cards: StageCard[] }) {
       <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Tasks</p>
       <div className="space-y-3">
         {cards.map((card, index) => (
-          <div key={card.id} className="flex gap-4">
-            <div className="flex w-3 shrink-0 flex-col items-center pt-4">
-              <StatusDot
-                tone={card.current ? (card.complete ? "done" : "timeline") : "timeline-muted"}
-              />
-              {index < cards.length - 1 ? (
-                <div className="mt-2 flex-1 border-l border-dashed border-timeline-line" />
-              ) : null}
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <AccordionRoot defaultValue={card.current ? [card.id] : []}>
-                <AccordionItem value={card.id}>
-                  <AccordionHeader>
-                    <AccordionTrigger
-                      trailing={<span className="text-xs text-muted-foreground">{card.meta}</span>}
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                          {card.kind === "rework" ? (
-                            <RefreshCcwDotIcon
-                              className={[
-                                "size-4",
-                                card.reviewType === "human"
-                                  ? "text-severity-info"
-                                  : "text-muted-foreground",
-                              ].join(" ")}
-                            />
-                          ) : null}
-                          <span
-                            className={
-                              card.kind === "rework" && card.reviewType === "agent"
-                                ? "text-muted-foreground"
-                                : undefined
-                            }
-                          >
-                            {card.title}
-                          </span>
-                          {card.kind === "rework" && card.reviewType ? (
-                            <Badge
-                              variant={card.reviewType === "human" ? "severityInfo" : "subtle"}
-                            >
-                              {card.reviewType}
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <div className="text-xs text-muted-foreground">{card.meta}</div>
-                      </div>
-                    </AccordionTrigger>
-                  </AccordionHeader>
-                  <AccordionPanel>
-                    <div className="space-y-4 p-4">
-                      {card.review?.userFeedback ? (
-                        <blockquote className="rounded-r-lg border-l-2 border-card-border bg-panel-muted px-3 py-2 text-sm italic text-secondary-foreground">
-                          {card.review.userFeedback}
-                        </blockquote>
-                      ) : null}
-
-                      <div className="space-y-3">
-                        {card.items.map((item) => (
-                          <StageTimelineItem key={item.id} item={item} />
-                        ))}
-                      </div>
-                    </div>
-                  </AccordionPanel>
-                </AccordionItem>
-              </AccordionRoot>
-            </div>
-          </div>
+          <StageCardView key={card.id} card={card} isLast={index === cards.length - 1} />
         ))}
       </div>
     </div>
   );
+}
+
+function StageCardView({ card, isLast }: { card: StageCard; isLast: boolean }) {
+  const inProgressTasks = card.items.filter((t) => t.status === "in_progress");
+  const skippedTasks = card.items.filter((t) => t.status === "skipped");
+  const otherTasks = card.items.filter((t) => t.status !== "in_progress" && t.status !== "skipped");
+
+  const visibleCount = card.items.filter((t) => t.status !== "skipped").length;
+  const meta = rebuildMeta(card, visibleCount);
+
+  return (
+    <div className="flex gap-4">
+      <div className="flex w-3 shrink-0 flex-col items-center pt-4">
+        <StatusDot tone={card.current ? (card.complete ? "done" : "timeline") : "timeline-muted"} />
+        {!isLast ? (
+          <div className="mt-2 flex-1 border-l border-dashed border-timeline-line" />
+        ) : null}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <AccordionRoot defaultValue={card.current ? [card.id] : []}>
+          <AccordionItem value={card.id}>
+            <AccordionHeader>
+              <AccordionTrigger
+                trailing={
+                  <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{meta}</span>
+                    {card.kind === "review" && card.review ? (
+                      <span
+                        data-review-id={card.review.id}
+                        role="button"
+                        tabIndex={0}
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLinkIcon className="size-3" />
+                        details
+                      </span>
+                    ) : null}
+                  </span>
+                }
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <span>{card.title}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">{meta}</div>
+                </div>
+              </AccordionTrigger>
+            </AccordionHeader>
+
+            {inProgressTasks.length > 0 ? (
+              <div className="space-y-2 px-4 pt-2 pb-1">
+                {inProgressTasks.map((item) => (
+                  <StageTimelineItem key={item.id} item={item} />
+                ))}
+              </div>
+            ) : null}
+
+            <AccordionPanel>
+              <div className="space-y-4 p-4">
+                {card.review?.userFeedback ? (
+                  <blockquote className="rounded-r-lg border-l-2 border-card-border bg-panel-muted px-3 py-2 text-sm italic text-secondary-foreground">
+                    {card.review.userFeedback}
+                  </blockquote>
+                ) : null}
+
+                <div className="max-h-105 space-y-3 overflow-y-auto pr-1">
+                  {otherTasks.map((item) => (
+                    <StageTimelineItem key={item.id} item={item} />
+                  ))}
+                </div>
+
+                {skippedTasks.length > 0 ? <SkippedSection items={skippedTasks} /> : null}
+              </div>
+            </AccordionPanel>
+          </AccordionItem>
+        </AccordionRoot>
+      </div>
+    </div>
+  );
+}
+
+function SkippedSection({ items }: { items: StageItem[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-card-border pt-3">
+      <button
+        type="button"
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronRightIcon
+          className={["size-3 transition-transform", open ? "rotate-90" : ""].join(" ")}
+        />
+        <span>{items.length} skipped</span>
+      </button>
+      {open ? (
+        <div className="mt-3 space-y-3">
+          {items.map((item) => (
+            <StageTimelineItem key={item.id} item={item} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function rebuildMeta(card: StageCard, visibleCount: number): string {
+  const visible = card.items.filter((t) => t.status !== "skipped");
+  const doneCount = visible.filter((t) => t.status === "done").length;
+  const skippedCount = card.items.length - visible.length;
+
+  if (card.canceled) {
+    return `${doneCount} / ${visibleCount} done · canceled`;
+  }
+  const base = `${doneCount} / ${visibleCount} done`;
+  return skippedCount > 0 ? `${base} · ${skippedCount} skipped` : base;
 }
 
 function StageTimelineItem({ item }: { item: StageItem }) {
@@ -151,7 +203,7 @@ function itemIndicator(status: StageItem["status"]) {
   }
 
   if (status === "in_progress") {
-    return <Clock3Icon className="size-4 text-primary" />;
+    return <Spinner className="size-4" />;
   }
 
   if (status === "blocked") {

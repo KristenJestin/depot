@@ -1,8 +1,9 @@
 import * as React from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 
 import { AgentBars } from "#/web/components/agent-bars";
+import { Spinner } from "#/web/components/loading-overlay";
 import { PrdStatusIcon } from "#/web/components/prd-status-icon";
 import { Card } from "#/web/components/ui/card";
 import { ProgressBar } from "#/web/components/ui/progress";
@@ -41,10 +42,19 @@ export function KanbanBoard({ columns }: { columns: BoardColumn[] }) {
 }
 
 function KanbanCard({ card, columnId }: { card: BoardCard; columnId: BoardColumn["id"] }) {
-  const progress = card.totalTasks === 0 ? 0 : Math.round((card.doneTasks / card.totalTasks) * 100);
-  const [tasksOpen, setTasksOpen] = React.useState(() => tasksOpenByDefault(columnId));
+  void columnId;
+  const visibleTotal = Math.max(0, card.totalTasks - card.skippedTasks);
+  const progress = visibleTotal === 0 ? 0 : Math.round((card.doneTasks / visibleTotal) * 100);
+  const [tasksOpen, setTasksOpen] = React.useState(false);
   const tasksPanelId = `kanban-tasks-${card.id}`;
   const showFooter = card.animatedLabel !== null || card.status !== "done";
+
+  const visibleTasks = card.previewTasks.filter((t) => t.status !== "skipped");
+  const inProgressTasks = visibleTasks.filter((t) => t.status === "in_progress");
+  const otherTasks = visibleTasks.filter((t) => t.status !== "in_progress");
+  const skippedCount = card.skippedTasks;
+  const [skippedOpen, setSkippedOpen] = React.useState(false);
+  const skippedTasks = card.previewTasks.filter((t) => t.status === "skipped");
 
   return (
     <Card
@@ -92,18 +102,34 @@ function KanbanCard({ card, columnId }: { card: BoardCard; columnId: BoardColumn
           </p>
         )}
 
-        {card.totalTasks > 0 && (
+        {visibleTotal > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
-                {card.doneTasks} / {card.totalTasks} tasks
+                {card.doneTasks} / {visibleTotal} tasks
+                {skippedCount > 0 ? ` · ${skippedCount} skipped` : ""}
               </span>
             </div>
             <ProgressBar value={progress} />
           </div>
         )}
 
-        {card.previewTasks.length > 0 && (
+        {inProgressTasks.length > 0 && (
+          <div className="space-y-2">
+            {inProgressTasks.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-center gap-2 rounded-md border border-card-border bg-card p-2 text-xs"
+              >
+                <StatusDot tone="active" />
+                <span className={`flex-1 ${taskLabelClass(task.status)}`}>{task.title}</span>
+                <Spinner />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {visibleTasks.length > 0 && (
           <div className="pointer-events-auto border-t border-card-border pt-3">
             <button
               type="button"
@@ -125,16 +151,44 @@ function KanbanCard({ card, columnId }: { card: BoardCard; columnId: BoardColumn
             </button>
 
             {tasksOpen ? (
-              <div id={tasksPanelId} className="space-y-2 pt-3">
-                {card.previewTasks.map((task, index) => (
+              <div id={tasksPanelId} className="max-h-64 space-y-2 overflow-y-auto pt-3 pr-1">
+                {otherTasks.map((task) => (
                   <div key={task.id} className="flex items-start gap-2 text-xs">
-                    <StatusDot
-                      tone={mapTaskTone(task.status)}
-                      className={index === 0 ? "" : undefined}
-                    />
+                    <StatusDot tone={mapTaskTone(task.status)} />
                     <span className={taskLabelClass(task.status)}>{task.title}</span>
                   </div>
                 ))}
+                {skippedCount > 0 ? (
+                  <div className="border-t border-card-border pt-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSkippedOpen((v) => !v);
+                      }}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      <ChevronRightIcon
+                        className={[
+                          "size-3 transition-transform",
+                          skippedOpen ? "rotate-90" : "",
+                        ].join(" ")}
+                      />
+                      <span>{skippedCount} skipped</span>
+                    </button>
+                    {skippedOpen ? (
+                      <div className="mt-2 space-y-2">
+                        {skippedTasks.map((task) => (
+                          <div key={task.id} className="flex items-start gap-2 text-xs">
+                            <StatusDot tone={mapTaskTone(task.status)} />
+                            <span className={taskLabelClass(task.status)}>{task.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -158,10 +212,6 @@ function KanbanCard({ card, columnId }: { card: BoardCard; columnId: BoardColumn
       ) : null}
     </Card>
   );
-}
-
-function tasksOpenByDefault(columnId: BoardColumn["id"]) {
-  return columnId === "in_progress" || columnId === "ready";
 }
 
 function columnNeedsReviewMeta(card: BoardCard) {
