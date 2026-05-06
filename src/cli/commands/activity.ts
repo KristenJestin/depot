@@ -18,6 +18,7 @@ const addCommand = command({
       schema: eventTypeSchema,
       required: true,
       positional: true,
+      expected: "a supported event type",
       description: "Event type (session_start, note, error, etc.)",
     },
     task: {
@@ -88,6 +89,7 @@ const listCommand = command({
       ),
       default: "20",
       alias: "n",
+      expected: "a positive integer",
       description: "Number of entries to show",
     },
     workspace: {

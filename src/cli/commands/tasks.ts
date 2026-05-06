@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { command } from "#/cli/command";
+import { resolveTextInput } from "#/cli/file-input";
 import { runEffect } from "#/cli/runtime";
 import type { TaskRow } from "#/db/schema";
 import * as DomainTasks from "#/modules/tasks/domain";
@@ -39,18 +40,29 @@ const addCommand = command({
     },
     desc: {
       schema: Schema.String.pipe(Schema.minLength(1)),
-      required: true,
-      description: "Task description",
+      expected: "non-empty text",
+      description: "Task description; new tasks store descriptions as structured_v1",
+    },
+    descFile: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      expected: "path to a readable text file",
+      description: "Read structured_v1 task description from a UTF-8 text file",
     },
     criteria: {
       schema: Schema.String.pipe(Schema.minLength(1)),
-      required: true,
+      expected: "non-empty text",
       description: "Done criteria (textual)",
+    },
+    criteriaFile: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      expected: "path to a readable text file",
+      description: "Read done criteria from a UTF-8 text file",
     },
     effort: {
       schema: effortSchema,
       required: true,
       alias: "e",
+      expected: "one of xs, s, m, l, xl",
       description: "Effort estimate (xs/s/m/l/xl)",
     },
     depends: {
@@ -59,11 +71,29 @@ const addCommand = command({
     },
     phase: {
       schema: Schema.Int.pipe(Schema.positive()),
+      coerce: "integer",
+      expected: "a positive integer",
       alias: "p",
       description: "Phase number this task belongs to (multi-phase PRDs only)",
     },
   },
   run: async ({ args, output }) => {
+    const description = await resolveTextInput({
+      output,
+      value: args.desc,
+      file: args.descFile,
+      valueFlag: "--desc",
+      fileFlag: "--desc-file",
+      required: true,
+    });
+    const doneCriteria = await resolveTextInput({
+      output,
+      value: args.criteria,
+      file: args.criteriaFile,
+      valueFlag: "--criteria",
+      fileFlag: "--criteria-file",
+      required: true,
+    });
     const prd = await runEffect(DomainPrds.getPrd(args.prdId));
     if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
 
@@ -92,8 +122,8 @@ const addCommand = command({
       DomainTasks.createTask({
         prdRevisionId: prd.id,
         title: args.title,
-        description: args.desc,
-        doneCriteria: args.criteria,
+        description,
+        doneCriteria,
         effort: args.effort,
         dependsOn: dependencyIds,
         phaseNumber: args.phase,
@@ -231,19 +261,34 @@ const updateCommand = command({
     },
     desc: {
       schema: Schema.String.pipe(Schema.minLength(1)),
-      description: "New task description",
+      expected: "non-empty text",
+      description: "New task description; updates store descriptions as structured_v1",
+    },
+    descFile: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      expected: "path to a readable text file",
+      description: "Read new structured_v1 task description from a UTF-8 text file",
     },
     criteria: {
       schema: Schema.String.pipe(Schema.minLength(1)),
+      expected: "non-empty text",
       description: "New done criteria",
+    },
+    criteriaFile: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      expected: "path to a readable text file",
+      description: "Read new done criteria from a UTF-8 text file",
     },
     effort: {
       schema: effortSchema,
       alias: "e",
+      expected: "one of xs, s, m, l, xl",
       description: "New effort estimate (xs/s/m/l/xl)",
     },
     phase: {
       schema: Schema.Int.pipe(Schema.positive()),
+      coerce: "integer",
+      expected: "a positive integer",
       alias: "p",
       description: "New phase number (multi-phase PRDs only)",
     },
@@ -271,21 +316,38 @@ const updateCommand = command({
     if (
       args.title === undefined &&
       args.desc === undefined &&
+      args.descFile === undefined &&
       args.criteria === undefined &&
+      args.criteriaFile === undefined &&
       args.effort === undefined &&
       args.phase === undefined
     ) {
       return output.error(
         "no_changes",
-        "No changes provided. Use --title, --desc, --criteria, --effort, or --phase.",
+        "No changes provided. Use --title, --desc, --desc-file, --criteria, --criteria-file, --effort, or --phase.",
       );
     }
+
+    const description = await resolveTextInput({
+      output,
+      value: args.desc,
+      file: args.descFile,
+      valueFlag: "--desc",
+      fileFlag: "--desc-file",
+    });
+    const doneCriteria = await resolveTextInput({
+      output,
+      value: args.criteria,
+      file: args.criteriaFile,
+      valueFlag: "--criteria",
+      fileFlag: "--criteria-file",
+    });
 
     const updated = await runEffect(
       DomainTasks.updateTask(task.id, {
         title: args.title,
-        description: args.desc,
-        doneCriteria: args.criteria,
+        description,
+        doneCriteria,
         effort: args.effort,
         phaseNumber: args.phase,
       }),
@@ -375,7 +437,7 @@ const blockCommand = command({
     if (output.isJson()) {
       output.success({ item: serializeTask(blocked) });
     } else {
-      output.print(`Blocked task '${blocked.title}' (${blocked.id}): ${args.reason}`);
+      printTaskTransition(output, "Blocked", blocked, args.reason);
     }
   },
 });
@@ -407,7 +469,7 @@ const skipCommand = command({
     if (output.isJson()) {
       output.success({ item: serializeTask(skipped) });
     } else {
-      output.print(`Skipped task '${skipped.title}' (${skipped.id}): ${args.reason}`);
+      printTaskTransition(output, "Skipped", skipped, args.reason);
     }
   },
 });
@@ -446,5 +508,28 @@ function printTaskSection(
 }
 
 function formatSectionLine(line: string, style: "text" | "list"): string {
-  return style === "list" ? `- ${line}` : line;
+  return style === "list" ? `- ${stripListMarker(line)}` : line;
+}
+
+function stripListMarker(line: string): string {
+  return line.replace(/^[-*]\s+/, "").trim();
+}
+
+function printTaskTransition(
+  output: CommandOutput,
+  verb: "Blocked" | "Skipped",
+  task: TaskRow,
+  reason: string,
+): void {
+  const normalizedReason = reason.trim();
+  if (normalizedReason.length <= 100 && !normalizedReason.includes("\n")) {
+    output.print(`${verb} task '${task.title}' (${task.id}): ${normalizedReason}`);
+    return;
+  }
+
+  output.print(`${verb} task '${task.title}' (${task.id})`);
+  output.print("Reason:");
+  for (const line of normalizedReason.split("\n")) {
+    output.print(`  ${line.trim()}`);
+  }
 }

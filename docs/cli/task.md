@@ -28,21 +28,27 @@ Add a new task to a PRD.
 ### Usage
 
 ```bash
-depot task add --prdId <prd-id> --title <title> --desc <text> --criteria <text> --effort <xs|s|m|l|xl> [--depends <task-id,task-id>]
+depot task add --prdId <prd-id> --title <title> (--desc <text> | --desc-file <path>) (--criteria <text> | --criteria-file <path>) --effort <xs|s|m|l|xl> [--depends <task-id,task-id>]
 ```
 
 ### Rules
 
 - `--prdId` is required
-- `--desc` is required
-- `--criteria` is required and must not be empty
+- `--desc` or `--desc-file` is required
+- `--criteria` or `--criteria-file` is required and must not be empty
+- file inputs read UTF-8 text and are safer for structured content with lines that start with `-`
+- inline and file variants for the same field are mutually exclusive
 - `--effort` must be one of `xs`, `s`, `m`, `l`, `xl`
 - `--depends` accepts comma-separated full task IDs
 - each dependency is verified before the task is created
 
-### Description format
+### Description storage
 
-New tasks are normalized toward the structured format:
+New task descriptions are always stored on the new-task path as `structured_v1`. There is
+currently no `--desc-format` flag and no raw/freeform storage path for new tasks.
+
+When the input already contains all three structured headings, depot parses and normalizes
+them:
 
 ```text
 Intent:
@@ -56,7 +62,36 @@ Non-goals:
 - What should not be pulled in.
 ```
 
-Even if you pass a plain description, depot currently stores it as `structured_v1`. Writing the structure explicitly keeps the task readable in both the CLI and the web UI.
+The parser accepts `Intent:`, `Scope:`, and `Non-goals:` headings. `Scope` and
+`Non-goals` are rendered as lists; leading `-` or `*` markers are normalized so `task show`
+does not double the bullet marker.
+
+Plain text is still accepted, but it is trimmed and stored with
+`descriptionFormat: "structured_v1"`. Because it does not contain the full structured
+shape, `depot task show` renders that content under a single `Description` section. Write
+the structure explicitly when a task should display as Intent, Scope, and Non-goals in the
+CLI and web UI.
+
+For structured or markdown-like descriptions, prefer `--desc-file` so shell and CLI
+argument parsers do not treat lines beginning with `-` as flags:
+
+```bash
+depot task add --prdId <prd-id> --title "Add context output" --desc-file task-desc.md --criteria-file task-criteria.md --effort m
+```
+
+Example `task-desc.md`:
+
+```text
+Intent:
+Render a live workspace summary for agents.
+
+Scope:
+- Include the active PRD.
+- Include the next available task.
+
+Non-goals:
+- Do not change the stored PRD schema.
+```
 
 ## `depot task list`
 

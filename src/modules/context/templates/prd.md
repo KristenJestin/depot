@@ -58,6 +58,8 @@ Use the CLI progressively:
 - create tasks with `depot task add ...`
 - refine tasks with `depot task update <task-id> ...`
 
+Prefer `prd load` or file flags such as `--context-file`, `--scope-file`, `--desc-file`, and `--criteria-file` for long structured text, especially when content contains markdown bullets or lines that start with `-`.
+
 The draft should evolve in real time. Every meaningful clarification should move the stored PRD closer to an implementation-ready spec.
 
 ### 3. Task Quality Bar
@@ -77,6 +79,26 @@ Write new task descriptions with this structure:
 - `Intent:` why this task exists now
 - `Scope:` what must change or be verified
 - `Non-goals:` what must not be pulled in
+
+Example task description:
+
+```text
+Intent:
+Make the current workflow state easy for the next agent to resume.
+
+Scope:
+- Render the active PRD.
+- Render the next actionable task.
+
+Non-goals:
+- Do not redesign unrelated command output.
+```
+
+New task descriptions are stored through the `structured_v1` path. There is no
+`--desc-format` flag for task creation or updates; if the user wants structured rendering
+in `task show` and the web UI, write the headings explicitly. Plain text remains accepted,
+but it is stored as `structured_v1` and rendered as a single Description section because it
+does not contain all structured headings.
 
 Keep the spec compact, but do not leave execution ambiguity behind.
 

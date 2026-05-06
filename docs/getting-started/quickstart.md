@@ -79,6 +79,10 @@ Non-goals:
 - Do not redesign the output format.
 ```
 
+New task descriptions are stored with `descriptionFormat: "structured_v1"`. There is no
+`--desc-format` selector for new tasks, so use the headings above when you want `task
+show` and the web UI to display separate Intent, Scope, and Non-goals sections.
+
 Then create the task:
 
 ```bash

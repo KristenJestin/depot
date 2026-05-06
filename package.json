@@ -1,6 +1,6 @@
 {
   "name": "@netsirk/depot",
-  "version": "2.1.15",
+  "version": "2.1.16",
   "description": "AI agent task and PRD management CLI",
   "keywords": [
     "agent",

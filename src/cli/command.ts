@@ -17,6 +17,10 @@ type ValidatedArgInput = {
   required?: boolean;
   /** Explicit citty type. Defaults to "string". Use "boolean" for flags. */
   type?: "boolean" | "string";
+  /** Coerce parser strings into a typed value before schema validation. */
+  coerce?: "integer";
+  /** User-facing shape used when validation fails. */
+  expected?: string;
   /** Default value forwarded to citty (and used when the flag is absent). */
   default?: unknown;
   /** Set to true for positional (non-flag) args. */
@@ -97,6 +101,44 @@ type CommandConfig<
 
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
+type CoercionResult = { ok: true; value: unknown } | { ok: false; message: string };
+
+function coerceArgValue(key: string, def: ValidatedArgInput, value: unknown): CoercionResult {
+  if (def.coerce !== "integer") {
+    return { ok: true, value };
+  }
+
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return { ok: true, value };
+  }
+
+  if (typeof value === "string") {
+    const raw = value.startsWith("=") ? value.slice(1) : value;
+    const trimmed = raw.trim();
+    if (/^[+-]?\d+$/.test(trimmed)) {
+      return { ok: true, value: Number.parseInt(trimmed, 10) };
+    }
+  }
+
+  return {
+    ok: false,
+    message: formatValidationMessage(key, def, value),
+  };
+}
+
+function formatValidationMessage(key: string, def: ValidatedArgInput, value: unknown): string {
+  const expected = def.expected ?? "a valid value";
+  return `${formatFlagName(key)} must be ${expected}; got ${formatReceivedValue(value)}`;
+}
+
+function formatFlagName(key: string): string {
+  return `--${key.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}`;
+}
+
+function formatReceivedValue(value: unknown): string {
+  return value === undefined ? "missing" : JSON.stringify(value);
+}
+
 function parseValidatedArgs<TDef extends ValidatedArgsDef>(
   argsDef: TDef,
   rawArgs: Record<string, unknown>,
@@ -108,24 +150,24 @@ function parseValidatedArgs<TDef extends ValidatedArgsDef>(
     const rawValue = rawArgs[key];
     const value = rawValue === undefined && def.default !== undefined ? def.default : rawValue;
 
-    if (def.required === true) {
-      // Required: always validate; missing counts as invalid
-      try {
-        result[key] = Schema.decodeUnknownSync(def.schema)(value);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        errors.push(`${key}: ${msg}`);
+    if (def.required === true && value === undefined) {
+      errors.push(`${formatFlagName(key)} is required`);
+      continue;
+    }
+
+    if (value !== undefined) {
+      const coerced = coerceArgValue(key, def, value);
+      if (!coerced.ok) {
+        errors.push(coerced.message);
+        continue;
       }
-    } else if (value !== undefined) {
-      // Optional but present: validate
+
       try {
-        result[key] = Schema.decodeUnknownSync(def.schema)(value);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        errors.push(`${key}: ${msg}`);
+        result[key] = Schema.decodeUnknownSync(def.schema)(coerced.value);
+      } catch {
+        errors.push(formatValidationMessage(key, def, value));
       }
     } else {
-      // Optional and absent: skip
       result[key] = undefined;
     }
   }

@@ -1,6 +1,7 @@
 import { Schema, Effect } from "effect";
 import { readFile } from "node:fs/promises";
 import { command } from "#/cli/command";
+import { resolveTextInput } from "#/cli/file-input";
 import { runEffect } from "#/cli/runtime";
 import * as DomainPrds from "#/modules/prds/domain";
 import { effortSchema } from "#/shared/schemas";
@@ -22,19 +23,41 @@ const createCommand = command({
       alias: "c",
       description: "Why this PRD exists",
     },
+    contextFile: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "Read PRD context from a UTF-8 text file",
+    },
     scope: {
       schema: Schema.String.pipe(Schema.minLength(1)),
       alias: "s",
       description: "What is included and excluded",
     },
+    scopeFile: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "Read PRD scope from a UTF-8 text file",
+    },
   },
   run: async ({ args, ws, output }) => {
+    const context = await resolveTextInput({
+      output,
+      value: args.context,
+      file: args.contextFile,
+      valueFlag: "--context",
+      fileFlag: "--context-file",
+    });
+    const scope = await resolveTextInput({
+      output,
+      value: args.scope,
+      file: args.scopeFile,
+      valueFlag: "--scope",
+      fileFlag: "--scope-file",
+    });
     const prd = await runEffect(
       DomainPrds.createPrd({
         projectId: ws.projectId,
         title: args.title,
-        context: args.context,
-        scope: args.scope,
+        context,
+        scope,
       }),
     );
     if (output.isJson()) {
@@ -98,25 +121,57 @@ const updateCommand = command({
       alias: "c",
       description: "New PRD context",
     },
+    contextFile: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "Read new PRD context from a UTF-8 text file",
+    },
     scope: {
       schema: Schema.String,
       alias: "s",
       description: "New PRD scope",
+    },
+    scopeFile: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "Read new PRD scope from a UTF-8 text file",
     },
   },
   run: async ({ args, output }) => {
     const prd = await runEffect(DomainPrds.getPrd(args.prdId));
     if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
 
-    if (args.title === undefined && args.context === undefined && args.scope === undefined) {
-      return output.error("no_changes", "No changes provided. Use --title, --context, or --scope.");
+    if (
+      args.title === undefined &&
+      args.context === undefined &&
+      args.contextFile === undefined &&
+      args.scope === undefined &&
+      args.scopeFile === undefined
+    ) {
+      return output.error(
+        "no_changes",
+        "No changes provided. Use --title, --context, --context-file, --scope, or --scope-file.",
+      );
     }
+
+    const context = await resolveTextInput({
+      output,
+      value: args.context,
+      file: args.contextFile,
+      valueFlag: "--context",
+      fileFlag: "--context-file",
+    });
+    const scope = await resolveTextInput({
+      output,
+      value: args.scope,
+      file: args.scopeFile,
+      valueFlag: "--scope",
+      fileFlag: "--scope-file",
+    });
 
     const updated = await runEffect(
       DomainPrds.updatePrd(prd.id, {
         title: args.title,
-        context: args.context,
-        scope: args.scope,
+        context,
+        scope,
       }),
     );
 

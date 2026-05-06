@@ -20,6 +20,12 @@ Payload conventions:
 - list commands use `payload.items`
 - a few compound operations return named fields such as `project`, `workspace`, `prd`, or `tasks`
 
+The covered mutation standard is:
+
+- `payload.item`: `task add`, `task done`, `task skip`, `prd create`, `review task add`
+- `payload.items`: `prd list`, `review list`
+- named compound payloads: `prd load` returns `payload.prd` and `payload.tasks`
+
 ## Error Envelope
 
 ```json
@@ -37,10 +43,11 @@ Common command-level error codes include:
 | `no_workspace`       | no workspace matched the current path                           |
 | `no_active_prd`      | no active PRD is available for the requested operation          |
 | `no_changes`         | no update fields were supplied                                  |
+| `conflicting_input`  | mutually exclusive inline/file flags were supplied              |
 | `already_done`       | archive or done action was requested for something already done |
 | `linked_data`        | workspace removal is blocked by linked PRDs                     |
 | `invalid_payload`    | log payload could not be parsed                                 |
-| `file_read_error`    | `prd load` could not read the requested file                    |
+| `file_read_error`    | a command could not read the requested input file               |
 | `invalid_depends_on` | a `prd load` document used invalid task index references        |
 | `unsupported`        | the command does not support JSON output                        |
 | `render_error`       | context rendering failed                                        |

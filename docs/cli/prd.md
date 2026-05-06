@@ -30,7 +30,7 @@ Create a new draft PRD in the current project's context.
 ### Usage
 
 ```bash
-depot prd create --title <title> [--context <text>] [--scope <text>]
+depot prd create --title <title> [--context <text> | --context-file <path>] [--scope <text> | --scope-file <path>]
 ```
 
 ### Example
@@ -38,6 +38,8 @@ depot prd create --title <title> [--context <text>] [--scope <text>]
 ```bash
 depot prd create --title "Core foundation" --context "Need persistent agent state" --scope "Project, PRD, task, and log flow"
 ```
+
+Use `--context-file` and `--scope-file` for long structured text. File inputs read UTF-8 text and avoid shell parsers treating markdown-like lines as flags. Inline and file variants for the same field are mutually exclusive.
 
 ## `depot prd list`
 
@@ -70,7 +72,7 @@ Update a draft PRD in place.
 ### Usage
 
 ```bash
-depot prd update <prd-id> [--title <text>] [--context <text>] [--scope <text>]
+depot prd update <prd-id> [--title <text>] [--context <text> | --context-file <path>] [--scope <text> | --scope-file <path>]
 ```
 
 Only `draft` PRDs can be updated in place. To revise a `ready` PRD, fork it first.
@@ -190,5 +192,8 @@ If `--file` is omitted, the command reads JSON from stdin.
 - `tasks` must contain at least one task
 - `dependsOn` uses zero-based indexes into earlier tasks in the same document
 - only backward references are allowed
+- task descriptions loaded from JSON use the same `structured_v1` storage path as
+  `depot task add`; include `Intent`, `Scope`, and `Non-goals` headings when you want
+  structured rendering
 - the full batch is created transactionally
 - when `ready` is true, the created PRD is immediately marked `ready`

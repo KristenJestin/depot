@@ -110,13 +110,17 @@ Each task includes:
 - an optional `reviewId` when the task is a review finding
 - an optional `severity` when the task belongs to a review
 
-New task descriptions are normalized to the `structured_v1` shape:
+New task descriptions are normalized to the `structured_v1` storage path:
 
 - `Intent:` why this task exists now
 - `Scope:` what should change or be verified
 - `Non-goals:` what should not be pulled into the task
 
-Older freeform descriptions remain readable. `depot task show` renders both structured and plain descriptions in a human-readable format.
+There is currently no `--desc-format` flag for choosing another format when creating or
+updating tasks. Plain text input is still accepted and trimmed, but new task rows store
+`descriptionFormat` as `structured_v1`. If the content does not include the full
+`Intent`, `Scope`, and `Non-goals` shape, `depot task show` renders it under a single
+`Description` section. Older freeform descriptions remain readable.
 
 The task lifecycle is:
 

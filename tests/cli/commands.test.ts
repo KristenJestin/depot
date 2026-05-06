@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { runCommand } from "citty";
 import fs from "node:fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -15,6 +16,7 @@ import {
   createPrd,
   createProject,
   createTask,
+  startTask,
   listTasks,
   listActivity,
   getProject,
@@ -68,6 +70,19 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
     process.stdout.write = original;
   }
   return chunks.join("");
+}
+
+async function captureConsoleError(fn: () => Promise<void>): Promise<string> {
+  const messages: string[] = [];
+  const spy = vi.spyOn(console, "error").mockImplementation((message) => {
+    messages.push(String(message));
+  });
+  try {
+    await fn();
+  } finally {
+    spy.mockRestore();
+  }
+  return messages.join("\n");
 }
 
 describe("CLI commands", () => {
@@ -177,6 +192,561 @@ describe("CLI commands", () => {
     expect(created!.description).toContain("- Render structured sections");
 
     stdout.mockRestore();
+  });
+
+  it.each([
+    ["--phase space", ["--phase", "1"]],
+    ["--phase equals", ["--phase=1"]],
+    ["-p space", ["-p", "1"]],
+    ["-p equals", ["-p=1"]],
+  ])("task add accepts numeric phase syntax from citty: %s", async (_label, phaseArgs) => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Phased PRD",
+    });
+
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runCommand(addCommand as any, {
+      rawArgs: [
+        "--prd-id",
+        prd.id,
+        "--title",
+        `Phase task ${phaseArgs.join(" ")}`,
+        "--desc",
+        formatStructuredTaskDescription({
+          intent: "Create a phased task.",
+          scope: "Exercise CLI parsing.",
+          nonGoals: "Do not touch the real depot database.",
+        }),
+        "--criteria",
+        "phase is persisted",
+        "--effort",
+        "s",
+        ...phaseArgs,
+      ],
+    });
+
+    const tasks = await listTasks(db, prd.id);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.phaseNumber).toBe(1);
+
+    stdout.mockRestore();
+  });
+
+  it("task update accepts numeric phase syntax from citty", async () => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const updateCommand = await getSubCommand(taskCommand, "update");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Phased PRD",
+    });
+    const task = await createTask(db, {
+      prdRevisionId: prd.id,
+      title: "Existing task",
+      description: "desc",
+      doneCriteria: "done",
+      effort: "s",
+      phaseNumber: 1,
+    });
+
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runCommand(updateCommand as any, {
+      rawArgs: [task.id, "--phase", "2"],
+    });
+
+    const tasks = await listTasks(db, prd.id);
+    expect(tasks[0]!.phaseNumber).toBe(2);
+
+    stdout.mockRestore();
+  });
+
+  it("task add accepts markdown-like long text without treating bullets as flags", async () => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Long text PRD",
+    });
+    const desc = formatStructuredTaskDescription({
+      intent: "Keep long CLI text intact.",
+      scope: ["pages_billing", "Preserve markdown-like bullets"],
+      nonGoals: "Do not parse bullets as flags.",
+    });
+
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runCommand(addCommand as any, {
+      rawArgs: [
+        "--prd-id",
+        prd.id,
+        "--title",
+        "Long text task",
+        "--desc",
+        desc,
+        "--criteria",
+        "stored exactly",
+        "--effort",
+        "m",
+      ],
+    });
+
+    const tasks = await listTasks(db, prd.id);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.description).toContain("- pages_billing");
+
+    stdout.mockRestore();
+  });
+
+  it("task add reads parser-sensitive criteria from a file in text mode", async () => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "File input PRD",
+    });
+    const criteriaFile = join(tmpdir(), `depot-criteria-${Date.now()}.txt`);
+    await fs.writeFile(criteriaFile, "Done when stored\n- pages_billing stays criteria text\n");
+
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await runCommand(addCommand as any, {
+        rawArgs: [
+          "--prd-id",
+          prd.id,
+          "--title",
+          "File criteria task",
+          "--desc",
+          "Read criteria from a file.",
+          "--criteria-file",
+          criteriaFile,
+          "--effort",
+          "s",
+        ],
+      });
+
+      const tasks = await listTasks(db, prd.id);
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.doneCriteria).toContain("- pages_billing stays criteria text");
+    } finally {
+      stdout.mockRestore();
+      await fs.unlink(criteriaFile);
+    }
+  });
+
+  it("task add reads description and criteria files in JSON mode", async () => {
+    setJsonMode(true);
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "JSON file input PRD",
+    });
+    const descFile = join(tmpdir(), `depot-desc-${Date.now()}.txt`);
+    const criteriaFile = join(tmpdir(), `depot-criteria-${Date.now()}-json.txt`);
+    await fs.writeFile(
+      descFile,
+      formatStructuredTaskDescription({
+        intent: "Read the description from disk.",
+        scope: "- pages_billing must stay plain text.",
+        nonGoals: "Do not change storage.",
+      }),
+    );
+    await fs.writeFile(criteriaFile, "JSON envelope includes the created task");
+
+    try {
+      const output = await captureStdout(async () => {
+        await runCommand(addCommand as any, {
+          rawArgs: [
+            "--prd-id",
+            prd.id,
+            "--title",
+            "JSON file task",
+            "--desc-file",
+            descFile,
+            "--criteria-file",
+            criteriaFile,
+            "--effort",
+            "m",
+          ],
+        });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(parsed.payload.item.title).toBe("JSON file task");
+      expect(parsed.payload.item.description).toContain("- pages_billing");
+      expect(parsed.payload.item.doneCriteria).toBe("JSON envelope includes the created task");
+    } finally {
+      await fs.unlink(descFile);
+      await fs.unlink(criteriaFile);
+    }
+  });
+
+  it("task add reports empty description files as concise text", async () => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Empty file validation PRD",
+    });
+    const descFile = join(tmpdir(), `depot-desc-empty-${Date.now()}.txt`);
+    await fs.writeFile(descFile, "");
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+
+    try {
+      const output = await captureConsoleError(async () => {
+        await expect(
+          runCommand(addCommand as any, {
+            rawArgs: [
+              "--prd-id",
+              prd.id,
+              "--title",
+              "Empty desc file",
+              "--desc-file",
+              descFile,
+              "--criteria",
+              "done",
+              "--effort",
+              "s",
+            ],
+          }),
+        ).rejects.toThrow("process.exit:1");
+      });
+
+      expect(output).toContain("--desc-file");
+      expect(output).toContain("non-empty text");
+      expect(output).not.toContain("minLength");
+    } finally {
+      exit.mockRestore();
+      await fs.unlink(descFile);
+    }
+  });
+
+  it("task add reports whitespace criteria files as JSON validation envelopes", async () => {
+    setJsonMode(true);
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "JSON empty file validation PRD",
+    });
+    const criteriaFile = join(tmpdir(), `depot-criteria-empty-${Date.now()}.txt`);
+    await fs.writeFile(criteriaFile, " \n\t ");
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+
+    try {
+      const output = await captureStdout(async () => {
+        await expect(
+          runCommand(addCommand as any, {
+            rawArgs: [
+              "--prd-id",
+              prd.id,
+              "--title",
+              "Whitespace criteria file",
+              "--desc",
+              "desc",
+              "--criteria-file",
+              criteriaFile,
+              "--effort",
+              "s",
+            ],
+          }),
+        ).rejects.toThrow("process.exit:1");
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("error");
+      expect(parsed.error.code).toBe("validation_error");
+      expect(parsed.error.message).toContain("--criteria-file");
+      expect(parsed.error.message).toContain("non-empty text");
+      expect(parsed.error.message).not.toContain("minLength");
+    } finally {
+      exit.mockRestore();
+      await fs.unlink(criteriaFile);
+    }
+  });
+
+  it("task add rejects conflicting inline and file criteria as JSON", async () => {
+    setJsonMode(true);
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Conflict PRD",
+    });
+    const criteriaFile = join(tmpdir(), `depot-criteria-conflict-${Date.now()}.txt`);
+    await fs.writeFile(criteriaFile, "from file");
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+
+    try {
+      const output = await captureStdout(async () => {
+        await expect(
+          runCommand(addCommand as any, {
+            rawArgs: [
+              "--prd-id",
+              prd.id,
+              "--title",
+              "Conflict task",
+              "--desc",
+              "desc",
+              "--criteria",
+              "inline",
+              "--criteria-file",
+              criteriaFile,
+              "--effort",
+              "s",
+            ],
+          }),
+        ).rejects.toThrow("process.exit:1");
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("error");
+      expect(parsed.error.code).toBe("conflicting_input");
+      expect(parsed.error.message).toContain("--criteria-file");
+    } finally {
+      exit.mockRestore();
+      await fs.unlink(criteriaFile);
+    }
+  });
+
+  it("prd create reads context and scope from files", async () => {
+    const { prdCommand } = await import("#/cli/commands/prds");
+    const createCommand = await getSubCommand(prdCommand, "create");
+
+    const contextFile = join(tmpdir(), `depot-context-${Date.now()}.txt`);
+    const scopeFile = join(tmpdir(), `depot-scope-${Date.now()}.txt`);
+    await fs.writeFile(contextFile, "Context:\n- pages_billing stays in context");
+    await fs.writeFile(scopeFile, "Scope:\n- Include parser-safe file inputs");
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await runCommand(createCommand as any, {
+        rawArgs: ["--title", "File PRD", "--context-file", contextFile, "--scope-file", scopeFile],
+      });
+
+      const { listPrds } = await import("#/lib/workflow");
+      const prds = await listPrds(db, { projectId });
+      const created = prds.find((prd) => prd.title === "File PRD");
+      expect(created?.context).toContain("- pages_billing stays in context");
+      expect(created?.scope).toContain("- Include parser-safe file inputs");
+    } finally {
+      stdout.mockRestore();
+      await fs.unlink(contextFile);
+      await fs.unlink(scopeFile);
+    }
+  });
+
+  it("task add reports parser validation errors as JSON envelopes", async () => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "JSON validation PRD",
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+    setJsonMode(true);
+
+    const output = await captureStdout(async () => {
+      await expect(
+        runCommand(addCommand as any, {
+          rawArgs: [
+            "--prd-id",
+            prd.id,
+            "--title",
+            "Bad phase",
+            "--desc",
+            "desc",
+            "--criteria",
+            "done",
+            "--effort",
+            "s",
+            "--phase",
+            "abc",
+          ],
+        }),
+      ).rejects.toThrow("process.exit:1");
+    });
+
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.kind).toBe("error");
+    expect(parsed.error.code).toBe("validation_error");
+    expect(parsed.error.message).toContain("--phase");
+    expect(parsed.error.message).not.toContain("Transformation process failure");
+
+    exit.mockRestore();
+  });
+
+  it.each([
+    ["0", '"0"'],
+    ["-1", '"-1"'],
+    ["abc", '"abc"'],
+  ])("task add reports invalid phase %s as concise text", async (phase, received) => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Text validation PRD",
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+
+    const output = await captureConsoleError(async () => {
+      await expect(
+        runCommand(addCommand as any, {
+          rawArgs: [
+            "--prd-id",
+            prd.id,
+            "--title",
+            "Bad phase",
+            "--desc",
+            "desc",
+            "--criteria",
+            "done",
+            "--effort",
+            "s",
+            `--phase=${phase}`,
+          ],
+        }),
+      ).rejects.toThrow("process.exit:1");
+    });
+
+    expect(output).toContain("--phase");
+    expect(output).toContain(received);
+    expect(output).not.toContain("Transformation process failure");
+
+    exit.mockRestore();
+  });
+
+  it("task add reports invalid effort as concise text", async () => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Effort validation PRD",
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+
+    const output = await captureConsoleError(async () => {
+      await expect(
+        runCommand(addCommand as any, {
+          rawArgs: [
+            "--prd-id",
+            prd.id,
+            "--title",
+            "Bad effort",
+            "--desc",
+            "desc",
+            "--criteria",
+            "done",
+            "--effort",
+            "huge",
+          ],
+        }),
+      ).rejects.toThrow("process.exit:1");
+    });
+
+    expect(output).toContain("--effort");
+    expect(output).toContain("one of xs, s, m, l, xl");
+    expect(output).not.toContain('Expected "xs"');
+
+    exit.mockRestore();
+  });
+
+  it("task add reports empty descriptions as concise text", async () => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const addCommand = await getSubCommand(taskCommand, "add");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Description validation PRD",
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+
+    const output = await captureConsoleError(async () => {
+      await expect(
+        runCommand(addCommand as any, {
+          rawArgs: [
+            "--prd-id",
+            prd.id,
+            "--title",
+            "Empty desc",
+            "--desc",
+            "",
+            "--criteria",
+            "done",
+            "--effort",
+            "s",
+          ],
+        }),
+      ).rejects.toThrow("process.exit:1");
+    });
+
+    expect(output).toContain("--desc");
+    expect(output).toContain("non-empty text");
+    expect(output).not.toContain("minLength");
+
+    exit.mockRestore();
+  });
+
+  it("review start reports invalid type as a concise JSON validation error", async () => {
+    const { reviewCommand } = await import("#/cli/commands/reviews");
+    const startCommand = await getSubCommand(reviewCommand, "start");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Review validation PRD",
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+    setJsonMode(true);
+
+    const output = await captureStdout(async () => {
+      await expect(
+        runCommand(startCommand as any, {
+          rawArgs: [prd.id, "--type", "robot"],
+        }),
+      ).rejects.toThrow("process.exit:1");
+    });
+
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.kind).toBe("error");
+    expect(parsed.error.code).toBe("validation_error");
+    expect(parsed.error.message).toContain("--type");
+    expect(parsed.error.message).toContain("one of human or agent");
+    expect(parsed.error.message).not.toContain('Expected "human"');
+
+    exit.mockRestore();
   });
 
   it("task list requires full PRD IDs", async () => {
@@ -348,6 +918,84 @@ describe("CLI commands", () => {
     stdout.mockRestore();
   });
 
+  it.each([
+    ["asterisk", "* First criterion\n* Second criterion"],
+    ["dash", "- First criterion\n- Second criterion"],
+  ])("task show normalizes %s criteria bullets", async (_label, doneCriteria) => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const showCommand = await getSubCommand(taskCommand, "show");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "CLI PRD",
+    });
+
+    const task = await createTask(db, {
+      prdRevisionId: prd.id,
+      title: "Bulleted criteria task",
+      description: formatStructuredTaskDescription({
+        intent: "Keep the output readable.",
+        scope: ["Normalize bullet markers", "Preserve structured headings"],
+        nonGoals: ["Do not add markdown rendering"],
+      }),
+      doneCriteria,
+      effort: "s",
+    });
+
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await showCommand.run({
+      args: {
+        taskId: task.id,
+      },
+    });
+
+    const lines = stdout.mock.calls.map((call) => String(call[0]));
+    expect(lines).toContain("Intent      : Keep the output readable.");
+    expect(lines).toContain("Scope       : - Normalize bullet markers");
+    expect(lines).toContain("Non-goals   : - Do not add markdown rendering");
+    expect(lines).toContain("Criteria    : - First criterion");
+    expect(lines.some((line) => line.trim() === "- Second criterion")).toBe(true);
+    expect(lines.some((line) => line.includes("- * First criterion"))).toBe(false);
+    expect(lines.some((line) => line.includes("- - First criterion"))).toBe(false);
+
+    stdout.mockRestore();
+  });
+
+  it("task skip renders long reasons without ANSI control codes", async () => {
+    const { taskCommand } = await import("#/cli/commands/tasks");
+    const skipCommand = await getSubCommand(taskCommand, "skip");
+
+    const prd = await createPrd(db, {
+      projectId,
+      title: "Skip output PRD",
+    });
+    const task = await createTask(db, {
+      prdRevisionId: prd.id,
+      title: "Skipped task",
+      description: "desc",
+      doneCriteria: "done",
+      effort: "s",
+    });
+    const longReason =
+      "This reason is intentionally long enough to be rendered across a compact block because it includes implementation detail that would be hard to scan inline.";
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await skipCommand.run({
+      args: {
+        taskId: task.id,
+        reason: longReason,
+      },
+    });
+
+    const text = stdout.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(text).toContain(`Skipped task 'Skipped task' (${task.id})`);
+    expect(text).toContain("Reason:\n  This reason is intentionally long");
+    expect(text).not.toContain(String.fromCharCode(27));
+
+    stdout.mockRestore();
+  });
+
   it("context mode renders only the requested mode", async () => {
     const { contextCommand } = await import("#/cli/commands/context");
     const prd = await createPrd(db, {
@@ -501,6 +1149,91 @@ describe("CLI commands", () => {
       expect(parsed.kind).toBe("success");
       expect(parsed.payload.item.title).toBe("JSON task");
       expect(Array.isArray(parsed.payload.item.dependsOn)).toBe(true);
+    });
+
+    it("task done emits success envelope with item", async () => {
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const doneCmd = await getSubCommand(taskCommand, "done");
+
+      const prd = await createPrd(db, { projectId, title: "JSON Task Done PRD" });
+      const task = await createTask(db, {
+        prdRevisionId: prd.id,
+        title: "Done task",
+        description: "d",
+        doneCriteria: "c",
+        effort: "s",
+      });
+      await startTask(db, task.id);
+
+      const output = await captureStdout(async () => {
+        await doneCmd.run({ args: { taskId: task.id } });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(parsed.payload.item.id).toBe(task.id);
+      expect(parsed.payload.item.status).toBe("done");
+    });
+
+    it("task skip emits success envelope with item", async () => {
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const skipCmd = await getSubCommand(taskCommand, "skip");
+
+      const prd = await createPrd(db, { projectId, title: "JSON Task Skip PRD" });
+      const task = await createTask(db, {
+        prdRevisionId: prd.id,
+        title: "Skipped task",
+        description: "d",
+        doneCriteria: "c",
+        effort: "s",
+      });
+
+      const output = await captureStdout(async () => {
+        await skipCmd.run({ args: { taskId: task.id, reason: "not needed" } });
+      });
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      expect(parsed.payload.item.id).toBe(task.id);
+      expect(parsed.payload.item.status).toBe("skipped");
+      expect(parsed.payload.item.skipReason).toBe("not needed");
+    });
+
+    it("review task add and review list emit standard JSON envelopes", async () => {
+      const { reviewCommand } = await import("#/cli/commands/reviews");
+      const reviewTaskCommand = await getSubCommand(reviewCommand, "task");
+      const taskAddCommand = await getSubCommand(reviewTaskCommand as any, "add");
+      const reviewListCommand = await getSubCommand(reviewCommand, "list");
+      const { createReview } = await import("#/lib/workflow");
+
+      const prd = await createPrd(db, { projectId, title: "Review JSON PRD" });
+      const review = await createReview(db, { prdRevisionId: prd.id, type: "human" });
+
+      const addOutput = await captureStdout(async () => {
+        await taskAddCommand.run({
+          args: {
+            reviewId: review.id,
+            title: "Finding",
+            description: "Explain the issue",
+            doneCriteria: "Issue is fixed",
+            severity: "major",
+          },
+        });
+      });
+
+      const addParsed = JSON.parse(addOutput.trim());
+      expect(addParsed.kind).toBe("success");
+      expect(addParsed.payload.item.title).toBe("Finding");
+      expect(addParsed.payload.item.reviewId).toBe(review.id);
+
+      const listOutput = await captureStdout(async () => {
+        await reviewListCommand.run({ args: { prdId: prd.id } });
+      });
+
+      const listParsed = JSON.parse(listOutput.trim());
+      expect(listParsed.kind).toBe("success");
+      expect(Array.isArray(listParsed.payload.items)).toBe(true);
+      expect(listParsed.payload.items[0].id).toBe(review.id);
     });
 
     it("log list emits success envelope with parsed payload objects", async () => {
