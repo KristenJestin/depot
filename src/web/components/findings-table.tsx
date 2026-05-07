@@ -49,9 +49,7 @@ export function FindingsTable({ findings, prdId, onViewAll }: FindingsTableProps
             <div
               key={f.id}
               className="flex items-center gap-2 px-2 py-1.5 hover:bg-secondary/40 cursor-pointer"
-              onClick={() =>
-                navigate({ to: "/prds/$id", params: { id: prdId }, search: { taskId: f.id } })
-              }
+              onClick={() => navigate({ to: "/prds/$id", params: { id: prdId } })}
             >
               <span className="shrink-0">
                 <Badge variant={severityVariant[severity]}>{severity}</Badge>

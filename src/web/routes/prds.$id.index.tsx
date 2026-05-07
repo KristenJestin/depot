@@ -22,17 +22,13 @@ import {
 } from "#/web/lib/prd-view-model";
 
 export const Route = createFileRoute("/prds/$id/")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    taskId: typeof search.taskId === "string" ? search.taskId : undefined,
-    reviewId: typeof search.reviewId === "string" ? search.reviewId : undefined,
-  }),
   component: PrdDetailRoute,
 });
 
 function PrdDetailRoute() {
   const { id } = Route.useParams();
-  const search = Route.useSearch();
-  const navigate = Route.useNavigate();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const { data } = prdsQuery.detail.useSuspense(id);
 
   const summary = buildDetailSummary(data);
@@ -41,12 +37,12 @@ function PrdDetailRoute() {
   const headRevision = revisions.find((revision) => revision.isHead);
   const isSuperseded = data.prd.supersededAt !== null;
   const selectedTask =
-    data.tasks.find((task) => task.id === search.taskId) ??
-    data.reviews.flatMap((review) => review.findings).find((task) => task.id === search.taskId) ??
+    data.tasks.find((task) => task.id === selectedTaskId) ??
+    data.reviews.flatMap((review) => review.findings).find((task) => task.id === selectedTaskId) ??
     null;
   const allTasks = [...data.tasks, ...data.reviews.flatMap((review) => review.findings)];
-  const selectedReview = search.reviewId
-    ? (data.reviews.find((review) => review.id === search.reviewId) ?? null)
+  const selectedReview = selectedReviewId
+    ? (data.reviews.find((review) => review.id === selectedReviewId) ?? null)
     : null;
 
   // Retain the last opened task / review during the close-out animation so the
@@ -91,12 +87,14 @@ function PrdDetailRoute() {
           const reviewId = target?.closest<HTMLElement>("[data-review-id]")?.dataset.reviewId;
           if (reviewId) {
             event.stopPropagation();
-            navigate({ to: ".", params: { id }, search: { reviewId } });
+            setSelectedTaskId(null);
+            setSelectedReviewId(reviewId);
             return;
           }
           const taskId = target?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
           if (taskId) {
-            navigate({ to: ".", params: { id }, search: { taskId } });
+            setSelectedReviewId(null);
+            setSelectedTaskId(taskId);
           }
         }}
       >
@@ -140,33 +138,18 @@ function PrdDetailRoute() {
           open={selectedTask !== null}
           reviews={data.reviews}
           allTasks={allTasks}
-          onClose={() =>
-            navigate({
-              to: ".",
-              params: { id },
-              search: {},
-            })
-          }
+          onClose={() => setSelectedTaskId(null)}
         />
 
         <ReviewDrawer
           review={selectedReview ?? lastReview}
           open={selectedReview !== null}
           index={lastReviewIndex}
-          onClose={() =>
-            navigate({
-              to: ".",
-              params: { id },
-              search: {},
-            })
-          }
-          onSelectFinding={(taskId) =>
-            navigate({
-              to: ".",
-              params: { id },
-              search: { taskId },
-            })
-          }
+          onClose={() => setSelectedReviewId(null)}
+          onSelectFinding={(taskId) => {
+            setSelectedReviewId(null);
+            setSelectedTaskId(taskId);
+          }}
         />
       </div>
     </div>

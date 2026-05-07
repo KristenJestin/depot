@@ -1,4 +1,5 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import { PrdHeaderCard } from "#/web/components/prd-header-card";
 import { PrdNoticeBanner } from "#/web/components/prd-notice-banner";
@@ -26,9 +27,6 @@ import {
 import { formatMetaDate } from "#/web/lib/view-format";
 
 export const Route = createFileRoute("/prds/$id/reviews/$reviewId")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    taskId: typeof search.taskId === "string" ? search.taskId : undefined,
-  }),
   loader: async ({ params }) => {
     const data = await prdsQuery.detail.ensureQueryData(params.id);
     if (!data.reviews.some((review) => review.id === params.reviewId)) {
@@ -43,12 +41,21 @@ type DetailFinding = DetailReview["findings"][number];
 
 function ReviewDetailPage() {
   const { id, reviewId } = Route.useParams();
-  const search = Route.useSearch();
-  const navigate = Route.useNavigate();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const { data } = prdsQuery.detail.useSuspense(id);
 
   const reviewIndex = data.reviews.findIndex((candidate) => candidate.id === reviewId);
   const review = reviewIndex === -1 ? null : data.reviews[reviewIndex];
+  const selectedTask =
+    data.tasks.find((task) => task.id === selectedTaskId) ??
+    data.reviews
+      .flatMap((candidate) => candidate.findings)
+      .find((task) => task.id === selectedTaskId) ??
+    null;
+  const [lastTask, setLastTask] = useState(selectedTask);
+  useEffect(() => {
+    if (selectedTask) setLastTask(selectedTask);
+  }, [selectedTask]);
 
   if (!review) {
     throw notFound();
@@ -60,12 +67,6 @@ function ReviewDetailPage() {
   const cycleNumber = review.phaseNumber ?? reviewIndex + 1;
   const headRevision = revisions.find((revision) => revision.isHead);
   const isSuperseded = data.prd.supersededAt !== null;
-  const selectedTask =
-    data.tasks.find((task) => task.id === search.taskId) ??
-    data.reviews
-      .flatMap((candidate) => candidate.findings)
-      .find((task) => task.id === search.taskId) ??
-    null;
   const allTasks = [...data.tasks, ...data.reviews.flatMap((candidate) => candidate.findings)];
   const reviewStages = stages.filter(
     (card) => card.review?.id === review.id || card.id === `rework-${review.id}`,
@@ -133,11 +134,7 @@ function ReviewDetailPage() {
                     return;
                   }
 
-                  navigate({
-                    to: ".",
-                    params: { id, reviewId },
-                    search: { taskId },
-                  });
+                  setSelectedTaskId(taskId);
                 }}
               >
                 <StageTimeline cards={reviewStages} />
@@ -164,13 +161,7 @@ function ReviewDetailPage() {
                       <button
                         key={finding.id}
                         type="button"
-                        onClick={() =>
-                          navigate({
-                            to: ".",
-                            params: { id, reviewId },
-                            search: { taskId: finding.id },
-                          })
-                        }
+                        onClick={() => setSelectedTaskId(finding.id)}
                         className="flex w-full items-start justify-between gap-3 border-b border-card-border pb-3 text-left transition-colors hover:bg-panel-muted last:border-b-0 last:pb-0"
                       >
                         <div className="min-w-0 space-y-2">
@@ -207,17 +198,11 @@ function ReviewDetailPage() {
         </div>
 
         <TaskDrawer
-          task={selectedTask}
+          task={selectedTask ?? lastTask}
           open={selectedTask !== null}
           reviews={data.reviews}
           allTasks={allTasks}
-          onClose={() =>
-            navigate({
-              to: ".",
-              params: { id, reviewId },
-              search: {},
-            })
-          }
+          onClose={() => setSelectedTaskId(null)}
         />
       </div>
     </div>
