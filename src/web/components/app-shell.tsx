@@ -1,11 +1,20 @@
 import * as React from "react";
 import { Link } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { LayoutDashboard, FolderOpen, CheckIcon, ChevronsUpDownIcon } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  CheckIcon,
+  ChevronsUpDownIcon,
+  FolderOpenIcon,
+  FileTextIcon,
+  LayoutDashboardIcon,
+} from "lucide-react";
 
 import { cn } from "../lib/utils";
-import { contextQuery, workspacesQuery, switchWorkspace } from "../lib/queries";
-import type { Workspace } from "../lib/api-types";
+import { contextQuery, prdsQuery, switchWorkspace, workspacesQuery } from "../lib/queries";
+import { PrdStatusIcon } from "./prd-status-icon";
+import type { PrdListResponse, Workspace } from "../lib/api-types";
+
+type SidebarPrd = PrdListResponse["prds"][number];
 
 function workspaceDisplayName(ws: Workspace): string {
   if (ws.label) return ws.label;
@@ -45,27 +54,28 @@ function WorkspaceSwitcher() {
   const projectName = current?.projectName ?? null;
 
   return (
-    <div ref={ref} className="relative px-2 pb-1">
+    <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors",
-          "text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent",
+          "flex h-10 w-full items-center gap-2 rounded-lg border border-transparent px-2.5 text-left transition-colors",
+          "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          "focus-visible:border-sidebar-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/20",
         )}
       >
-        <FolderOpen className="size-3.5 shrink-0 text-sidebar-foreground/60" />
-        <div className="flex-1 min-w-0">
+        <FolderOpenIcon className="size-4 shrink-0 text-sidebar-foreground/70" />
+        <div className="min-w-0 flex-1">
           <div className="truncate text-xs font-medium text-sidebar-accent-foreground">{label}</div>
           {projectName && (
-            <div className="truncate text-xs text-sidebar-foreground/50">{projectName}</div>
+            <div className="truncate text-xs text-sidebar-foreground/65">{projectName}</div>
           )}
         </div>
-        <ChevronsUpDownIcon className="size-3 shrink-0 text-sidebar-foreground/40" />
+        <ChevronsUpDownIcon className="size-3.5 shrink-0 text-sidebar-foreground/50" />
       </button>
 
       {open && (
-        <div className="absolute left-2 right-2 bottom-full mb-1 z-50 bg-popover border border-border rounded-lg shadow-lg overflow-hidden">
-          <div className="py-1 max-h-60 overflow-y-auto">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-card-border bg-popover p-1 shadow-card-hover">
+          <div className="max-h-60 overflow-y-auto">
             {workspaces.map((ws) => {
               const isSelected = ws.id === currentId;
               return (
@@ -77,16 +87,16 @@ function WorkspaceSwitcher() {
                     setOpen(false);
                   }}
                   className={cn(
-                    "w-full flex items-center gap-2 px-3 py-2 text-left transition-colors text-sm",
+                    "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors",
                     isSelected
                       ? "bg-accent text-accent-foreground"
-                      : "text-popover-foreground hover:bg-accent/60",
+                      : "text-popover-foreground hover:bg-accent",
                   )}
                 >
                   <CheckIcon
                     className={cn("size-3 shrink-0", isSelected ? "opacity-100" : "opacity-0")}
                   />
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="truncate text-xs font-medium">{workspaceDisplayName(ws)}</div>
                     <div className="truncate text-xs text-muted-foreground">{ws.projectName}</div>
                   </div>
@@ -101,56 +111,133 @@ function WorkspaceSwitcher() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const { data } = useQuery(prdsQuery.list.options());
+  const prds = React.useMemo(
+    () =>
+      [...(data?.prds ?? [])].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      ),
+    [data?.prds],
+  );
+
   return (
-    <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
-      <aside className="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
-        {/* Logo */}
-        <div className="px-3 pt-3 pb-2">
-          <div className="flex items-center gap-2">
-            <div className="size-6 shrink-0 rounded-md depot-logo-gradient" />
-            <div>
-              <div className="text-sm font-semibold text-sidebar-accent-foreground leading-tight">
-                depot
-              </div>
-              <div className="text-xs leading-tight text-sidebar-foreground/60">serve</div>
+    <div className="relative flex h-dvh overflow-hidden bg-background text-foreground">
+      <aside className="hidden w-64 shrink-0 flex-col overflow-hidden bg-sidebar p-2 md:flex">
+        <div className="px-1 py-1">
+          <Link
+            to="/"
+            className="flex h-10 items-center gap-2 rounded-lg border border-transparent px-2 text-sidebar-accent-foreground transition-colors hover:bg-sidebar-accent"
+          >
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg depot-logo-gradient text-xs font-semibold text-primary-foreground shadow-card">
+              D
             </div>
-          </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold leading-tight">depot</div>
+              <div className="truncate text-xs leading-tight text-sidebar-foreground/70">
+                PRD workspace
+              </div>
+            </div>
+          </Link>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto px-2 py-1">
-          <Link to="/" activeOptions={{ exact: true }} className="mb-0.5 block no-underline">
-            {({ isActive }) => (
-              <div
-                className={cn(
-                  "flex items-center gap-2 rounded-md transition-colors px-2.5 py-1 text-sm",
-                  isActive
-                    ? "text-sidebar-accent-foreground bg-sidebar-accent"
-                    : "text-sidebar-foreground hover:text-sidebar-accent-foreground bg-transparent",
-                )}
-              >
-                <LayoutDashboard className="size-3.5" />
-                Overview
-              </div>
-            )}
-          </Link>
+        <div className="px-1 pb-3 pt-2">
+          <WorkspaceSwitcher />
+        </div>
+
+        <nav className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
+          <div className="space-y-6">
+            <SidebarSection title="Navigation">
+              <SidebarLink to="/" label="Overview" icon={LayoutDashboardIcon} exact />
+            </SidebarSection>
+
+            {prds.length > 0 ? (
+              <SidebarSection title="PRDs">
+                {prds.map((prd) => (
+                  <SidebarPrdLink key={prd.id} prd={prd} />
+                ))}
+              </SidebarSection>
+            ) : null}
+          </div>
         </nav>
 
-        {/* Separator */}
-        <div className="h-px bg-sidebar-border my-1" />
-
-        {/* Workspace switcher */}
-        <WorkspaceSwitcher />
-
-        {/* Version */}
-        <div className="px-3 pt-1.5 pb-2.5 border-t border-sidebar-border">
-          <span className="font-mono text-xs text-sidebar-foreground/60">v0.1.0 · serve</span>
+        <div className="mt-auto border-t border-sidebar-border px-3 pb-2 pt-3">
+          <div className="flex items-center justify-between gap-2 text-xs text-sidebar-foreground/70">
+            <span className="font-mono">v0.1.0</span>
+            <span>serve</span>
+          </div>
         </div>
       </aside>
 
-      {/* Main */}
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">{children}</div>
+      <main className="relative z-0 min-w-0 flex-1 overflow-auto p-2 md:pl-0.5">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-card-border bg-card shadow-card">
+          {children}
+        </div>
+      </main>
     </div>
+  );
+}
+
+function SidebarSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-1">
+      <p className="px-3 text-xs font-medium text-sidebar-foreground/65">{title}</p>
+      <div className="space-y-1">{children}</div>
+    </section>
+  );
+}
+
+function SidebarLink({
+  to,
+  label,
+  icon: Icon,
+  exact,
+}: {
+  to: "/";
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  exact?: boolean;
+}) {
+  return (
+    <Link to={to} activeOptions={{ exact }} className="block no-underline">
+      {({ isActive }) => (
+        <div
+          className={cn(
+            "flex h-8 items-center gap-2 rounded-lg border border-transparent px-3 text-sm font-medium transition-colors",
+            isActive
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          )}
+        >
+          <Icon className="size-4 shrink-0" />
+          <span>{label}</span>
+        </div>
+      )}
+    </Link>
+  );
+}
+
+function SidebarPrdLink({ prd }: { prd: SidebarPrd }) {
+  return (
+    <Link
+      to="/prds/$id"
+      params={{ id: prd.id }}
+      aria-label={`Open ${prd.title}`}
+      className="block no-underline"
+    >
+      {({ isActive }) => (
+        <div
+          className={cn(
+            "flex min-h-9 items-center gap-2 rounded-lg border border-transparent px-3 py-1.5 text-sm transition-colors",
+            isActive
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          )}
+        >
+          <PrdStatusIcon status={prd.status} className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{prd.title}</span>
+          <FileTextIcon className="size-3.5 shrink-0 text-sidebar-foreground/45" />
+        </div>
+      )}
+    </Link>
   );
 }

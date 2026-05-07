@@ -1,7 +1,7 @@
 import { createFileRoute, notFound, Outlet } from "@tanstack/react-router";
 
-import { prdsQuery } from "../lib/queries";
 import { DotLoader } from "../components/ui/dot-loader";
+import { prdsQuery } from "../lib/queries";
 
 export const Route = createFileRoute("/prds/$id")({
   loader: async ({ params }) => {
@@ -10,8 +10,8 @@ export const Route = createFileRoute("/prds/$id")({
     return data;
   },
   pendingComponent: () => (
-    <div className="flex h-full items-center justify-center bg-app-gradient">
-      <DotLoader preset="thinking" label="Loading…" />
+    <div className="flex h-full items-center justify-center bg-card">
+      <DotLoader preset="thinking" label="Loading..." />
     </div>
   ),
   component: () => <Outlet />,

@@ -7,6 +7,7 @@ import { PrdSidebar } from "#/web/components/prd-sidebar";
 import { ReviewDrawer } from "#/web/components/review-drawer";
 import { StageTimeline } from "#/web/components/stage-timeline";
 import { TaskDrawer } from "#/web/components/task-drawer";
+import { PageContent, PageShell, PageTopBar } from "#/web/components/page-shell";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -61,8 +62,8 @@ function PrdDetailRoute() {
     : 0;
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-app-gradient">
-      <div className="border-b border-card-border bg-card/80 px-6 py-3 backdrop-blur">
+    <PageShell>
+      <PageTopBar>
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
@@ -78,10 +79,10 @@ function PrdDetailRoute() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-      </div>
+      </PageTopBar>
 
-      <div
-        className="min-h-0 overflow-y-auto px-8 py-6"
+      <PageContent
+        className="px-4 py-5 sm:px-6 lg:px-8 lg:py-6"
         onClickCapture={(event) => {
           const target = event.target as HTMLElement | null;
           const reviewId = target?.closest<HTMLElement>("[data-review-id]")?.dataset.reviewId;
@@ -98,7 +99,7 @@ function PrdDetailRoute() {
           }
         }}
       >
-        <div className="mx-auto flex max-w-7xl items-start gap-6">
+        <div className="mx-auto flex max-w-7xl flex-col items-stretch gap-6 xl:flex-row xl:items-start">
           <main
             className={["min-w-0 flex-1 space-y-4", selectedTask ? "opacity-60" : undefined]
               .filter(Boolean)
@@ -151,7 +152,7 @@ function PrdDetailRoute() {
             setSelectedTaskId(taskId);
           }}
         />
-      </div>
-    </div>
+      </PageContent>
+    </PageShell>
   );
 }

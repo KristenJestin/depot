@@ -20,7 +20,7 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
   const showCanceledFooter = prd.status === "canceled";
 
   return (
-    <Card>
+    <Card className="gap-0 border border-card-border py-0">
       <div className="space-y-5 p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
@@ -60,14 +60,14 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
       </div>
 
       {showReviewFooter && (
-        <Card.Footer className="mt-0 border-card-border bg-severity-info-soft px-4 py-3 text-xs text-severity-info">
+        <Card.Footer className="border-t border-card-border bg-severity-info-soft px-4 py-3 text-xs text-severity-info">
           <span>{summary.currentCycleLabel ?? "Awaiting human review"}</span>
           <span className="ml-auto">Waiting on feedback</span>
         </Card.Footer>
       )}
 
       {showActiveFooter && (
-        <Card.Footer className="mt-0 border-card-border px-4 py-3 text-xs text-status-in-progress-foreground">
+        <Card.Footer className="border-t border-card-border px-4 py-3 text-xs text-status-in-progress-foreground">
           <span className="flex items-center gap-2">
             <AgentBars />
             <span>{summary.currentCycleLabel ?? "Working"}</span>
@@ -80,14 +80,14 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
       )}
 
       {showDoneFooter && (
-        <Card.Footer className="mt-0 border-card-border bg-status-done-soft px-4 py-3 text-xs text-status-done-foreground">
+        <Card.Footer className="border-t border-card-border bg-status-done-soft px-4 py-3 text-xs text-status-done-foreground">
           <span>All {summary.totalTasks} tasks complete</span>
           <span className="ml-auto">{formatMetaDate(prd.updatedAt)}</span>
         </Card.Footer>
       )}
 
       {showCanceledFooter && (
-        <Card.Footer className="mt-0 border-card-border bg-status-canceled-soft px-4 py-3 text-xs text-status-canceled-foreground">
+        <Card.Footer className="border-t border-card-border bg-status-canceled-soft px-4 py-3 text-xs text-status-canceled-foreground">
           <span>
             Canceled · {summary.doneTasks} / {summary.totalTasks} tasks completed
           </span>

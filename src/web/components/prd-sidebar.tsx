@@ -35,7 +35,7 @@ export function PrdSidebar({
   summary: DetailSummary;
 }) {
   return (
-    <aside className="w-72 shrink-0 space-y-4">
+    <aside className="w-full shrink-0 space-y-4 xl:w-72">
       <SidebarWidget title="Info">
         <InfoRows prd={prd} workspace={workspace} summary={summary} />
       </SidebarWidget>
@@ -237,7 +237,11 @@ function SidebarWidget({
       <h2 className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
         {title}
       </h2>
-      <Card className={`p-4${maxHeight ? " max-h-[420px] overflow-y-auto" : ""}`}>{children}</Card>
+      <Card
+        className={`border border-card-border p-4${maxHeight ? " max-h-[420px] overflow-y-auto" : ""}`}
+      >
+        {children}
+      </Card>
     </section>
   );
 }

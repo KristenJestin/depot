@@ -6,6 +6,7 @@ import { PrdNoticeBanner } from "#/web/components/prd-notice-banner";
 import { PrdSidebar } from "#/web/components/prd-sidebar";
 import { StageTimeline } from "#/web/components/stage-timeline";
 import { TaskDrawer } from "#/web/components/task-drawer";
+import { PageContent, PageShell, PageTopBar } from "#/web/components/page-shell";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -73,8 +74,8 @@ function ReviewDetailPage() {
   );
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-app-gradient">
-      <div className="border-b border-card-border bg-card/80 px-6 py-3 backdrop-blur">
+    <PageShell>
+      <PageTopBar>
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
@@ -98,10 +99,10 @@ function ReviewDetailPage() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-      </div>
+      </PageTopBar>
 
-      <div className="min-h-0 overflow-y-auto px-8 py-6">
-        <div className="mx-auto flex max-w-7xl items-start gap-6">
+      <PageContent className="px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+        <div className="mx-auto flex max-w-7xl flex-col items-stretch gap-6 xl:flex-row xl:items-start">
           <main
             className={["min-w-0 flex-1 space-y-4", selectedTask ? "opacity-60" : undefined]
               .filter(Boolean)
@@ -144,7 +145,7 @@ function ReviewDetailPage() {
                 <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
                   Tasks
                 </p>
-                <Card className="p-4">
+                <Card className="border border-card-border p-4">
                   <EmptyState message="This review has no findings yet." />
                 </Card>
               </section>
@@ -155,7 +156,7 @@ function ReviewDetailPage() {
                 <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
                   Findings
                 </p>
-                <Card className="p-4">
+                <Card className="border border-card-border p-4">
                   <div className="space-y-3">
                     {review.findings.map((finding) => (
                       <button
@@ -204,8 +205,8 @@ function ReviewDetailPage() {
           allTasks={allTasks}
           onClose={() => setSelectedTaskId(null)}
         />
-      </div>
-    </div>
+      </PageContent>
+    </PageShell>
   );
 }
 
@@ -216,7 +217,7 @@ function ReviewSummaryCard({ review, cycleNumber }: { review: DetailReview; cycl
   const remainingCount = review.findings.length - resolvedCount;
 
   return (
-    <Card>
+    <Card className="border border-card-border py-0">
       <div className="space-y-5 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
