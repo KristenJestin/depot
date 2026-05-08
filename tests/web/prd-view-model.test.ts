@@ -490,4 +490,90 @@ describe("prd view model", () => {
     });
     expect(stages.map((stage) => stage.id)).not.toContain("rework-review-3");
   });
+
+  it("groups phased base tasks and keeps future phases visible", () => {
+    const now = "2026-04-30T10:00:00.000Z";
+    const data: Parameters<typeof buildStageCards>[0] = {
+      prd: {
+        id: "rev-phases",
+        prdId: "prd-phases",
+        projectId: "proj-1",
+        workspaceId: null,
+        revision: 1,
+        title: "Phased PRD",
+        context: null,
+        scope: null,
+        status: "ready",
+        auditCycles: 0,
+        currentPhase: 1,
+        supersededAt: null,
+        createdAt: now,
+        updatedAt: now,
+        readyAt: now,
+        activatedAt: now,
+      },
+      tasks: [
+        {
+          id: "phase-1-task",
+          prdRevisionId: "rev-phases",
+          position: 1,
+          title: "Build the first phase",
+          description: "Intent:\nBuild the first phase",
+          descriptionFormat: "structured_v1",
+          doneCriteria: "First phase built",
+          dependsOn: "[]",
+          effort: "m",
+          phaseNumber: 1,
+          status: "pending",
+          reviewId: null,
+          severity: null,
+          blockedReason: null,
+          skipReason: null,
+          createdAt: now,
+          startedAt: null,
+          completedAt: null,
+        },
+        {
+          id: "phase-2-task",
+          prdRevisionId: "rev-phases",
+          position: 2,
+          title: "Prepare the second phase",
+          description: "Intent:\nPrepare the second phase",
+          descriptionFormat: "structured_v1",
+          doneCriteria: "Second phase prepared",
+          dependsOn: "[]",
+          effort: "s",
+          phaseNumber: 2,
+          status: "pending",
+          reviewId: null,
+          severity: null,
+          blockedReason: null,
+          skipReason: null,
+          createdAt: now,
+          startedAt: null,
+          completedAt: null,
+        },
+      ],
+      reviews: [],
+      revisions: [],
+      activity: [],
+    };
+
+    const stages = buildStageCards(data);
+
+    expect(stages.map((stage) => stage.id)).toEqual(["phase-1", "phase-2"]);
+    expect(stages[0]).toMatchObject({
+      title: "Phase 1",
+      phaseNumber: 1,
+      current: true,
+      future: false,
+    });
+    expect(stages[1]).toMatchObject({
+      title: "Phase 2",
+      phaseNumber: 2,
+      current: false,
+      future: true,
+    });
+    expect(stages[1]?.items.map((item) => item.title)).toEqual(["Prepare the second phase"]);
+  });
 });

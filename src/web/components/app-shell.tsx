@@ -1,13 +1,7 @@
 import * as React from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  CheckIcon,
-  ChevronsUpDownIcon,
-  FolderOpenIcon,
-  FileTextIcon,
-  LayoutDashboardIcon,
-} from "lucide-react";
+import { CheckIcon, ChevronsUpDownIcon, FolderOpenIcon, LayoutDashboardIcon } from "lucide-react";
 
 import { cn } from "../lib/utils";
 import { contextQuery, prdsQuery, switchWorkspace, workspacesQuery } from "../lib/queries";
@@ -121,8 +115,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="relative flex h-dvh overflow-hidden bg-background text-foreground">
-      <aside className="hidden w-64 shrink-0 flex-col overflow-hidden bg-sidebar p-2 md:flex">
+    <div className="relative flex h-dvh overflow-hidden bg-sidebar text-foreground">
+      <aside className="hidden w-64 shrink-0 flex-col overflow-hidden p-2 md:flex">
         <div className="px-1 py-1">
           <Link
             to="/"
@@ -235,7 +229,6 @@ function SidebarPrdLink({ prd }: { prd: SidebarPrd }) {
         >
           <PrdStatusIcon status={prd.status} className="size-4 shrink-0" />
           <span className="min-w-0 flex-1 truncate">{prd.title}</span>
-          <FileTextIcon className="size-3.5 shrink-0 text-sidebar-foreground/45" />
         </div>
       )}
     </Link>

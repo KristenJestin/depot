@@ -62,7 +62,7 @@ export function AccordionPanel({
   return (
     <BaseAccordion.Panel
       className={cn(
-        "overflow-hidden border-t border-card-border data-[ending-style]:animate-out data-[starting-style]:animate-in",
+        "h-[var(--accordion-panel-height)] overflow-hidden border-t border-card-border opacity-100 transition-[height,opacity] duration-250 ease-[cubic-bezier(0.32,0.72,0,1)] data-[ending-style]:h-0 data-[starting-style]:h-0 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
         className,
       )}
       keepMounted

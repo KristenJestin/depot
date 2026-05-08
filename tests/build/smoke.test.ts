@@ -6,7 +6,7 @@
  * build with `bun run test:smoke`, which rebuilds everything first.
  */
 import { describe, test, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -47,11 +47,17 @@ describe.skipIf(!built)("build smoke", () => {
 
   test("npm pack tarball includes dist/web/index.html and dist/index.mjs", () => {
     const projectRoot = resolve(distDir, "..");
+    const npmCacheDir = resolve(projectRoot, ".depot-dev/npm-cache");
+    mkdirSync(npmCacheDir, { recursive: true });
     const result = spawnSync("npm", ["pack", "--dry-run", "--json"], {
       encoding: "utf-8",
+      env: { ...process.env, npm_config_cache: npmCacheDir },
       timeout: 30_000,
       cwd: projectRoot,
     });
+    if (result.status !== 0) {
+      throw new Error(`npm pack --json failed:\n${result.stdout}\n${result.stderr}`);
+    }
     let packs: Array<{ files: Array<{ path: string }> }>;
     try {
       packs = JSON.parse(result.stdout);

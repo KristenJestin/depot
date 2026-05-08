@@ -13,7 +13,7 @@
 
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.205 0.012 286);
-  --card-border: oklch(0.205 0.012 286 / 0.08);
+  --card-border: oklch(0.205 0.012 286 / 0.12);
   --card-shadow: 0 1px 2px oklch(0.18 0.01 286 / 0.06);
   --card-shadow-hover: 0 12px 30px oklch(0.18 0.01 286 / 0.12);
 
@@ -304,7 +304,7 @@
   }
 
   .bg-panel-muted {
-    background-color: color-mix(in oklch, var(--card) 72%, var(--muted));
+    background-color: color-mix(in oklch, var(--card) 30%, var(--muted));
   }
 
   .border-card-border {

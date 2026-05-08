@@ -2,7 +2,11 @@ import * as React from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 
 import { StatusDot } from "#/web/components/ui/status-dot";
-import { cn } from "#/web/lib/utils";
+import {
+  CollapsiblePanel,
+  CollapsibleRoot,
+  CollapsibleTrigger,
+} from "#/web/components/ui/collapsible";
 import type { BoardCard } from "#/web/lib/prd-view-model";
 
 export function KanbanTaskList({ card }: { card: BoardCard }) {
@@ -17,59 +21,64 @@ export function KanbanTaskList({ card }: { card: BoardCard }) {
   }
 
   return (
-    <div className="pointer-events-auto border-t border-card-border/70 pt-2">
-      <button
-        type="button"
-        aria-expanded={open}
+    <CollapsibleRoot
+      open={open}
+      onOpenChange={setOpen}
+      className="pointer-events-auto border-t border-card-border/70 pt-2"
+    >
+      <CollapsibleTrigger
         aria-controls={tasksPanelId}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          setOpen((value) => !value);
         }}
         className="flex w-full items-center justify-between gap-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <span>Tasks</span>
-        <ChevronDownIcon
-          className={cn("size-4 transition-transform", open ? "rotate-180" : undefined)}
-        />
-      </button>
+        <ChevronDownIcon className="size-4 transition-transform data-[panel-open]:rotate-180" />
+      </CollapsibleTrigger>
 
-      {open ? (
-        <div id={tasksPanelId} className="max-h-56 space-y-2 overflow-y-auto pt-3 pr-1">
+      <CollapsiblePanel
+        id={tasksPanelId}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        <div className="max-h-56 space-y-2 overflow-y-auto pt-3 pr-1">
           {visibleTasks.map((task) => (
             <KanbanTaskRow key={task.id} task={task} />
           ))}
 
           {skippedTasks.length > 0 ? (
-            <div className="border-t border-card-border pt-2">
-              <button
-                type="button"
+            <CollapsibleRoot
+              open={skippedOpen}
+              onOpenChange={setSkippedOpen}
+              className="border-t border-card-border pt-2"
+            >
+              <CollapsibleTrigger
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  setSkippedOpen((value) => !value);
                 }}
                 className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                <ChevronRightIcon
-                  className={cn("size-3 transition-transform", skippedOpen ? "rotate-90" : null)}
-                />
+                <ChevronRightIcon className="size-3 transition-transform data-[panel-open]:rotate-90" />
                 <span>{skippedTasks.length} skipped</span>
-              </button>
+              </CollapsibleTrigger>
 
-              {skippedOpen ? (
+              <CollapsiblePanel>
                 <div className="mt-2 space-y-2">
                   {skippedTasks.map((task) => (
                     <KanbanTaskRow key={task.id} task={task} />
                   ))}
                 </div>
-              ) : null}
-            </div>
+              </CollapsiblePanel>
+            </CollapsibleRoot>
           ) : null}
         </div>
-      ) : null}
-    </div>
+      </CollapsiblePanel>
+    </CollapsibleRoot>
   );
 }
 

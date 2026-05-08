@@ -87,10 +87,9 @@ describe("KanbanBoard", () => {
     expect(readySection).not.toBeNull();
     expect(doneSection).not.toBeNull();
 
-    expect(
-      within(readySection as HTMLElement).queryByText("Ready preview"),
-    ).not.toBeInTheDocument();
-    expect(within(doneSection as HTMLElement).queryByText("Done preview")).not.toBeInTheDocument();
+    expect(within(readySection as HTMLElement).queryByText("Ready preview")).not.toBeVisible();
+    expect(within(doneSection as HTMLElement).queryByText("Done preview")).not.toBeVisible();
+    expect(within(readySection as HTMLElement).queryByText("Ready")).not.toBeInTheDocument();
 
     const readyToggle = within(readySection as HTMLElement).getByRole("button", { name: "Tasks" });
     fireEvent.click(readyToggle);
@@ -105,7 +104,7 @@ describe("KanbanBoard", () => {
     expect(within(doneSection as HTMLElement).getByText("Done preview")).toBeVisible();
   });
 
-  it("does not render the footer timestamp for done cards", () => {
+  it("does not repeat done status or render the footer timestamp for done cards", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-30T10:01:00.000Z"));
 
@@ -140,7 +139,7 @@ describe("KanbanBoard", () => {
     const doneSection = screen.getByRole("heading", { name: "Done" }).closest("section");
 
     expect(doneSection).not.toBeNull();
-    expect(within(doneSection as HTMLElement).getByText("Completed")).toBeVisible();
+    expect(within(doneSection as HTMLElement).queryByText("Completed")).not.toBeInTheDocument();
     expect(within(doneSection as HTMLElement).queryByText("1m ago")).not.toBeInTheDocument();
 
     vi.useRealTimers();

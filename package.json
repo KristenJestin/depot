@@ -1,6 +1,6 @@
 {
   "name": "@netsirk/depot",
-  "version": "2.1.17",
+  "version": "2.1.18",
   "description": "AI agent task and PRD management CLI",
   "keywords": [
     "agent",
@@ -36,6 +36,7 @@
     "test:smoke": "vp pack && vp build && vp test tests/build",
     "depot": "vp pack && node --env-file-if-exists=.env dist/index.mjs --",
     "dev:web": "vp dev",
+    "dev:web:local": "bun --env-file=.env run dev:web",
     "db:check": "drizzle-kit check",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

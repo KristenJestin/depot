@@ -44,6 +44,7 @@ export type StageItem = {
   status: DetailTask["status"] | "stopped";
   effort: DetailTask["effort"];
   severity: DetailTask["severity"];
+  createdAt: DetailTask["createdAt"];
   startedAt: DetailTask["startedAt"];
   completedAt: DetailTask["completedAt"];
   blockedReason: DetailTask["blockedReason"];
@@ -52,14 +53,17 @@ export type StageItem = {
 
 export type StageCard = {
   id: string;
-  kind: "initial" | "review";
+  kind: "initial" | "phase" | "review";
   title: string;
   meta: string;
   items: StageItem[];
   review?: DetailReview;
   reviewType?: DetailReview["type"];
+  phaseNumber: number | null;
+  createdAt: DetailPrd["createdAt"];
   current: boolean;
   complete: boolean;
+  future: boolean;
   canceled: boolean;
 };
 
@@ -243,7 +247,7 @@ export function buildDetailSummary({ prd, tasks, reviews }: DetailData): DetailS
 }
 
 export function buildStageCards(data: DetailData): StageCard[] {
-  const initialTasks = data.tasks.filter((task) => task.reviewId === null);
+  const baseTaskCards = buildBaseTaskStageCards(data);
   const reviewCards: StageCard[] = [];
 
   for (const [index, review] of data.reviews.entries()) {
@@ -259,34 +263,175 @@ export function buildStageCards(data: DetailData): StageCard[] {
       items: findings,
       review,
       reviewType: review.type,
+      phaseNumber: review.phaseNumber ?? null,
+      createdAt: review.createdAt,
       current: false,
       complete: review.status === "done",
+      future: false,
       canceled: false,
     };
 
     reviewCards.push(reviewCard);
   }
 
-  const cards = [
-    {
-      id: "initial-run",
-      kind: "initial" as const,
-      title: "Initial run",
-      meta: buildInitialMeta(initialTasks, data.prd.status),
-      items: initialTasks.map((task) => toStageItem(task, data.prd.status === "canceled")),
-      current: false,
-      complete: initialTasks.every((task) => task.status === "done" || task.status === "skipped"),
-      canceled: data.prd.status === "canceled",
-    },
-    ...reviewCards,
-  ].filter((card) => card.items.length > 0);
+  const cards = combineStageCards(baseTaskCards, reviewCards).filter(
+    (card) => card.items.length > 0,
+  );
 
-  const reversed = cards.reverse();
-  if (reversed[0]) {
-    reversed[0].current = true;
+  markCurrentStage(cards, data);
+
+  return orderStageCards(cards);
+}
+
+function buildBaseTaskStageCards(data: DetailData): StageCard[] {
+  const initialTasks = data.tasks.filter((task) => task.reviewId === null);
+  const phasedTasks = initialTasks.filter((task) => task.phaseNumber !== null);
+
+  if (phasedTasks.length === 0) {
+    return [
+      {
+        id: "initial-run",
+        kind: "initial",
+        title: "Initial run",
+        meta: buildInitialMeta(initialTasks, data.prd.status),
+        items: initialTasks.map((task) => toStageItem(task, data.prd.status === "canceled")),
+        phaseNumber: null,
+        createdAt: latestTaskDate(initialTasks) ?? data.prd.createdAt,
+        current: false,
+        complete: initialTasks.every((task) => task.status === "done" || task.status === "skipped"),
+        future: false,
+        canceled: data.prd.status === "canceled",
+      },
+    ];
   }
 
-  return reversed;
+  const cards: StageCard[] = [];
+  const unphasedTasks = initialTasks.filter((task) => task.phaseNumber === null);
+  if (unphasedTasks.length > 0) {
+    cards.push({
+      id: "initial-run",
+      kind: "initial",
+      title: "Initial run",
+      meta: buildInitialMeta(unphasedTasks, data.prd.status),
+      items: unphasedTasks.map((task) => toStageItem(task, data.prd.status === "canceled")),
+      phaseNumber: null,
+      createdAt: latestTaskDate(unphasedTasks) ?? data.prd.createdAt,
+      current: false,
+      complete: unphasedTasks.every((task) => task.status === "done" || task.status === "skipped"),
+      future: false,
+      canceled: data.prd.status === "canceled",
+    });
+  }
+
+  const phaseNumbers = [
+    ...new Set(
+      phasedTasks
+        .map((task) => task.phaseNumber)
+        .filter((phaseNumber): phaseNumber is number => phaseNumber !== null),
+    ),
+  ].sort((a, b) => a - b);
+
+  for (const phaseNumber of phaseNumbers) {
+    const phaseTasks = phasedTasks.filter((task) => task.phaseNumber === phaseNumber);
+    cards.push({
+      id: `phase-${phaseNumber}`,
+      kind: "phase",
+      title: `Phase ${phaseNumber}`,
+      meta: buildInitialMeta(phaseTasks, data.prd.status),
+      items: phaseTasks.map((task) => toStageItem(task, data.prd.status === "canceled")),
+      phaseNumber,
+      createdAt: latestTaskDate(phaseTasks) ?? data.prd.createdAt,
+      current: false,
+      complete: phaseTasks.every((task) => task.status === "done" || task.status === "skipped"),
+      future:
+        isFuturePhase(data.prd, phaseNumber) &&
+        phaseTasks.every((task) => task.status === "pending"),
+      canceled: data.prd.status === "canceled",
+    });
+  }
+
+  return cards;
+}
+
+function combineStageCards(baseTaskCards: StageCard[], reviewCards: StageCard[]): StageCard[] {
+  const hasPhaseCards = [...baseTaskCards, ...reviewCards].some(
+    (card) => card.phaseNumber !== null,
+  );
+
+  if (!hasPhaseCards) {
+    return [...baseTaskCards, ...reviewCards];
+  }
+
+  const phaseNumbers = [
+    ...new Set(
+      [...baseTaskCards, ...reviewCards]
+        .map((card) => card.phaseNumber)
+        .filter((phaseNumber): phaseNumber is number => phaseNumber !== null),
+    ),
+  ].sort((a, b) => a - b);
+
+  const cards: StageCard[] = [];
+  cards.push(...baseTaskCards.filter((card) => card.phaseNumber === null));
+
+  for (const phaseNumber of phaseNumbers) {
+    const baseCard = baseTaskCards.find((card) => card.phaseNumber === phaseNumber);
+    if (baseCard) {
+      cards.push(baseCard);
+    }
+    cards.push(...reviewCards.filter((card) => card.phaseNumber === phaseNumber));
+  }
+
+  cards.push(...reviewCards.filter((card) => card.phaseNumber === null));
+  return cards;
+}
+
+function markCurrentStage(cards: StageCard[], data: DetailData): void {
+  const activeReview = [...data.reviews].reverse().find((review) => review.status !== "done");
+  const activeReviewCard = activeReview
+    ? cards.find((card) => card.review?.id === activeReview.id)
+    : null;
+  if (activeReviewCard) {
+    activeReviewCard.current = true;
+    return;
+  }
+
+  if (
+    data.prd.status !== "done" &&
+    data.prd.status !== "canceled" &&
+    data.prd.currentPhase !== null &&
+    data.prd.currentPhase !== undefined
+  ) {
+    const currentPhaseCard = cards.find((card) => card.phaseNumber === data.prd.currentPhase);
+    if (currentPhaseCard) {
+      currentPhaseCard.current = true;
+      return;
+    }
+  }
+
+  const latestCard = cards.at(-1);
+  if (latestCard) {
+    latestCard.current = true;
+  }
+}
+
+function orderStageCards(cards: StageCard[]): StageCard[] {
+  const currentCards = cards.filter((card) => card.current);
+  const futureCards = cards
+    .filter((card) => card.future && !card.current)
+    .sort((a, b) => (a.phaseNumber ?? 0) - (b.phaseNumber ?? 0));
+  const previousCards = cards.filter((card) => !card.current && !card.future).reverse();
+
+  return [...currentCards, ...futureCards, ...previousCards];
+}
+
+function isFuturePhase(prd: DetailPrd, phaseNumber: number): boolean {
+  return (
+    prd.currentPhase !== null &&
+    prd.currentPhase !== undefined &&
+    phaseNumber > prd.currentPhase &&
+    prd.status !== "done" &&
+    prd.status !== "canceled"
+  );
 }
 
 export function buildRevisionEntries(data: DetailData): RevisionEntry[] {
@@ -347,6 +492,7 @@ function toStageItem(task: DetailTask, canceled: boolean): StageItem {
       status: "stopped",
       effort: task.effort,
       severity: task.severity,
+      createdAt: task.createdAt,
       startedAt: task.startedAt,
       completedAt: task.completedAt,
       blockedReason: task.blockedReason,
@@ -360,11 +506,23 @@ function toStageItem(task: DetailTask, canceled: boolean): StageItem {
     status: task.status,
     effort: task.effort,
     severity: task.severity,
+    createdAt: task.createdAt,
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     blockedReason: task.blockedReason,
     skipReason: task.skipReason,
   };
+}
+
+function latestTaskDate(tasks: DetailTask[]): DetailTask["createdAt"] | null {
+  let latest: DetailTask["createdAt"] | null = null;
+  for (const task of tasks) {
+    if (!latest || Date.parse(task.createdAt) > Date.parse(latest)) {
+      latest = task.createdAt;
+    }
+  }
+
+  return latest;
 }
 
 function buildInitialMeta(tasks: DetailTask[], prdStatus: DetailPrd["status"]): string {

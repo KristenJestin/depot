@@ -4,6 +4,11 @@ import { useState } from "react";
 
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
+import {
+  CollapsiblePanel,
+  CollapsibleRoot,
+  CollapsibleTrigger,
+} from "#/web/components/ui/collapsible";
 import { StatusBadge } from "#/web/components/ui/status-badge";
 import { StatusDot } from "#/web/components/ui/status-dot";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
@@ -140,16 +145,14 @@ function ReviewItem({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-b border-card-border pb-3 last:border-b-0 last:pb-0">
+    <CollapsibleRoot
+      open={open}
+      onOpenChange={setOpen}
+      className="border-b border-card-border pb-3 last:border-b-0 last:pb-0"
+    >
       <div className="flex w-full items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex flex-1 items-center gap-2 text-left"
-        >
-          <ChevronRightIcon
-            className={["size-3 transition-transform", open ? "rotate-90" : ""].join(" ")}
-          />
+        <CollapsibleTrigger className="flex flex-1 items-center gap-2 text-left">
+          <ChevronRightIcon className="size-3 transition-transform data-[panel-open]:rotate-90" />
           <span
             data-review-id={review.id}
             className="text-sm font-semibold text-foreground hover:underline"
@@ -157,12 +160,12 @@ function ReviewItem({
             Review #{index}
           </span>
           <Badge variant={review.type === "human" ? "severityInfo" : "subtle"}>{review.type}</Badge>
-        </button>
+        </CollapsibleTrigger>
         <span className="text-xs text-muted-foreground">
           {formatMetaDate(review.doneAt ?? review.createdAt)}
         </span>
       </div>
-      {open ? (
+      <CollapsiblePanel>
         <div className="mt-3 space-y-3 pl-5">
           <div className="flex items-center justify-between gap-2">
             {review.status === "done" ? (
@@ -218,8 +221,8 @@ function ReviewItem({
             ))}
           </div>
         </div>
-      ) : null}
-    </div>
+      </CollapsiblePanel>
+    </CollapsibleRoot>
   );
 }
 

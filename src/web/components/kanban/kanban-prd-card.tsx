@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { CalendarIcon, CornerDownRightIcon, ListChecksIcon, MessageCircleIcon } from "lucide-react";
+import type * as React from "react";
 
 import { AgentBars } from "#/web/components/agent-bars";
 import { Spinner } from "#/web/components/loading-overlay";
@@ -7,7 +8,6 @@ import { KanbanProgressRing } from "#/web/components/kanban/kanban-progress-ring
 import { KanbanTaskList } from "#/web/components/kanban/kanban-task-list";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
-import { StatusBadge } from "#/web/components/ui/status-badge";
 import { StatusDot } from "#/web/components/ui/status-dot";
 import { cn } from "#/web/lib/utils";
 import type { BoardCard, BoardColumn } from "#/web/lib/prd-view-model";
@@ -23,8 +23,10 @@ export function KanbanPrdCard({
   const visibleTotal = Math.max(0, card.totalTasks - card.skippedTasks);
   const progress = visibleTotal === 0 ? 0 : Math.round((card.doneTasks / visibleTotal) * 100);
   const activeTasks = card.previewTasks.filter((task) => task.status === "in_progress");
-  const reviewLabel = buildReviewLabel(card);
-  const context = card.context ? formatContextSnippet(card.context) : card.footerLabel;
+  const signalBadges = buildSignalBadges(card);
+  const footerLabel = resolveFooterLabel(card, columnId);
+  const context = card.context ? formatContextSnippet(card.context) : (footerLabel ?? "No context");
+  const showTimestamp = card.status !== "done";
 
   return (
     <Card
@@ -42,17 +44,18 @@ export function KanbanPrdCard({
       />
 
       <div className="relative z-10 flex flex-col gap-2.5 px-3 pt-3 pb-2.5 pointer-events-none">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusBadge status={columnId === "review" ? "review" : card.status} />
+        <div className="flex items-start justify-between gap-2">
           <Badge variant="outline" className="bg-card">
             <ListChecksIcon className="size-3" />
             {visibleTotal}
           </Badge>
-          {reviewLabel ? (
-            <Badge variant="severityInfo" className="bg-card">
-              {reviewLabel}
-            </Badge>
-          ) : null}
+          <div className="flex min-w-0 flex-wrap justify-end gap-1.5">
+            {signalBadges.map((badge) => (
+              <Badge key={badge.label} variant={badge.variant} className="bg-card">
+                {badge.label}
+              </Badge>
+            ))}
+          </div>
         </div>
 
         <p
@@ -98,9 +101,9 @@ export function KanbanPrdCard({
               <AgentBars />
               <span className="truncate">{card.animatedLabel}</span>
             </span>
-          ) : (
-            <span className="truncate">{card.footerLabel}</span>
-          )}
+          ) : footerLabel ? (
+            <span className="truncate">{footerLabel}</span>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 items-center gap-3 text-xs">
@@ -110,10 +113,12 @@ export function KanbanPrdCard({
               {card.latestReview?.findingsCount ?? 0}
             </span>
           </span>
-          <span className="flex items-center gap-1">
-            <CalendarIcon className="size-3 text-muted-foreground" />
-            <span className="font-medium text-foreground">{formatBoardTime(card.updatedAt)}</span>
-          </span>
+          {showTimestamp ? (
+            <span className="flex items-center gap-1">
+              <CalendarIcon className="size-3 text-muted-foreground" />
+              <span className="font-medium text-foreground">{formatBoardTime(card.updatedAt)}</span>
+            </span>
+          ) : null}
           <KanbanProgressRing value={progress} />
         </div>
       </div>
@@ -121,15 +126,82 @@ export function KanbanPrdCard({
   );
 }
 
-function buildReviewLabel(card: BoardCard) {
-  if (!card.latestReview) {
+type SignalBadge = {
+  label: string;
+  variant: React.ComponentProps<typeof Badge>["variant"];
+};
+
+function buildSignalBadges(card: BoardCard): SignalBadge[] {
+  const badges: SignalBadge[] = [];
+  const review = card.latestReview;
+
+  if (review) {
+    if (review.criticalCount > 0) {
+      badges.push({ label: `${review.criticalCount} critical`, variant: "severityCritical" });
+    }
+    if (review.majorCount > 0) {
+      badges.push({ label: `${review.majorCount} major`, variant: "severityMajor" });
+    }
+    if (review.minorCount > 0) {
+      badges.push({ label: `${review.minorCount} minor`, variant: "severityMinor" });
+    }
+    if (
+      review.infoCount > 0 &&
+      review.criticalCount + review.majorCount + review.minorCount === 0
+    ) {
+      badges.push({ label: `${review.infoCount} info`, variant: "severityInfo" });
+    }
+  }
+
+  if (card.blockedTasks > 0) {
+    badges.push({ label: `${card.blockedTasks} blocked`, variant: "statusInProgress" });
+  }
+
+  if (card.skippedTasks > 0) {
+    badges.push({ label: `${card.skippedTasks} skipped`, variant: "outline" });
+  }
+
+  return badges.slice(0, 3);
+}
+
+function resolveFooterLabel(card: BoardCard, columnId: BoardColumn["id"]): string | null {
+  const normalizedFooter = normalizeLabel(card.footerLabel);
+  const columnStatus = columnId === "review" ? "review" : columnId;
+  const redundantLabels = new Set([
+    normalizeLabel(columnId),
+    normalizeLabel(columnStatus),
+    normalizeLabel(columnTitle(columnId)),
+    normalizeLabel(card.status),
+    normalizeLabel(card.status.replace("_", " ")),
+  ]);
+
+  if (columnId === "done") {
+    redundantLabels.add("completed");
+  }
+
+  if (columnId === "canceled") {
+    redundantLabels.add("cancelled");
+  }
+
+  if (redundantLabels.has(normalizedFooter)) {
     return null;
   }
 
-  const parts = [
-    card.latestReview.majorCount > 0 ? `${card.latestReview.majorCount} major` : null,
-    card.latestReview.minorCount > 0 ? `${card.latestReview.minorCount} minor` : null,
-  ].filter(Boolean);
+  return card.footerLabel;
+}
 
-  return parts.length > 0 ? parts.join(" / ") : null;
+function normalizeLabel(value: string): string {
+  return value.toLowerCase().replaceAll("_", " ").trim();
+}
+
+function columnTitle(columnId: BoardColumn["id"]): string {
+  if (columnId === "ready") {
+    return "Todo";
+  }
+
+  if (columnId === "in_progress") {
+    return "In Progress";
+  }
+
+  return columnId;
 }

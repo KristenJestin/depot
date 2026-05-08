@@ -9,8 +9,8 @@ function CardRoot({ className, ...props }: CardProps) {
     <div
       data-slot="card"
       className={cn(
-        "flex flex-col gap-4 rounded-xl bg-card py-4 text-foreground shadow-card",
-        "[&_[data-slot=table-header]]:border-t",
+        "flex flex-col gap-4 rounded-xl bg-card py-4 text-foreground shadow-sm overflow-hidden",
+        "**:data-[slot=table-header]:border-t",
         className,
       )}
       {...props}
@@ -55,11 +55,7 @@ function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
 
 function CardFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      data-slot="card-footer"
-      className={cn("flex items-center px-6 [.border-t]:pt-6", className)}
-      {...props}
-    />
+    <div data-slot="card-footer" className={cn("flex items-center px-6", className)} {...props} />
   );
 }
 
