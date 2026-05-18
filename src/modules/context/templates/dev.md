@@ -97,24 +97,52 @@ If the auditor reports findings, continue the loop through a review-driven coder
 
 ### 4. Human Validation Loop
 
-When the implementation or audit result comes back, ask the user for validation.
+When the auditor reports back (with or without findings), the PRD is now blocked on a human. **Always** mark this explicitly so the kanban surfaces it correctly:
 
-If the user gives new feedback:
+```
+depot prd request-review <prd-id> [--reason "<short context>"]
+```
+
+This transitions the PRD from `in_progress` → `review` and emits a `prd_review_requested` event. The dashboard immediately moves the card into the **Review** column. Do this even when you expect the user to approve trivially — the explicit gate is the contract.
+
+Then ask the user for validation.
+
+**Branch A — user approves.** Mark the PRD done directly from `review`:
+
+```
+depot prd done <prd-id> --approved-by <user> --comment "<rationale>"
+```
+
+(For multi-phase PRDs, see "Phase Advance" below — phase-advance handles approval in the middle of a multi-phase plan.)
+
+**Branch B — user gives feedback.** Walk the conversation through to actionable findings without leaving `review` status. The PRD stays in `review` for the entire Q&A; only the next coder spawn flips it back.
 
 1. explore the codebase if needed to verify what the feedback refers to
 2. ask targeted questions until the request is unambiguous
-3. create or continue a human review draft
-4. update the review live while understanding improves
-5. once the review draft is implementation-ready, validate it (`depot review begin <id>` or `review activate`) and relaunch the coder
+3. create or continue a human review draft (`depot review start <prd-id> --type human`)
+4. update the review live while understanding improves (`depot review update`, `depot review task add`)
+5. once the review draft is implementation-ready, validate it (`depot review begin <id>`)
+6. **transition the PRD back to active work and spawn the coder**:
+
+   ```
+   depot prd resume <prd-id>
+   ```
+
+   This flips `review` → `in_progress` and emits `prd_resumed`. Then launch the coder follow-up with `depot context coder <prd-id> --review <review-id>`.
+
+7. when the follow-up coder pass returns, run the auditor again (rule: always audit after coder), then **return to the top of section 4**: `prd request-review` and ask the user. The loop repeats until approval.
 
 Use the review as a live draft, not as a final dump.
 
 Relevant commands:
 
+- `depot prd request-review <prd-id>` — open the human-validation gate (in_progress → review)
+- `depot prd resume <prd-id>` — close the gate and resume coder work (review → in_progress)
+- `depot prd done <prd-id> --approved-by ...` — close the PRD from `review` on approval
 - `depot review start <prd-id> --type human`
 - `depot review update <review-id> --feedback ...`
 - `depot review task add <review-id> ...`
-- `depot task update <task-id> ...` for review findings that need refinement (now supports `--severity`, `--add-depends`, `--remove-depends`)
+- `depot task update <task-id> ...` for review findings that need refinement (supports `--severity`, `--add-depends`, `--remove-depends`)
 - `depot review begin <review-id>` (alias: `depot review activate`) when the draft is validated and actionable
 - `depot review done <review-id>` when the review loop is complete
 - `depot review reopen <review-id>` if you need to add a late finding to a closed review

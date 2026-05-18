@@ -5,13 +5,27 @@ export type ProjectStatus = (typeof VALID_PROJECT_STATUSES)[number];
 
 // ── PRD status transitions ────────────────────────────────────────────────────
 
-export const VALID_PRD_STATUSES = ["draft", "ready", "in_progress", "done", "canceled"] as const;
+export const VALID_PRD_STATUSES = [
+  "draft",
+  "ready",
+  "in_progress",
+  "review",
+  "done",
+  "canceled",
+] as const;
 export type PrdStatus = (typeof VALID_PRD_STATUSES)[number];
 
+// `review` marks the explicit "blocked by human" gate that sits between
+// agent work and final approval. The orchestrator opens it after every
+// coder+audit cycle so the kanban surfaces "waiting on human" as a
+// first-class state. From `review` the human can either approve straight
+// to `done`, or feedback flips the PRD back to `in_progress` so the dev
+// orchestrator can spawn the next coder pass.
 export const VALID_PRD_TRANSITIONS: Record<PrdStatus, PrdStatus[]> = {
   draft: ["ready", "canceled"],
   ready: ["in_progress", "canceled"],
-  in_progress: ["done", "canceled"],
+  in_progress: ["review", "done", "canceled"],
+  review: ["in_progress", "done", "canceled"],
   done: [],
   canceled: [],
 };
@@ -74,6 +88,8 @@ export const VALID_EVENT_TYPES = [
   "task_skipped",
   "prd_activated",
   "prd_ready",
+  "prd_review_requested",
+  "prd_resumed",
   "prd_done",
   "prd_approved",
   "prd_canceled",

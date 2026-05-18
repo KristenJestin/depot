@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 
 import { KanbanBoard } from "#/web/components/kanban-board";
 import { PageContent, PageShell, PageTopBar } from "#/web/components/page-shell";
@@ -9,7 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "#/web/components/ui/breadcrumb";
-import { prdsQuery } from "#/web/lib/queries";
+import { contextQuery, prdsQuery } from "#/web/lib/queries";
 import { buildBoardColumns } from "#/web/lib/prd-view-model";
 
 export const Route = createFileRoute("/")({
@@ -19,10 +20,18 @@ export const Route = createFileRoute("/")({
 
 function DashboardRoute() {
   const { data } = prdsQuery.list.useSuspense();
+  const { data: contextData } = useQuery(contextQuery.options());
+  // Show the per-card project badge whenever no specific workspace is
+  // selected — that's the "All projects" view set via the workspace
+  // switcher (cookie sentinel `__cleared`). The badge would be redundant
+  // when the dashboard is already filtered to a single project.
+  const showProjectBadges = contextData !== undefined && contextData.workspaceId === null;
   const columns = buildBoardColumns(data.prds);
   const total = data.prds.length;
+  // "Active" = anything mid-cycle. PRDs in `review` are still part of an
+  // active cycle (just blocked on a human), so they count as running too.
   const running = data.prds.filter(
-    (prd: (typeof data.prds)[number]) => prd.status === "in_progress",
+    (prd: (typeof data.prds)[number]) => prd.status === "in_progress" || prd.status === "review",
   ).length;
 
   return (
@@ -52,7 +61,7 @@ function DashboardRoute() {
       </PageTopBar>
 
       <PageContent>
-        <KanbanBoard columns={columns} />
+        <KanbanBoard columns={columns} showProjectBadges={showProjectBadges} />
       </PageContent>
     </PageShell>
   );

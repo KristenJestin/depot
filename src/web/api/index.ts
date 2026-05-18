@@ -1,10 +1,22 @@
 import { Hono } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 
 import { getDb } from "#/services/database";
 import { normalizeWorkspacePath } from "#/shared/utils";
 import type { Database } from "#/db/client";
 import type { Variables } from "./types";
 import { prdsRoutes } from "./prds";
+
+// Cookie used to remember the user's selected workspace across browser
+// sessions and server restarts. Storing it server-readable lets every
+// API request be scoped to the chosen project without the client having
+// to round-trip the id on every call. The "__cleared" sentinel value
+// represents the user explicitly choosing "no workspace" (different
+// semantics from the cookie being absent — which falls back to the
+// cwd-based hint).
+const WORKSPACE_COOKIE = "depot_workspace_id";
+const WORKSPACE_COOKIE_CLEARED = "__cleared";
+const WORKSPACE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
 async function resolveWorkspaceHint(db: Database): Promise<string | null> {
   const cwd = normalizeWorkspacePath(process.cwd());
@@ -23,18 +35,20 @@ async function resolveWorkspaceHint(db: Database): Promise<string | null> {
   return best;
 }
 
-// In-memory override; undefined = fall back to cwd resolution, null = no workspace
-let workspaceOverride: string | null | undefined = undefined;
-
 const app = new Hono<{ Variables: Variables }>()
   .basePath("/api")
   .use("*", async (c, next) => {
     const db = await getDb();
     c.set("db", db);
-    const wsId =
-      workspaceOverride !== undefined
-        ? workspaceOverride
-        : await resolveWorkspaceHint(db).catch(() => null);
+    const cookie = getCookie(c, WORKSPACE_COOKIE);
+    let wsId: string | null;
+    if (cookie === WORKSPACE_COOKIE_CLEARED) {
+      wsId = null;
+    } else if (cookie) {
+      wsId = cookie;
+    } else {
+      wsId = await resolveWorkspaceHint(db).catch(() => null);
+    }
     c.set("currentWorkspaceId", wsId);
     await next();
   })
@@ -62,8 +76,14 @@ const app = new Hono<{ Variables: Variables }>()
     if (workspaceId !== null && typeof workspaceId !== "string") {
       return c.json({ error: "Invalid body" }, 400);
     }
-    workspaceOverride = workspaceId as string | null;
-    return c.json({ workspaceId: workspaceOverride }, 200);
+    const value = workspaceId === null ? WORKSPACE_COOKIE_CLEARED : workspaceId;
+    setCookie(c, WORKSPACE_COOKIE, value, {
+      path: "/",
+      maxAge: WORKSPACE_COOKIE_MAX_AGE,
+      sameSite: "Lax",
+      httpOnly: false,
+    });
+    return c.json({ workspaceId: workspaceId as string | null }, 200);
   })
   .get("/workspaces", async (c) => {
     const db = c.var.db;

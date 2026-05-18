@@ -12,7 +12,23 @@ import type { Variables } from "./types";
 export const prdsRoutes = new Hono<{ Variables: Variables }>()
   .get("/prds", async (c) => {
     const db = c.var.db;
-    const prdList = await getRuntime().runPromise(DomainPrds.listPrds({ latestOnly: true }));
+    // Scope the dashboard to the project of the currently-selected workspace.
+    // The workspace cookie set via PATCH /api/context is the source of truth;
+    // when no cookie is set, the middleware falls back to a cwd-based hint
+    // (see src/web/api/index.ts). When no workspace can be resolved at all
+    // we still list all PRDs so a fresh install isn't a blank page.
+    const wsId = c.var.currentWorkspaceId;
+    let projectId: string | null = null;
+    if (wsId) {
+      const ws = await db.query.workspaces.findFirst({
+        where: { id: wsId },
+        columns: { projectId: true },
+      });
+      projectId = ws?.projectId ?? null;
+    }
+    const prdList = await getRuntime().runPromise(
+      DomainPrds.listPrds(projectId ? { projectId, latestOnly: true } : { latestOnly: true }),
+    );
     prdList.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
     const prdRevisionIds = prdList.map((prd) => prd.id);
@@ -150,6 +166,21 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       reviewTaskCounts.set(task.reviewId, entry);
     }
 
+    // Project names — needed so the UI can show a project badge on the
+    // PRD card when the dashboard is in "all projects" mode (workspace
+    // switcher set to null). One batched query keeps it cheap; the
+    // result lives in a Map keyed on projectId.
+    const distinctProjectIds = [...new Set(prdList.map((p) => p.projectId))];
+    const projectNameMap = new Map<string, string>();
+    if (distinctProjectIds.length > 0) {
+      const projectRows = await db.query.projects.findMany({
+        columns: { id: true, name: true },
+      });
+      for (const row of projectRows) {
+        if (distinctProjectIds.includes(row.id)) projectNameMap.set(row.id, row.name);
+      }
+    }
+
     const prds = prdList.map((p) => {
       const counts = taskCounts.get(p.id) ?? {
         totalTasks: 0,
@@ -197,6 +228,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
 
       return {
         ...p,
+        projectName: projectNameMap.get(p.projectId) ?? null,
         ...counts,
         latestReview,
         previewTasks,

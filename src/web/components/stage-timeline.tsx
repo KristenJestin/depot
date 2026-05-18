@@ -76,7 +76,11 @@ function FuturePhases({
   const [open, setOpen] = useState(false);
 
   return (
-    <CollapsibleRoot open={open} onOpenChange={setOpen} className="border-b border-dashed border-timeline-line pb-3">
+    <CollapsibleRoot
+      open={open}
+      onOpenChange={setOpen}
+      className="border-b border-dashed border-timeline-line pb-3"
+    >
       <div>
         <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
           <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">

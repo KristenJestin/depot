@@ -1,14 +1,12 @@
 import { Link } from "@tanstack/react-router";
-import { CalendarIcon, CornerDownRightIcon, ListChecksIcon, MessageCircleIcon } from "lucide-react";
+import { CalendarIcon, CornerDownRightIcon, FolderIcon } from "lucide-react";
 import type * as React from "react";
 
 import { AgentBars } from "#/web/components/agent-bars";
-import { Spinner } from "#/web/components/loading-overlay";
 import { KanbanProgressRing } from "#/web/components/kanban/kanban-progress-ring";
 import { KanbanTaskList } from "#/web/components/kanban/kanban-task-list";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
-import { StatusDot } from "#/web/components/ui/status-dot";
 import { cn } from "#/web/lib/utils";
 import type { BoardCard, BoardColumn } from "#/web/lib/prd-view-model";
 import { formatBoardTime, formatContextSnippet } from "#/web/lib/view-format";
@@ -16,17 +14,23 @@ import { formatBoardTime, formatContextSnippet } from "#/web/lib/view-format";
 export function KanbanPrdCard({
   card,
   columnId,
+  showProjectBadge = false,
 }: {
   card: BoardCard;
   columnId: BoardColumn["id"];
+  showProjectBadge?: boolean;
 }) {
   const visibleTotal = Math.max(0, card.totalTasks - card.skippedTasks);
   const progress = visibleTotal === 0 ? 0 : Math.round((card.doneTasks / visibleTotal) * 100);
-  const activeTasks = card.previewTasks.filter((task) => task.status === "in_progress");
   const signalBadges = buildSignalBadges(card);
   const footerLabel = resolveFooterLabel(card, columnId);
   const context = card.context ? formatContextSnippet(card.context) : (footerLabel ?? "No context");
-  const showTimestamp = card.status !== "done";
+  const isTerminal = card.status === "done" || card.status === "canceled";
+  // Drop the timestamp for terminal cards — they're not "fresh" by definition
+  // and the footer space is better used for the project badge in all-projects mode.
+  const showTimestamp = !isTerminal;
+  const showTaskList = !isTerminal;
+  const headerHasContent = signalBadges.length > 0 || (showProjectBadge && card.projectName);
 
   return (
     <Card
@@ -43,20 +47,28 @@ export function KanbanPrdCard({
         className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
 
-      <div className="relative z-10 flex flex-col gap-2.5 px-3 pt-3 pb-2.5 pointer-events-none">
-        <div className="flex items-start justify-between gap-2">
-          <Badge variant="outline" className="bg-card">
-            <ListChecksIcon className="size-3" />
-            {visibleTotal}
-          </Badge>
-          <div className="flex min-w-0 flex-wrap justify-end gap-1.5">
-            {signalBadges.map((badge) => (
-              <Badge key={badge.label} variant={badge.variant} className="bg-card">
-                {badge.label}
+      <div className="relative z-10 flex flex-col gap-2 px-3 pt-3 pb-2.5 pointer-events-none">
+        {headerHasContent ? (
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
+            {showProjectBadge && card.projectName ? (
+              <Badge variant="neutral" className="bg-card">
+                <FolderIcon className="size-3" />
+                {card.projectName}
               </Badge>
-            ))}
+            ) : (
+              <span />
+            )}
+            {signalBadges.length > 0 ? (
+              <div className="flex flex-wrap justify-end gap-1.5">
+                {signalBadges.map((badge) => (
+                  <Badge key={badge.label} variant={badge.variant} className="bg-card">
+                    {badge.label}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
           </div>
-        </div>
+        ) : null}
 
         <p
           className={cn(
@@ -72,29 +84,12 @@ export function KanbanPrdCard({
           <p className="truncate text-xs text-muted-foreground">{context}</p>
         </div>
 
-        {activeTasks.length > 0 ? (
-          <div className="space-y-2">
-            {activeTasks.map((task) => (
-              <div
-                key={task.id}
-                className="flex items-center gap-2 rounded-md border border-card-border bg-card px-2 py-1.5 text-xs"
-              >
-                <StatusDot tone="active" />
-                <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-                  {task.title}
-                </span>
-                <Spinner />
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        <KanbanTaskList card={card} />
+        {showTaskList ? <KanbanTaskList card={card} /> : null}
       </div>
 
       <div className="border-t border-border-subtle" />
 
-      <div className="relative z-10 flex items-center justify-between gap-2 px-3 pt-2.5 pb-3 pointer-events-none">
+      <div className="relative z-10 flex items-center justify-between gap-2 px-3 pt-2 pb-2.5 pointer-events-none">
         <div className="min-w-0 flex items-center gap-2 text-xs text-muted-foreground">
           {card.animatedLabel ? (
             <span className="flex min-w-0 items-center gap-2 text-status-in-progress-foreground">
@@ -107,19 +102,13 @@ export function KanbanPrdCard({
         </div>
 
         <div className="flex shrink-0 items-center gap-3 text-xs">
-          <span className="flex items-center gap-1">
-            <MessageCircleIcon className="size-3 text-muted-foreground" />
-            <span className="font-medium text-foreground">
-              {card.latestReview?.findingsCount ?? 0}
-            </span>
-          </span>
           {showTimestamp ? (
             <span className="flex items-center gap-1">
               <CalendarIcon className="size-3 text-muted-foreground" />
               <span className="font-medium text-foreground">{formatBoardTime(card.updatedAt)}</span>
             </span>
           ) : null}
-          <KanbanProgressRing value={progress} />
+          {visibleTotal > 0 ? <KanbanProgressRing value={progress} /> : null}
         </div>
       </div>
     </Card>
@@ -131,37 +120,28 @@ type SignalBadge = {
   variant: React.ComponentProps<typeof Badge>["variant"];
 };
 
+// Surface only the ONE most-actionable signal per card. Stacking 3+ badges
+// (critical + major + minor + blocked + skipped) was the main source of
+// kanban clutter; in practice the highest-severity bucket is the
+// load-bearing one — anything else only matters once the user clicks in.
 function buildSignalBadges(card: BoardCard): SignalBadge[] {
-  const badges: SignalBadge[] = [];
   const review = card.latestReview;
-
-  if (review) {
-    if (review.criticalCount > 0) {
-      badges.push({ label: `${review.criticalCount} critical`, variant: "severityCritical" });
-    }
-    if (review.majorCount > 0) {
-      badges.push({ label: `${review.majorCount} major`, variant: "severityMajor" });
-    }
-    if (review.minorCount > 0) {
-      badges.push({ label: `${review.minorCount} minor`, variant: "severityMinor" });
-    }
-    if (
-      review.infoCount > 0 &&
-      review.criticalCount + review.majorCount + review.minorCount === 0
-    ) {
-      badges.push({ label: `${review.infoCount} info`, variant: "severityInfo" });
-    }
+  if (review?.criticalCount) {
+    return [{ label: `${review.criticalCount} critical`, variant: "severityCritical" }];
   }
-
+  if (review?.majorCount) {
+    return [{ label: `${review.majorCount} major`, variant: "severityMajor" }];
+  }
   if (card.blockedTasks > 0) {
-    badges.push({ label: `${card.blockedTasks} blocked`, variant: "statusInProgress" });
+    return [{ label: `${card.blockedTasks} blocked`, variant: "statusInProgress" }];
   }
-
-  if (card.skippedTasks > 0) {
-    badges.push({ label: `${card.skippedTasks} skipped`, variant: "outline" });
+  if (review?.minorCount) {
+    return [{ label: `${review.minorCount} minor`, variant: "severityMinor" }];
   }
-
-  return badges.slice(0, 3);
+  if (review?.infoCount && !(review.criticalCount + review.majorCount + review.minorCount)) {
+    return [{ label: `${review.infoCount} info`, variant: "severityInfo" }];
+  }
+  return [];
 }
 
 function resolveFooterLabel(card: BoardCard, columnId: BoardColumn["id"]): string | null {

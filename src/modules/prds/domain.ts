@@ -279,6 +279,65 @@ export const cancelPrd = (id: string) =>
   });
 
 /**
+ * Request a human review on an in-progress PRD: transition to `review`.
+ * The dev orchestrator calls this at the natural validation gates — end
+ * of every audit cycle for multi-phase PRDs and at final close. The
+ * kanban surfaces the PRD in the dedicated "Review" column from this
+ * point on, marking it explicitly as "blocked by human".
+ */
+export const requestReviewPrd = (id: string, reason?: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    yield* checkPrdTransition(rev.status, "review");
+    const rows = yield* dbQuery(() =>
+      db.update(prdRevisions).set({ status: "review" }).where(eq(prdRevisions.id, id)).returning(),
+    );
+    yield* logActivity({
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId: id,
+      eventType: "prd_review_requested",
+      payload: {
+        prdRevisionId: id,
+        title: rev.title,
+        ...(reason ? { reason } : {}),
+      },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return rows[0]!;
+  });
+
+/**
+ * Resume work on a PRD that was sitting in `review`: transition back to
+ * `in_progress`. The dev orchestrator calls this after the human review
+ * Q&A converges and the next coder pass is about to spawn. Equivalent
+ * lifecycle to "the human gave actionable feedback, agents pick it up".
+ */
+export const resumePrd = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    yield* checkPrdTransition(rev.status, "in_progress");
+    const rows = yield* dbQuery(() =>
+      db
+        .update(prdRevisions)
+        .set({ status: "in_progress" })
+        .where(eq(prdRevisions.id, id))
+        .returning(),
+    );
+    yield* logActivity({
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId: id,
+      eventType: "prd_resumed",
+      payload: { prdRevisionId: id, title: rev.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return rows[0]!;
+  });
+
+/**
  * Fork a ready revision into a new draft revision.
  *
  * Only `ready` revisions can be forked. The new revision is draft, inherits

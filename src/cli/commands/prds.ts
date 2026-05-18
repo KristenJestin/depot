@@ -457,6 +457,71 @@ const cancelCommand = command({
   },
 });
 
+const requestReviewCommand = command({
+  meta: {
+    name: "request-review",
+    description:
+      "Move an in_progress PRD to 'review' — explicit human-validation gate (kanban → Review column)",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+    reason: {
+      schema: Schema.String,
+      required: false,
+      description: "Optional context recorded on the prd_review_requested event",
+    },
+  },
+  run: async ({ args, output }) => {
+    const updated = await runEffect(
+      DomainPrds.requestReviewPrd(args.prdId, args.reason).pipe(
+        Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
+      ),
+    );
+    if (!updated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    if (output.isJson()) {
+      output.success({ item: updated });
+    } else {
+      output.print(`Requested human review on PRD '${updated.title}' (${updated.id}) [review]`);
+    }
+  },
+});
+
+const resumeCommand = command({
+  meta: {
+    name: "resume",
+    description:
+      "Move a PRD from 'review' back to 'in_progress' — call after the human review converges and the next coder pass is about to spawn",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const updated = await runEffect(
+      DomainPrds.resumePrd(args.prdId).pipe(
+        Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
+      ),
+    );
+    if (!updated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    if (output.isJson()) {
+      output.success({ item: updated });
+    } else {
+      output.print(`Resumed PRD '${updated.title}' (${updated.id}) [in_progress]`);
+    }
+  },
+});
+
 const forkCommand = command({
   meta: {
     name: "fork",
@@ -1211,6 +1276,8 @@ export const prdCommand = command({
     close: closeCommand,
     cancel: cancelCommand,
     discard: discardCommand,
+    "request-review": requestReviewCommand,
+    resume: resumeCommand,
     fork: forkCommand,
     load: loadCommand,
     reload: reloadCommand,

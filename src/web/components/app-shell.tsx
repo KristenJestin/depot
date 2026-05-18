@@ -44,8 +44,16 @@ function WorkspaceSwitcher() {
 
   if (workspaces.length === 0) return null;
 
-  const label = current ? workspaceDisplayName(current) : "No workspace";
-  const projectName = current?.projectName ?? null;
+  // currentId === null means the user explicitly picked "All projects" via
+  // the dedicated entry below. Distinct from "no workspace" (which would be
+  // the initial state when the cwd hint resolves to nothing).
+  const isAllProjects = contextData !== undefined && currentId === null;
+  const label = isAllProjects
+    ? "All projects"
+    : current
+      ? workspaceDisplayName(current)
+      : "No workspace";
+  const projectName = isAllProjects ? "Across every project" : (current?.projectName ?? null);
 
   return (
     <div ref={ref} className="relative">
@@ -70,6 +78,34 @@ function WorkspaceSwitcher() {
       {open && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-card-border bg-popover p-1 shadow-card-hover">
           <div className="max-h-60 overflow-y-auto">
+            {/* "All projects" pseudo-entry — sets workspaceId to null so the
+                middleware's cleared-sentinel branch fires and GET /api/prds
+                returns every project. The BoardCard shows a project badge
+                in this mode (see KanbanCard). */}
+            <button
+              disabled={mutation.isPending}
+              onClick={() => {
+                mutation.mutate(null);
+                setOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors",
+                isAllProjects
+                  ? "bg-accent text-accent-foreground"
+                  : "text-popover-foreground hover:bg-accent",
+              )}
+            >
+              <CheckIcon
+                className={cn("size-3 shrink-0", isAllProjects ? "opacity-100" : "opacity-0")}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-medium">All projects</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  Show every PRD with project badges
+                </div>
+              </div>
+            </button>
+            <div className="my-1 border-t border-card-border" />
             {workspaces.map((ws) => {
               const isSelected = ws.id === currentId;
               return (

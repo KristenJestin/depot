@@ -29,7 +29,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 describe("KanbanBoard", () => {
-  it("collapses task previews by default and toggles them open on click", () => {
+  it("collapses task previews by default on active cards and toggles them open on click", () => {
     const columns: BoardColumn[] = [
       {
         id: "ready",
@@ -38,6 +38,8 @@ describe("KanbanBoard", () => {
           {
             id: "ready-card",
             prdId: "prd-1",
+            projectId: "proj-1",
+            projectName: "Acme",
             title: "Ready card",
             context: null,
             status: "ready",
@@ -54,6 +56,25 @@ describe("KanbanBoard", () => {
           },
         ],
       },
+    ];
+
+    render(<KanbanBoard columns={columns} />);
+
+    const readySection = screen.getByRole("heading", { name: "Todo" }).closest("section");
+    expect(readySection).not.toBeNull();
+
+    expect(within(readySection as HTMLElement).queryByText("Ready preview")).not.toBeVisible();
+    expect(within(readySection as HTMLElement).queryByText("Ready")).not.toBeInTheDocument();
+
+    const readyToggle = within(readySection as HTMLElement).getByRole("button", { name: "Tasks" });
+    fireEvent.click(readyToggle);
+
+    expect(readyToggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(readySection as HTMLElement).getByText("Ready preview")).toBeVisible();
+  });
+
+  it("hides the Tasks toggle on terminal cards (done / canceled)", () => {
+    const columns: BoardColumn[] = [
       {
         id: "done",
         title: "Done",
@@ -61,6 +82,8 @@ describe("KanbanBoard", () => {
           {
             id: "done-card",
             prdId: "prd-2",
+            projectId: "proj-1",
+            projectName: "Acme",
             title: "Done card",
             context: null,
             status: "done",
@@ -81,27 +104,13 @@ describe("KanbanBoard", () => {
 
     render(<KanbanBoard columns={columns} />);
 
-    const readySection = screen.getByRole("heading", { name: "Todo" }).closest("section");
     const doneSection = screen.getByRole("heading", { name: "Done" }).closest("section");
-
-    expect(readySection).not.toBeNull();
     expect(doneSection).not.toBeNull();
 
-    expect(within(readySection as HTMLElement).queryByText("Ready preview")).not.toBeVisible();
-    expect(within(doneSection as HTMLElement).queryByText("Done preview")).not.toBeVisible();
-    expect(within(readySection as HTMLElement).queryByText("Ready")).not.toBeInTheDocument();
-
-    const readyToggle = within(readySection as HTMLElement).getByRole("button", { name: "Tasks" });
-    fireEvent.click(readyToggle);
-
-    expect(readyToggle).toHaveAttribute("aria-expanded", "true");
-    expect(within(readySection as HTMLElement).getByText("Ready preview")).toBeVisible();
-
-    const doneToggle = within(doneSection as HTMLElement).getByRole("button", { name: "Tasks" });
-    fireEvent.click(doneToggle);
-
-    expect(doneToggle).toHaveAttribute("aria-expanded", "true");
-    expect(within(doneSection as HTMLElement).getByText("Done preview")).toBeVisible();
+    // Tasks panel is suppressed entirely on terminal cards; they are not actionable.
+    expect(
+      within(doneSection as HTMLElement).queryByRole("button", { name: "Tasks" }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not repeat done status or render the footer timestamp for done cards", () => {
@@ -116,6 +125,8 @@ describe("KanbanBoard", () => {
           {
             id: "done-card",
             prdId: "prd-2",
+            projectId: "proj-1",
+            projectName: "Acme",
             title: "Done card",
             context: null,
             status: "done",

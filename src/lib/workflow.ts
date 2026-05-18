@@ -145,6 +145,14 @@ export function cancelPrd(db: Database, id: string) {
   return runWithDb(db, DomainPrds.cancelPrd(id));
 }
 
+export function requestReviewPrd(db: Database, id: string, reason?: string) {
+  return runWithDb(db, DomainPrds.requestReviewPrd(id, reason));
+}
+
+export function resumePrd(db: Database, id: string) {
+  return runWithDb(db, DomainPrds.resumePrd(id));
+}
+
 export function forkPrd(db: Database, id: string) {
   return runWithDb(db, DomainPrds.forkPrd(id));
 }

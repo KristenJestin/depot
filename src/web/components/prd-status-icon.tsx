@@ -10,7 +10,7 @@ import {
 
 import type { PrdStatus } from "#/shared/validator";
 
-const ICONS: Record<PrdStatus | "review", React.ComponentType<LucideProps>> = {
+const ICONS: Record<PrdStatus, React.ComponentType<LucideProps>> = {
   draft: CircleDashedIcon,
   ready: CirclePlayIcon,
   in_progress: Clock3Icon,
@@ -19,7 +19,7 @@ const ICONS: Record<PrdStatus | "review", React.ComponentType<LucideProps>> = {
   review: RefreshCcwDotIcon,
 };
 
-const CLASS_NAMES: Record<PrdStatus | "review", string> = {
+const CLASS_NAMES: Record<PrdStatus, string> = {
   draft: "text-status-draft",
   ready: "text-status-ready",
   in_progress: "text-status-in-progress",
@@ -28,13 +28,7 @@ const CLASS_NAMES: Record<PrdStatus | "review", string> = {
   review: "text-info",
 };
 
-export function PrdStatusIcon({
-  status,
-  className,
-}: {
-  status: PrdStatus | "review";
-  className?: string;
-}) {
+export function PrdStatusIcon({ status, className }: { status: PrdStatus; className?: string }) {
   const Icon = ICONS[status];
   return <Icon className={["size-4", CLASS_NAMES[status], className].filter(Boolean).join(" ")} />;
 }

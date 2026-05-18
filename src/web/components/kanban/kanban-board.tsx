@@ -1,7 +1,13 @@
 import { KanbanColumn } from "#/web/components/kanban/kanban-column";
 import type { BoardColumn } from "#/web/lib/prd-view-model";
 
-export function KanbanBoard({ columns }: { columns: BoardColumn[] }) {
+export function KanbanBoard({
+  columns,
+  showProjectBadges = false,
+}: {
+  columns: BoardColumn[];
+  showProjectBadges?: boolean;
+}) {
   const total = columns.reduce((sum, column) => sum + column.cards.length, 0);
   const active = columns
     .filter((column) => column.id === "in_progress" || column.id === "review")
@@ -32,7 +38,7 @@ export function KanbanBoard({ columns }: { columns: BoardColumn[] }) {
         <div className="min-h-0 flex-1 overflow-x-auto">
           <div className="flex min-h-full gap-3 p-0.5 pb-1">
             {columns.map((column) => (
-              <KanbanColumn key={column.id} column={column} />
+              <KanbanColumn key={column.id} column={column} showProjectBadges={showProjectBadges} />
             ))}
           </div>
         </div>

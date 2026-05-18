@@ -12,6 +12,9 @@ import {
   markPrdReady,
   updatePrd,
   donePrd,
+  cancelPrd,
+  requestReviewPrd,
+  resumePrd,
   forkPrd,
   listPrdFamily,
   createReview,
@@ -89,6 +92,45 @@ describe("PRD workflow", () => {
   it("rejects donePrd on non-in_progress PRD", async () => {
     const prd = await createPrd(db, { projectId, title: "PRD" });
     await expect(donePrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
+  });
+
+  it("transitions in_progress → review via requestReviewPrd", async () => {
+    const prd = await createPrd(db, { projectId, title: "PRD" });
+    await db.update(prdRevisions).set({ status: "in_progress" }).where(eq(prdRevisions.id, prd.id));
+    const inReview = await requestReviewPrd(db, prd.id, "phase audit clean");
+    expect(inReview.status).toBe("review");
+  });
+
+  it("transitions review → in_progress via resumePrd", async () => {
+    const prd = await createPrd(db, { projectId, title: "PRD" });
+    await db.update(prdRevisions).set({ status: "review" }).where(eq(prdRevisions.id, prd.id));
+    const resumed = await resumePrd(db, prd.id);
+    expect(resumed.status).toBe("in_progress");
+  });
+
+  it("transitions review → done via donePrd (user approval path)", async () => {
+    const prd = await createPrd(db, { projectId, title: "PRD" });
+    await db.update(prdRevisions).set({ status: "review" }).where(eq(prdRevisions.id, prd.id));
+    const done = await donePrd(db, prd.id);
+    expect(done.status).toBe("done");
+  });
+
+  it("transitions review → canceled via cancelPrd", async () => {
+    const prd = await createPrd(db, { projectId, title: "PRD" });
+    await db.update(prdRevisions).set({ status: "review" }).where(eq(prdRevisions.id, prd.id));
+    const canceled = await cancelPrd(db, prd.id);
+    expect(canceled.status).toBe("canceled");
+  });
+
+  it("rejects requestReviewPrd from a draft PRD", async () => {
+    const prd = await createPrd(db, { projectId, title: "PRD" });
+    await expect(requestReviewPrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
+  });
+
+  it("rejects resumePrd from in_progress (only valid from review)", async () => {
+    const prd = await createPrd(db, { projectId, title: "PRD" });
+    await db.update(prdRevisions).set({ status: "in_progress" }).where(eq(prdRevisions.id, prd.id));
+    await expect(resumePrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
   });
 
   it("forks a ready PRD into a new draft revision", async () => {

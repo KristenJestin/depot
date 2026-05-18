@@ -221,7 +221,12 @@ export function summarizeActivityPayload(
     case "prd_ready":
     case "prd_done":
     case "prd_canceled":
+    case "prd_resumed":
       return String(payload.title ?? "");
+    case "prd_review_requested":
+      return [String(payload.title ?? ""), String(payload.reason ?? "")]
+        .filter(Boolean)
+        .join(" — ");
     case "prd_forked":
       return `${String(payload.sourcePrdRevisionId ?? "")} → ${String(payload.newPrdRevisionId ?? "")} (rev ${String(payload.revision ?? "")})`;
     case "review_created":

@@ -312,5 +312,85 @@ describe("web api", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it("écrit un cookie depot_workspace_id réutilisable par les requêtes suivantes", async () => {
+      const patchRes = await app.request("/api/context", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: "ws-1" }),
+      });
+      expect(patchRes.status).toBe(200);
+      const setCookie = patchRes.headers.get("set-cookie") ?? "";
+      expect(setCookie).toMatch(/depot_workspace_id=ws-1/);
+      expect(setCookie).toMatch(/Path=\//i);
+      expect(setCookie).toMatch(/SameSite=Lax/i);
+
+      const getRes = await app.request("/api/context", {
+        headers: { Cookie: "depot_workspace_id=ws-1" },
+      });
+      const ctx = await getRes.json();
+      expect(ctx.workspaceId).toBe("ws-1");
+    });
+
+    it("le sentinel __cleared force workspaceId null sur GET /api/context", async () => {
+      const res = await app.request("/api/context", {
+        headers: { Cookie: "depot_workspace_id=__cleared" },
+      });
+      const body = await res.json();
+      expect(body.workspaceId).toBeNull();
+    });
+  });
+
+  describe("GET /api/prds — filtre par projet du workspace courant", () => {
+    it("ne retourne que les PRDs du projet du workspace cookie quand un cookie est présent", async () => {
+      // Seed a second project with its own PRD so we have data to filter against.
+      const otherProjectId = "proj-other";
+      await db.insert(projects).values({ id: otherProjectId, name: "Other Project" });
+      await db.insert(prds).values({ id: "prd-other-1", projectId: otherProjectId });
+      await db.insert(workspaces).values({
+        id: "ws-other",
+        projectId: otherProjectId,
+        path: "/other/path",
+        label: null,
+      });
+      await db.insert(prdRevisions).values({
+        id: "rev-other",
+        prdId: "prd-other-1",
+        projectId: otherProjectId,
+        title: "Other-project PRD",
+        status: "draft",
+        updatedAt: new Date(2000),
+        revision: 1,
+      });
+      // Set the original test PRD to be the current revision so it shows up under latestOnly.
+      await db
+        .update(prds)
+        .set({ currentRevisionId: "rev-other" })
+        .where(eq(prds.id, "prd-other-1"));
+
+      // With ws-1 cookie → only PRDs from projectId.
+      const wsResp = await app.request("/api/prds", {
+        headers: { Cookie: "depot_workspace_id=ws-1" },
+      });
+      const wsBody = await wsResp.json();
+      const wsTitles = wsBody.prds.map((p: { title: string }) => p.title);
+      expect(wsTitles).not.toContain("Other-project PRD");
+
+      // With ws-other cookie → only Other-project PRD.
+      const otherResp = await app.request("/api/prds", {
+        headers: { Cookie: "depot_workspace_id=ws-other" },
+      });
+      const otherBody = await otherResp.json();
+      const otherTitles = otherBody.prds.map((p: { title: string }) => p.title);
+      expect(otherTitles).toContain("Other-project PRD");
+      expect(otherTitles).not.toContain("First PRD");
+
+      // With __cleared cookie → all PRDs (no filter).
+      const allResp = await app.request("/api/prds", {
+        headers: { Cookie: "depot_workspace_id=__cleared" },
+      });
+      const allBody = await allResp.json();
+      expect(allBody.prds.length).toBeGreaterThanOrEqual(2);
+    });
   });
 });

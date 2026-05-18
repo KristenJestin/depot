@@ -218,6 +218,15 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     title: Schema.String,
   }),
   prd_ready: Schema.Struct({ prdRevisionId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_review_requested: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    title: Schema.String,
+    reason: Schema.optional(Schema.String),
+  }),
+  prd_resumed: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    title: Schema.String,
+  }),
   prd_done: Schema.Struct({ prdRevisionId: Schema.optional(Schema.String), title: Schema.String }),
   prd_approved: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),

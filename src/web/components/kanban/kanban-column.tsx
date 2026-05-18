@@ -3,7 +3,13 @@ import { Badge } from "#/web/components/ui/badge";
 import { PrdStatusIcon } from "#/web/components/prd-status-icon";
 import type { BoardColumn } from "#/web/lib/prd-view-model";
 
-export function KanbanColumn({ column }: { column: BoardColumn }) {
+export function KanbanColumn({
+  column,
+  showProjectBadges = false,
+}: {
+  column: BoardColumn;
+  showProjectBadges?: boolean;
+}) {
   return (
     <section className="flex w-72 shrink-0 flex-col rounded-xl bg-muted shadow-card md:w-auto md:min-w-64 md:flex-1">
       <header className="flex items-center gap-2 px-2 py-2">
@@ -17,7 +23,12 @@ export function KanbanColumn({ column }: { column: BoardColumn }) {
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-1 pb-1">
         {column.cards.length > 0 ? (
           column.cards.map((card) => (
-            <KanbanPrdCard key={card.id} card={card} columnId={column.id} />
+            <KanbanPrdCard
+              key={card.id}
+              card={card}
+              columnId={column.id}
+              showProjectBadge={showProjectBadges}
+            />
           ))
         ) : (
           <div className="rounded-lg border border-dashed border-card-border bg-card/60 px-3 py-6 text-center text-xs text-muted-foreground">

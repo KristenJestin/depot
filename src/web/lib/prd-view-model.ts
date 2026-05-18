@@ -17,6 +17,8 @@ export type BoardCardTask = {
 export type BoardCard = {
   id: string;
   prdId: string;
+  projectId: string;
+  projectName: string | null;
   title: string;
   context: string | null;
   status: ListPrd["status"];
@@ -134,6 +136,8 @@ function buildBoardCard(prd: ListPrd): BoardCard {
   return {
     id: prd.id,
     prdId: prd.prdId,
+    projectId: prd.projectId,
+    projectName: prd.projectName ?? null,
     title: prd.title,
     context: prd.context,
     status: prd.status,
@@ -159,6 +163,16 @@ function resolveBoardColumn(prd: ListPrd): BoardColumnId {
     return "canceled";
   }
 
+  // Explicit `review` status — the dev orchestrator parked the PRD here
+  // pending human validation. Takes precedence over any other heuristic.
+  if (prd.status === "review") {
+    return "review";
+  }
+
+  // Legacy fallback: PRDs created before the explicit `review` status
+  // existed signalled the same intent by leaving the latest human review
+  // open while the PRD itself stayed `in_progress`. Keep the heuristic
+  // alive so historical data still groups correctly.
   if (
     prd.status === "in_progress" &&
     prd.latestReview?.type === "human" &&
@@ -171,6 +185,12 @@ function resolveBoardColumn(prd: ListPrd): BoardColumnId {
 }
 
 function buildAnimatedLabel(prd: ListPrd): string | null {
+  // PRDs explicitly parked in the human-review gate shouldn't animate as
+  // "writing" — they are waiting on a human, the agents are idle.
+  if (prd.status === "review") {
+    return "Awaiting review";
+  }
+
   if (prd.status !== "in_progress") {
     return null;
   }
