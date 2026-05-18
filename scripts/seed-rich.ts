@@ -1,11 +1,17 @@
 /**
  * Rich-example seed for the local dev UI.
  *
- * Builds a single coherent project — "Acme Banking App" — with eight PRDs
- * exercising every PRD lifecycle state (draft, ready, in_progress, done,
- * canceled), multi-phase plans, multi-revision histories, and a mix of
- * human + agent reviews with findings of every severity. The activity_log
- * is populated chronologically so the UI's history view tells a story.
+ * Builds three projects so the project-scoping behaviour can actually be
+ * exercised locally:
+ *
+ *  - "Acme Banking" (main, two workspaces, 8 PRDs) — the rich one. Covers
+ *    every PRD lifecycle state, multi-phase plans, multi-revision histories,
+ *    and a mix of human + agent reviews with findings of every severity.
+ *  - "Acme Crypto Exchange" (one workspace, 3 PRDs) — draft / in_progress / done.
+ *  - "Acme Internal Tools" (one workspace, 2 PRDs) — ready / canceled.
+ *
+ * The activity_log is populated chronologically so the UI's history view
+ * tells a story.
  *
  * Usage:
  *   DB_PATH=.depot-dev/depot.db bun run scripts/seed-rich.ts
@@ -287,10 +293,15 @@ insertWorkspace({
 
 // Helper: log a base set of lifecycle events for a revision.
 type LifecycleEvent = { eventType: string; at: number; payload?: Record<string, unknown> };
-const logRevision = (revisionId: string, workspaceId: string | null, events: LifecycleEvent[]) => {
+const logRevision = (
+  projectId: string,
+  revisionId: string,
+  workspaceId: string | null,
+  events: LifecycleEvent[],
+) => {
   for (const e of events) {
     insertActivity({
-      projectId: PROJECT_ID,
+      projectId,
       workspaceId,
       prdRevisionId: revisionId,
       taskId: null,
@@ -525,7 +536,7 @@ for (const [title, desc, effort, status] of PRD1_REV2_TASKS) {
   });
 }
 
-logRevision(REV1A, WS_ID, [
+logRevision(PROJECT_ID, REV1A, WS_ID, [
   { eventType: "prd_created", at: T(40 * DAY), payload: { revision: 1 } },
   { eventType: "prd_updated", at: T(39 * DAY), payload: { fields: ["context", "scope"] } },
   { eventType: "prd_ready", at: T(38 * DAY) },
@@ -537,7 +548,7 @@ logRevision(REV1A, WS_ID, [
   { eventType: "prd_done", at: T(30 * DAY) },
   { eventType: "prd_forked", at: T(15 * DAY), payload: { newRevisionId: REV1B } },
 ]);
-logRevision(REV1B, WS_ID, [
+logRevision(PROJECT_ID, REV1B, WS_ID, [
   { eventType: "prd_created", at: T(15 * DAY), payload: { revision: 2, forkedFrom: REV1A } },
   { eventType: "prd_ready", at: T(14 * DAY) },
   { eventType: "prd_activated", at: T(14 * DAY) },
@@ -763,7 +774,7 @@ for (const [title, desc, effort] of PRD2_PHASE3) {
   });
 }
 
-logRevision(REV2, WS_FEATURE_ID, [
+logRevision(PROJECT_ID, REV2, WS_FEATURE_ID, [
   { eventType: "prd_created", at: T(20 * DAY), payload: { revision: 1 } },
   { eventType: "prd_updated", at: T(19 * DAY), payload: { fields: ["context", "scope"] } },
   { eventType: "prd_ready", at: T(18 * DAY) },
@@ -834,7 +845,7 @@ for (let i = 0; i < PRD3_TASKS.length; i++) {
     completedAt: null,
   });
 }
-logRevision(REV3, WS_ID, [
+logRevision(PROJECT_ID, REV3, WS_ID, [
   { eventType: "prd_created", at: T(12 * DAY) },
   { eventType: "prd_updated", at: T(11 * DAY), payload: { fields: ["context", "scope"] } },
   { eventType: "prd_ready", at: T(9 * DAY) },
@@ -936,7 +947,7 @@ for (let i = 0; i < PRD4_FINDINGS.length; i++) {
     completedAt: null,
   });
 }
-logRevision(REV4, WS_ID, [
+logRevision(PROJECT_ID, REV4, WS_ID, [
   { eventType: "prd_created", at: T(10 * DAY) },
   { eventType: "prd_ready", at: T(8 * DAY) },
   { eventType: "prd_activated", at: T(7 * DAY) },
@@ -994,7 +1005,7 @@ for (let i = 0; i < PRD5_TASKS.length; i++) {
     completedAt: null,
   });
 }
-logRevision(REV5, WS_ID, [
+logRevision(PROJECT_ID, REV5, WS_ID, [
   { eventType: "prd_created", at: T(2 * DAY) },
   { eventType: "prd_updated", at: T(45 * MIN), payload: { fields: ["context"] } },
   { eventType: "task_created", at: T(20 * MIN) },
@@ -1069,7 +1080,7 @@ insertReview({
   updatedAt: T(23 * DAY),
   doneAt: T(23 * DAY),
 });
-logRevision(REV6, WS_ID, [
+logRevision(PROJECT_ID, REV6, WS_ID, [
   { eventType: "prd_created", at: T(28 * DAY) },
   { eventType: "prd_ready", at: T(27 * DAY) },
   { eventType: "prd_activated", at: T(27 * DAY) },
@@ -1108,7 +1119,7 @@ insertRevision({
   readyAt: null,
   activatedAt: null,
 });
-logRevision(REV7, WS_ID, [
+logRevision(PROJECT_ID, REV7, WS_ID, [
   { eventType: "prd_created", at: T(18 * DAY) },
   {
     eventType: "prd_canceled",
@@ -1197,7 +1208,7 @@ for (let i = 0; i < PRD8_REV2_TASKS.length; i++) {
     completedAt: null,
   });
 }
-logRevision(REV8A, WS_ID, [
+logRevision(PROJECT_ID, REV8A, WS_ID, [
   { eventType: "prd_created", at: T(33 * DAY) },
   { eventType: "prd_ready", at: T(31 * DAY) },
   { eventType: "prd_activated", at: T(30 * DAY) },
@@ -1208,10 +1219,376 @@ logRevision(REV8A, WS_ID, [
     payload: { newRevisionId: REV8B, reason: "legal: joint-account consent" },
   },
 ]);
-logRevision(REV8B, WS_ID, [
+logRevision(PROJECT_ID, REV8B, WS_ID, [
   { eventType: "prd_created", at: T(7 * DAY), payload: { revision: 2, forkedFrom: REV8A } },
   { eventType: "prd_ready", at: T(6 * DAY) },
   { eventType: "prd_activated", at: T(5 * DAY) },
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Secondary projects
+//
+// Lighter than Acme Banking — these exist to validate the project scoping in
+// the web UI. Selecting one of these projects' workspaces should filter the
+// dashboard to only the PRDs below; the "All projects" mode should mix them
+// with the Acme Banking PRDs and show each PRD's project badge.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Project: Acme Crypto Exchange (one workspace, 3 PRDs) ────────────────────
+
+const PROJECT_CRYPTO_ID = generateId();
+const WS_CRYPTO_ID = generateId();
+
+insertProject({
+  id: PROJECT_CRYPTO_ID,
+  name: "Acme Crypto Exchange",
+  description: "Spot trading platform — wallet, order book, settlement.",
+  status: "active",
+  createdAt: T(30 * DAY),
+});
+insertWorkspace({
+  id: WS_CRYPTO_ID,
+  projectId: PROJECT_CRYPTO_ID,
+  path: "/home/dev/workspaces/acme-crypto",
+  label: "main",
+  createdAt: T(30 * DAY),
+});
+
+// PRD A — DRAFT (still being scoped)
+const PRD_CRYPTO_A = generateId();
+const REV_CRYPTO_A = generateId();
+insertPrd({
+  id: PRD_CRYPTO_A,
+  projectId: PROJECT_CRYPTO_ID,
+  currentRevisionId: REV_CRYPTO_A,
+  createdAt: T(2 * DAY),
+});
+insertRevision({
+  id: REV_CRYPTO_A,
+  prdId: PRD_CRYPTO_A,
+  projectId: PROJECT_CRYPTO_ID,
+  workspaceId: WS_CRYPTO_ID,
+  revision: 1,
+  title: "KYC enhanced verification tier",
+  context:
+    "Regulator now requires a tier-2 KYC flow (proof of address, source of funds) before unlocking deposits above 10k EUR.",
+  scope:
+    "**In scope:** address proof upload + OCR validation, source-of-funds questionnaire, tier-2 review queue.\n\n**Out of scope:** sanctions screening (already shipped), automated risk scoring.",
+  status: "draft",
+  auditCycles: 0,
+  currentPhase: null,
+  supersededAt: null,
+  createdAt: T(2 * DAY),
+  updatedAt: T(2 * DAY),
+  readyAt: null,
+  activatedAt: null,
+});
+for (const [i, [title, desc, effort, status]] of (
+  [
+    ["Spec address proof OCR provider", "Compare Onfido, Sumsub, internal.", "s", "pending"],
+    ["Draft questionnaire copy", "Legal-approved wording for tier-2 form.", "s", "pending"],
+    ["Schema for review queue", "Reviewer workload + audit trail.", "m", "pending"],
+  ] as const
+).entries()) {
+  insertTask({
+    id: generateId(),
+    prdRevisionId: REV_CRYPTO_A,
+    position: i + 1,
+    title,
+    description: desc,
+    doneCriteria: "Spec signed off by compliance and engineering.",
+    dependsOn: [],
+    effort: effort as TaskSeed["effort"],
+    phaseNumber: null,
+    status: status as TaskSeed["status"],
+    reviewId: null,
+    severity: null,
+    blockedReason: null,
+    skipReason: null,
+    createdAt: T(2 * DAY) + i * 10_000,
+    startedAt: null,
+    completedAt: null,
+  });
+}
+logRevision(PROJECT_CRYPTO_ID, REV_CRYPTO_A, WS_CRYPTO_ID, [
+  {
+    eventType: "prd_created",
+    at: T(2 * DAY),
+    payload: { title: "KYC enhanced verification tier" },
+  },
+]);
+
+// PRD B — IN_PROGRESS
+const PRD_CRYPTO_B = generateId();
+const REV_CRYPTO_B = generateId();
+insertPrd({
+  id: PRD_CRYPTO_B,
+  projectId: PROJECT_CRYPTO_ID,
+  currentRevisionId: REV_CRYPTO_B,
+  createdAt: T(15 * DAY),
+});
+insertRevision({
+  id: REV_CRYPTO_B,
+  prdId: PRD_CRYPTO_B,
+  projectId: PROJECT_CRYPTO_ID,
+  workspaceId: WS_CRYPTO_ID,
+  revision: 1,
+  title: "Limit order book v2",
+  context:
+    "The matching engine occasionally orphans partial fills when two market orders cross the spread within the same tick. Rewrite the order book to be tick-deterministic.",
+  scope:
+    "**In scope:** new price-time priority engine, deterministic tick replay, regression harness against last 30 days of prod fills.\n\n**Out of scope:** stop / stop-limit orders (next PRD), UI changes.",
+  status: "in_progress",
+  auditCycles: 1,
+  currentPhase: null,
+  supersededAt: null,
+  createdAt: T(15 * DAY),
+  updatedAt: T(1 * DAY),
+  readyAt: T(13 * DAY),
+  activatedAt: T(12 * DAY),
+});
+for (const [i, [title, desc, effort, status]] of (
+  [
+    ["Bench current engine vs spec", "Replay prod fills, capture orphan rate.", "m", "done"],
+    ["Implement price-time priority engine", "Core matching logic + invariants.", "l", "done"],
+    ["Deterministic tick replay harness", "Reproducible fixtures from prod.", "m", "in_progress"],
+    ["Run shadow mode for 24h", "Compare new engine vs prod, diff fills.", "m", "pending"],
+    ["Cutover plan + rollback runbook", "How to revert if shadow disagrees.", "s", "pending"],
+  ] as const
+).entries()) {
+  insertTask({
+    id: generateId(),
+    prdRevisionId: REV_CRYPTO_B,
+    position: i + 1,
+    title,
+    description: desc,
+    doneCriteria: "Engine matches prod fills with <1bp drift over 24h shadow.",
+    dependsOn: [],
+    effort: effort as TaskSeed["effort"],
+    phaseNumber: null,
+    status: status as TaskSeed["status"],
+    reviewId: null,
+    severity: null,
+    blockedReason: null,
+    skipReason: null,
+    createdAt: T(15 * DAY) + i * 10_000,
+    startedAt: status === "pending" ? null : T(10 * DAY),
+    completedAt: status === "done" ? T(5 * DAY) : null,
+  });
+}
+logRevision(PROJECT_CRYPTO_ID, REV_CRYPTO_B, WS_CRYPTO_ID, [
+  { eventType: "prd_created", at: T(15 * DAY) },
+  { eventType: "prd_ready", at: T(13 * DAY) },
+  { eventType: "prd_activated", at: T(12 * DAY) },
+]);
+
+// PRD C — DONE
+const PRD_CRYPTO_C = generateId();
+const REV_CRYPTO_C = generateId();
+insertPrd({
+  id: PRD_CRYPTO_C,
+  projectId: PROJECT_CRYPTO_ID,
+  currentRevisionId: REV_CRYPTO_C,
+  createdAt: T(28 * DAY),
+});
+insertRevision({
+  id: REV_CRYPTO_C,
+  prdId: PRD_CRYPTO_C,
+  projectId: PROJECT_CRYPTO_ID,
+  workspaceId: WS_CRYPTO_ID,
+  revision: 1,
+  title: "Cold-wallet withdrawal cooldown",
+  context:
+    "Compliance ask: any withdrawal that would drain cold storage below the policy threshold must trigger a 24h manual review.",
+  scope:
+    "**In scope:** policy threshold table, withdrawal request status `cooldown`, ops approval flow.\n\n**Out of scope:** automated policy adjustment.",
+  status: "done",
+  auditCycles: 1,
+  currentPhase: null,
+  supersededAt: null,
+  createdAt: T(28 * DAY),
+  updatedAt: T(20 * DAY),
+  readyAt: T(27 * DAY),
+  activatedAt: T(26 * DAY),
+});
+for (const [i, [title, desc]] of (
+  [
+    ["Add policy_threshold table + migration", "Per-asset min cold balance."],
+    ["Implement cooldown state in withdrawal", "New status + transitions."],
+    ["Ops review UI for cooldown queue", "Approve / reject + audit log."],
+    ["Smoke test full flow", "End-to-end on staging."],
+  ] as const
+).entries()) {
+  insertTask({
+    id: generateId(),
+    prdRevisionId: REV_CRYPTO_C,
+    position: i + 1,
+    title,
+    description: desc,
+    doneCriteria: "Smoke test passes; cooldown queue working in staging.",
+    dependsOn: [],
+    effort: "m" as TaskSeed["effort"],
+    phaseNumber: null,
+    status: "done" as TaskSeed["status"],
+    reviewId: null,
+    severity: null,
+    blockedReason: null,
+    skipReason: null,
+    createdAt: T(28 * DAY) + i * 10_000,
+    startedAt: T(25 * DAY) + i * HOUR,
+    completedAt: T(22 * DAY) + i * HOUR,
+  });
+}
+logRevision(PROJECT_CRYPTO_ID, REV_CRYPTO_C, WS_CRYPTO_ID, [
+  { eventType: "prd_created", at: T(28 * DAY) },
+  { eventType: "prd_ready", at: T(27 * DAY) },
+  { eventType: "prd_activated", at: T(26 * DAY) },
+  { eventType: "prd_done", at: T(20 * DAY) },
+]);
+
+// ── Project: Acme Internal Tools (one workspace, 2 PRDs) ─────────────────────
+
+const PROJECT_TOOLS_ID = generateId();
+const WS_TOOLS_ID = generateId();
+
+insertProject({
+  id: PROJECT_TOOLS_ID,
+  name: "Acme Internal Tools",
+  description: "Back-office tooling for ops, finance and support.",
+  status: "active",
+  createdAt: T(40 * DAY),
+});
+insertWorkspace({
+  id: WS_TOOLS_ID,
+  projectId: PROJECT_TOOLS_ID,
+  path: "/home/dev/workspaces/acme-internal",
+  label: "main",
+  createdAt: T(40 * DAY),
+});
+
+// PRD A — READY (not yet activated)
+const PRD_TOOLS_A = generateId();
+const REV_TOOLS_A = generateId();
+insertPrd({
+  id: PRD_TOOLS_A,
+  projectId: PROJECT_TOOLS_ID,
+  currentRevisionId: REV_TOOLS_A,
+  createdAt: T(6 * DAY),
+});
+insertRevision({
+  id: REV_TOOLS_A,
+  prdId: PRD_TOOLS_A,
+  projectId: PROJECT_TOOLS_ID,
+  workspaceId: WS_TOOLS_ID,
+  revision: 1,
+  title: "Support agent impersonation",
+  context:
+    "Support agents currently ask customers to read out values from their dashboards to diagnose issues. Add a sandboxed impersonation mode so an agent can view (read-only) a customer's dashboard with full audit trail.",
+  scope:
+    "**In scope:** read-only impersonation token, audit log entry per session, banner in UI while active.\n\n**Out of scope:** write actions, automated session expiry.",
+  status: "ready",
+  auditCycles: 0,
+  currentPhase: null,
+  supersededAt: null,
+  createdAt: T(6 * DAY),
+  updatedAt: T(4 * DAY),
+  readyAt: T(4 * DAY),
+  activatedAt: null,
+});
+for (const [i, [title, desc, effort]] of (
+  [
+    ["Issue + verify impersonation token", "Short-lived, scoped, audited.", "m"],
+    ["UI banner during impersonation", "Persistent, dismissable, logged on dismiss.", "s"],
+    ["Audit log entries + retention", "Per session, retained 90 days.", "m"],
+  ] as const
+).entries()) {
+  insertTask({
+    id: generateId(),
+    prdRevisionId: REV_TOOLS_A,
+    position: i + 1,
+    title,
+    description: desc,
+    doneCriteria: "Smoke test with a support agent demonstrates the full read-only flow.",
+    dependsOn: [],
+    effort: effort as TaskSeed["effort"],
+    phaseNumber: null,
+    status: "pending" as TaskSeed["status"],
+    reviewId: null,
+    severity: null,
+    blockedReason: null,
+    skipReason: null,
+    createdAt: T(6 * DAY) + i * 10_000,
+    startedAt: null,
+    completedAt: null,
+  });
+}
+logRevision(PROJECT_TOOLS_ID, REV_TOOLS_A, WS_TOOLS_ID, [
+  { eventType: "prd_created", at: T(6 * DAY) },
+  { eventType: "prd_ready", at: T(4 * DAY) },
+]);
+
+// PRD B — CANCELED
+const PRD_TOOLS_B = generateId();
+const REV_TOOLS_B = generateId();
+insertPrd({
+  id: PRD_TOOLS_B,
+  projectId: PROJECT_TOOLS_ID,
+  currentRevisionId: REV_TOOLS_B,
+  createdAt: T(35 * DAY),
+});
+insertRevision({
+  id: REV_TOOLS_B,
+  prdId: PRD_TOOLS_B,
+  projectId: PROJECT_TOOLS_ID,
+  workspaceId: WS_TOOLS_ID,
+  revision: 1,
+  title: "Manual finance export to QuickBooks",
+  context:
+    "Finance team was running monthly manual exports. PRD canceled when leadership picked Xero over QuickBooks; the relevant work moved into the Xero migration PRD on a different team.",
+  scope: "Build CSV export + scheduled email for the finance team — superseded by the Xero work.",
+  status: "canceled",
+  auditCycles: 0,
+  currentPhase: null,
+  supersededAt: null,
+  createdAt: T(35 * DAY),
+  updatedAt: T(30 * DAY),
+  readyAt: null,
+  activatedAt: null,
+});
+for (const [i, [title, status]] of (
+  [
+    ["Spec the CSV schema", "skipped"],
+    ["Wire the export endpoint", "pending"],
+    ["Email scheduling", "pending"],
+  ] as const
+).entries()) {
+  insertTask({
+    id: generateId(),
+    prdRevisionId: REV_TOOLS_B,
+    position: i + 1,
+    title,
+    description: "Canceled before kickoff.",
+    doneCriteria: "—",
+    dependsOn: [],
+    effort: "s" as TaskSeed["effort"],
+    phaseNumber: null,
+    status: status as TaskSeed["status"],
+    reviewId: null,
+    severity: null,
+    blockedReason: null,
+    skipReason: status === "skipped" ? "Scope canceled — moved to Xero PRD." : null,
+    createdAt: T(35 * DAY) + i * 10_000,
+    startedAt: null,
+    completedAt: null,
+  });
+}
+logRevision(PROJECT_TOOLS_ID, REV_TOOLS_B, WS_TOOLS_ID, [
+  { eventType: "prd_created", at: T(35 * DAY) },
+  {
+    eventType: "prd_canceled",
+    at: T(30 * DAY),
+    payload: { reason: "Superseded by Xero migration PRD" },
+  },
 ]);
 
 // ── Done ─────────────────────────────────────────────────────────────────────
@@ -1229,4 +1606,15 @@ const summary = db
   )
   .get();
 console.log("Seed complete:", summary);
+
+const perProject = db
+  .prepare(
+    `SELECT p.name, COUNT(DISTINCT r.prd_id) AS prds
+       FROM projects p
+       LEFT JOIN prd_revisions r ON r.project_id = p.id
+       GROUP BY p.id
+       ORDER BY p.name`,
+  )
+  .all();
+console.log("PRDs per project:", perProject);
 db.close();
