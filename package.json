@@ -60,6 +60,7 @@
     "@base-ui/react": "^1.4.1",
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/space-grotesk": "^5.2.10",
+    "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-query": "5.100.2",
     "@tanstack/react-router": "1.168.24",
     "citty": "^0.2.2",
@@ -71,6 +72,8 @@
     "lucide-react": "^1.11.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
     "ulid": "^3.0.2"
   },

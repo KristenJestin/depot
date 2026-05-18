@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { PrdHeaderCard } from "#/web/components/prd-header-card";
 import { PrdNoticeBanner } from "#/web/components/prd-notice-banner";
 import { PrdSidebar } from "#/web/components/prd-sidebar";
-import { StageTimeline } from "#/web/components/stage-timeline";
 import { TaskDrawer } from "#/web/components/task-drawer";
 import { PageContent, PageShell, PageTopBar } from "#/web/components/page-shell";
 import {
@@ -16,15 +15,10 @@ import {
 } from "#/web/components/ui/breadcrumb";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
-import { EmptyState } from "#/web/components/ui/empty-state";
 import { StatusBadge } from "#/web/components/ui/status-badge";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
 import { prdsQuery } from "#/web/lib/queries";
-import {
-  buildDetailSummary,
-  buildRevisionEntries,
-  buildStageCards,
-} from "#/web/lib/prd-view-model";
+import { buildDetailSummary, buildRevisionEntries } from "#/web/lib/prd-view-model";
 import { formatMetaDate } from "#/web/lib/view-format";
 
 export const Route = createFileRoute("/prds/$id/reviews/$reviewId")({
@@ -64,14 +58,10 @@ function ReviewDetailPage() {
 
   const summary = buildDetailSummary(data);
   const revisions = buildRevisionEntries(data);
-  const stages = buildStageCards(data);
   const cycleNumber = review.phaseNumber ?? reviewIndex + 1;
   const headRevision = revisions.find((revision) => revision.isHead);
   const isSuperseded = data.prd.supersededAt !== null;
   const allTasks = [...data.tasks, ...data.reviews.flatMap((candidate) => candidate.findings)];
-  const reviewStages = stages.filter(
-    (card) => card.review?.id === review.id || card.id === `rework-${review.id}`,
-  );
 
   return (
     <PageShell>
@@ -126,37 +116,12 @@ function ReviewDetailPage() {
             <PrdHeaderCard prd={data.prd} summary={summary} />
             <ReviewSummaryCard review={review} cycleNumber={cycleNumber} />
 
-            {reviewStages.length > 0 ? (
-              <div
-                onClickCapture={(event) => {
-                  const target = event.target as HTMLElement | null;
-                  const taskId = target?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
-                  if (!taskId) {
-                    return;
-                  }
-
-                  setSelectedTaskId(taskId);
-                }}
-              >
-                <StageTimeline cards={reviewStages} />
-              </div>
-            ) : (
-              <section className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-                  Tasks
-                </p>
-                <Card className="border border-card-border p-4">
-                  <EmptyState message="This review has no findings yet." />
-                </Card>
-              </section>
-            )}
-
-            {review.findings.length > 0 ? (
-              <section className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-                  Findings
-                </p>
-                <Card className="border border-card-border p-4">
+            <section className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                Findings
+              </p>
+              <Card className="border border-card-border p-4">
+                {review.findings.length > 0 ? (
                   <div className="space-y-3">
                     {review.findings.map((finding) => (
                       <button
@@ -183,9 +148,13 @@ function ReviewDetailPage() {
                       </button>
                     ))}
                   </div>
-                </Card>
-              </section>
-            ) : null}
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No findings yet — the audit is still running.
+                  </p>
+                )}
+              </Card>
+            </section>
           </main>
 
           <PrdSidebar

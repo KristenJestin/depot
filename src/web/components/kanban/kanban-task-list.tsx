@@ -1,12 +1,12 @@
 import * as React from "react";
-import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 
-import { StatusDot } from "#/web/components/ui/status-dot";
+import { CollapseChevron } from "#/web/components/ui/collapse-chevron";
 import {
   CollapsiblePanel,
   CollapsibleRoot,
   CollapsibleTrigger,
 } from "#/web/components/ui/collapsible";
+import { TaskIndicator } from "#/web/components/ui/task-indicator";
 import type { BoardCard } from "#/web/lib/prd-view-model";
 
 export function KanbanTaskList({ card }: { card: BoardCard }) {
@@ -32,10 +32,10 @@ export function KanbanTaskList({ card }: { card: BoardCard }) {
           event.preventDefault();
           event.stopPropagation();
         }}
-        className="flex w-full items-center justify-between gap-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="group flex w-full items-center justify-between gap-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <span>Tasks</span>
-        <ChevronDownIcon className="size-4 transition-transform data-[panel-open]:rotate-180" />
+        <CollapseChevron />
       </CollapsibleTrigger>
 
       <CollapsiblePanel
@@ -61,9 +61,9 @@ export function KanbanTaskList({ card }: { card: BoardCard }) {
                   event.preventDefault();
                   event.stopPropagation();
                 }}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                className="group flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                <ChevronRightIcon className="size-3 transition-transform data-[panel-open]:rotate-90" />
+                <CollapseChevron direction="right" size="sm" />
                 <span>{skippedTasks.length} skipped</span>
               </CollapsibleTrigger>
 
@@ -85,30 +85,10 @@ export function KanbanTaskList({ card }: { card: BoardCard }) {
 function KanbanTaskRow({ task }: { task: BoardCard["previewTasks"][number] }) {
   return (
     <div className="flex items-start gap-2 text-xs">
-      <StatusDot tone={mapTaskTone(task.status)} />
+      <TaskIndicator status={task.status} />
       <span className={taskLabelClass(task.status)}>{task.title}</span>
     </div>
   );
-}
-
-function mapTaskTone(status: BoardCard["previewTasks"][number]["status"]) {
-  if (status === "done") {
-    return "done" as const;
-  }
-
-  if (status === "in_progress") {
-    return "active" as const;
-  }
-
-  if (status === "blocked") {
-    return "blocked" as const;
-  }
-
-  if (status === "skipped") {
-    return "skipped" as const;
-  }
-
-  return "pending" as const;
 }
 
 function taskLabelClass(status: BoardCard["previewTasks"][number]["status"]) {

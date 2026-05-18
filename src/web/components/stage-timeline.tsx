@@ -10,12 +10,13 @@ import {
   AccordionTrigger,
 } from "#/web/components/ui/accordion";
 import { Badge } from "#/web/components/ui/badge";
+import { CollapseChevron } from "#/web/components/ui/collapse-chevron";
 import {
   CollapsiblePanel,
   CollapsibleRoot,
   CollapsibleTrigger,
 } from "#/web/components/ui/collapsible";
-import { StatusDot } from "#/web/components/ui/status-dot";
+import { TaskIndicator } from "#/web/components/ui/task-indicator";
 import type { StageCard, StageItem } from "#/web/lib/prd-view-model";
 
 type PhaseState = "pending" | "coding" | "reviewing" | "done";
@@ -82,13 +83,16 @@ function FuturePhases({
       className="border-b border-dashed border-timeline-line pb-3"
     >
       <div>
-        <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 text-left">
           <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Future phases
           </span>
-          <Badge variant="outline">
-            {phases.length} phase{phases.length === 1 ? "" : "s"}
-          </Badge>
+          <span className="flex items-center gap-2 text-muted-foreground">
+            <Badge variant="outline">
+              {phases.length} phase{phases.length === 1 ? "" : "s"}
+            </Badge>
+            <CollapseChevron />
+          </span>
         </CollapsibleTrigger>
       </div>
       <CollapsiblePanel>
@@ -156,7 +160,9 @@ function TimelineCardView({ card, defaultOpen }: { card: TimelineCard; defaultOp
                   </span>
                 ) : null}
               </div>
-              <p className="text-xs text-muted-foreground">{meta}</p>
+              {card.rows.length > 0 ? (
+                <p className="text-xs text-muted-foreground">{meta}</p>
+              ) : null}
             </div>
           </AccordionTrigger>
         </AccordionHeader>
@@ -192,45 +198,43 @@ function TaskGroupView({ group }: { group: TaskGroup }) {
 }
 
 function TaskRow({ row, groupId }: { row: StageItem; groupId: TaskGroup["id"] }) {
+  const isAuditMarker = row.reviewId !== undefined;
+  // Audit markers route clicks to the review drawer instead of the task
+  // drawer — they're a synthetic row, not a real task, and have nothing
+  // useful to show in the task detail view.
+  const dataAttr = isAuditMarker ? { "data-review-id": row.reviewId } : { "data-task-id": row.id };
+
   return (
     <button
       type="button"
-      data-task-id={row.id}
+      {...dataAttr}
       className="grid min-h-9 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 py-1.5 text-left transition-colors hover:bg-panel-muted/60"
       title={row.blockedReason ?? row.skipReason ?? row.title}
     >
       <TaskIndicator status={row.status} />
       <span className={itemTitleClass(row.status)}>{row.title}</span>
       <span className="flex shrink-0 items-center gap-1.5">
-        {row.severity ? (
-          <Badge variant={severityVariant(row.severity)}>{row.severity}</Badge>
-        ) : null}
-        <Badge variant="subtle">{row.effort}</Badge>
-        {groupId !== "blocked" && row.status === "blocked" ? (
-          <Badge variant="statusInProgress">blocked</Badge>
-        ) : null}
-        {groupId !== "skipped" && row.status === "skipped" ? (
-          <Badge variant="outline">skipped</Badge>
-        ) : null}
-        {groupId !== "skipped" && row.status === "stopped" ? (
-          <Badge variant="outline">stopped</Badge>
-        ) : null}
+        {isAuditMarker ? (
+          <Badge variant="subtle">audit</Badge>
+        ) : (
+          <>
+            {row.severity ? (
+              <Badge variant={severityVariant(row.severity)}>{row.severity}</Badge>
+            ) : null}
+            <Badge variant="subtle">{row.effort}</Badge>
+            {groupId !== "blocked" && row.status === "blocked" ? (
+              <Badge variant="statusInProgress">blocked</Badge>
+            ) : null}
+            {groupId !== "skipped" && row.status === "skipped" ? (
+              <Badge variant="outline">skipped</Badge>
+            ) : null}
+            {groupId !== "skipped" && row.status === "stopped" ? (
+              <Badge variant="outline">stopped</Badge>
+            ) : null}
+          </>
+        )}
       </span>
     </button>
-  );
-}
-
-function TaskIndicator({ status }: { status: StageItem["status"] }) {
-  return (
-    <span className="relative flex size-4 shrink-0 items-center justify-center">
-      {status === "in_progress" ? (
-        <span
-          aria-hidden="true"
-          className="absolute inset-0 rounded-full border border-primary/20 border-t-primary animate-spin"
-        />
-      ) : null}
-      <StatusDot tone={mapItemTone(status)} className="mt-0" />
-    </span>
   );
 }
 
@@ -262,11 +266,19 @@ function buildTimelinePhase(id: string, cards: StageCard[]): TimelinePhase {
   const humanReviews = cards.filter(
     (card) => card.kind === "review" && card.reviewType === "human",
   );
+
+  // From the user's POV, agent audits are an implementation detail of the
+  // coder/auditor loop — they don't need their own visual representation.
+  // Their findings are tasks; fold them into the phase work card alongside
+  // base tasks so the timeline reads as "here is the work being done", not
+  // "here is the loop machinery". Human reviews still surface as their own
+  // card because they represent explicit user feedback, not internal audit
+  // cycles.
   const workRows = [
     ...baseCards.flatMap((card) => card.items),
     ...agentReviews.flatMap((card) => card.items),
   ];
-  const future = isFutureTimelinePhase({ baseCards, agentReviews, humanReviews, rows: workRows });
+  const future = isFutureTimelinePhase({ baseCards, humanReviews, rows: workRows });
   const current = cards.some((card) => card.current);
 
   return {
@@ -279,8 +291,8 @@ function buildTimelinePhase(id: string, cards: StageCard[]): TimelinePhase {
       {
         id: `${id}-work`,
         title: phaseWorkTitle(phaseNumber, future),
-        description: workCardDescription(workRows, agentReviews),
-        state: phaseWorkState({ current, future, baseCards, agentReviews, rows: workRows }),
+        description: workCardDescription(workRows),
+        state: phaseWorkState({ current, future, rows: workRows }),
         current: current && !humanReviews.some((review) => review.current),
         future,
         reviewId: null,
@@ -299,7 +311,7 @@ function buildTimelinePhase(id: string, cards: StageCard[]): TimelinePhase {
         rows: review.items,
       })),
     ]
-      .filter((card) => card.rows.length > 0)
+      .filter((card) => card.rows.length > 0 || card.reviewId !== null)
       .sort(compareTimelineCardsDescending),
   };
 }
@@ -318,22 +330,19 @@ function phaseWorkTitle(phaseNumber: number | null, future: boolean): string {
 
 function isFutureTimelinePhase({
   baseCards,
-  agentReviews,
   humanReviews,
   rows,
 }: {
   baseCards: StageCard[];
-  agentReviews: StageCard[];
   humanReviews: StageCard[];
   rows: StageItem[];
 }): boolean {
   return (
     baseCards.length > 0 &&
     baseCards.every((card) => card.future) &&
-    agentReviews.length === 0 &&
     humanReviews.length === 0 &&
     rows.length > 0 &&
-    rows.every((row) => row.status === "pending")
+    rows.every((row) => row.status === "pending" || row.status === "skipped")
   );
 }
 
@@ -405,28 +414,24 @@ function buildTaskGroups(rows: StageItem[]): TaskGroup[] {
 function phaseWorkState({
   current,
   future,
-  baseCards,
-  agentReviews,
   rows,
 }: {
   current: boolean;
   future: boolean;
-  baseCards: StageCard[];
-  agentReviews: StageCard[];
   rows: StageItem[];
 }): PhaseState {
-  if (future || rows.every((row) => row.status === "pending")) {
+  // Treat `skipped` as a non-starting state alongside `pending`: a PRD that
+  // was made ready with some tasks pre-skipped shouldn't flip to "coding"
+  // until something actually runs (`in_progress`, `blocked`, `done`).
+  if (future || rows.every((row) => row.status === "pending" || row.status === "skipped")) {
     return "pending";
   }
 
-  const hasOpenAgentReview = agentReviews.some((card) => card.review?.status !== "done");
-  const hasOpenAuditWork = agentReviews.some((card) => card.items.some((item) => !isClosed(item)));
-  if (hasOpenAgentReview || hasOpenAuditWork) {
-    return "reviewing";
+  if (rows.every((row) => isClosed(row))) {
+    return "done";
   }
 
-  const hasOpenBaseWork = baseCards.some((card) => card.items.some((item) => !isClosed(item)));
-  if (current || hasOpenBaseWork) {
+  if (current || rows.some((row) => !isClosed(row))) {
     return "coding";
   }
 
@@ -465,15 +470,9 @@ function phaseDescription({
   return "Completed work";
 }
 
-function workCardDescription(rows: StageItem[], agentReviews: StageCard[]): string {
+function workCardDescription(rows: StageItem[]): string {
   const taskCount = rows.length;
-  const auditCount = agentReviews.length;
-  const parts = [`${taskCount} task${taskCount === 1 ? "" : "s"}`];
-  if (auditCount > 0) {
-    parts.push(`${auditCount} audit cycle${auditCount === 1 ? "" : "s"}`);
-  }
-
-  return parts.join(" - ");
+  return `${taskCount} task${taskCount === 1 ? "" : "s"}`;
 }
 
 function humanReviewDescription(card: StageCard): string {
@@ -541,30 +540,6 @@ function itemTitleClass(status: StageItem["status"]) {
   }
 
   return "truncate text-sm text-secondary-foreground";
-}
-
-function mapItemTone(status: StageItem["status"]) {
-  if (status === "done") {
-    return "done" as const;
-  }
-
-  if (status === "in_progress") {
-    return "active" as const;
-  }
-
-  if (status === "blocked") {
-    return "blocked" as const;
-  }
-
-  if (status === "skipped") {
-    return "skipped" as const;
-  }
-
-  if (status === "stopped") {
-    return "stopped" as const;
-  }
-
-  return "pending" as const;
 }
 
 function severityVariant(severity: NonNullable<StageItem["severity"]>) {

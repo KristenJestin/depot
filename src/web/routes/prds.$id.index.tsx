@@ -1,6 +1,7 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { LiveActivityPanel } from "#/web/components/live-activity-panel";
 import { PrdHeaderCard } from "#/web/components/prd-header-card";
 import { PrdNoticeBanner } from "#/web/components/prd-notice-banner";
 import { PrdSidebar } from "#/web/components/prd-sidebar";
@@ -122,6 +123,11 @@ function PrdDetailRoute() {
 
             <PrdHeaderCard prd={data.prd} summary={summary} />
             <StageTimeline cards={stages} />
+            <LiveActivityPanel
+              prdStatus={data.prd.status}
+              activity={data.activity}
+              tasks={data.tasks}
+            />
           </main>
 
           <PrdSidebar

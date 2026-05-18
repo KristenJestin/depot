@@ -1,9 +1,10 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRightIcon, ChevronRightIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
+import { CollapseChevron } from "#/web/components/ui/collapse-chevron";
 import {
   CollapsiblePanel,
   CollapsibleRoot,
@@ -151,8 +152,8 @@ function ReviewItem({
       className="border-b border-card-border pb-3 last:border-b-0 last:pb-0"
     >
       <div className="flex w-full items-center justify-between gap-2">
-        <CollapsibleTrigger className="flex flex-1 items-center gap-2 text-left">
-          <ChevronRightIcon className="size-3 transition-transform data-[panel-open]:rotate-90" />
+        <CollapsibleTrigger className="group flex flex-1 items-center gap-2 text-left">
+          <CollapseChevron direction="right" size="sm" />
           <span
             data-review-id={review.id}
             className="text-sm font-semibold text-foreground hover:underline"
@@ -261,6 +262,7 @@ function InfoRows({
   const displayStatus = resolvePrdDisplayStatus(prd, summary.activeReview);
   const rows = [
     ["Status", <StatusBadge key="status" status={displayStatus} />],
+    ["ID", <CopyId key="id" value={prd.id} />],
     [
       "Revision",
       <Badge key="revision" variant="subtle">
@@ -321,6 +323,37 @@ function InfoRows({
         </div>
       ))}
     </div>
+  );
+}
+
+function CopyId({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable (e.g. http context, sandboxed iframe) — fail
+      // quietly. The user can still grab the value from the title attribute.
+    }
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="font-mono text-[11px] text-muted-foreground" title={value}>
+        {value.slice(0, 8)}…
+      </span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label="Copy PRD ID"
+        title={copied ? "Copied" : "Copy PRD ID"}
+        className="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+      </button>
+    </span>
   );
 }
 

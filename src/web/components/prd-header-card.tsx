@@ -1,9 +1,12 @@
 import { Clock3Icon } from "lucide-react";
+import { useState } from "react";
 
 import { AgentBars } from "#/web/components/agent-bars";
 import { Markdown } from "#/web/components/markdown";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
+import { CollapseToggleButton } from "#/web/components/ui/collapse-chevron";
+import { CollapsiblePanel, CollapsibleRoot } from "#/web/components/ui/collapsible";
 import { StatusBadge } from "#/web/components/ui/status-badge";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
 import { resolvePrdDisplayStatus, type DetailSummary } from "#/web/lib/prd-view-model";
@@ -18,46 +21,63 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
   const showActiveFooter = prd.status === "in_progress" && !showReviewFooter;
   const showDoneFooter = prd.status === "done";
   const showCanceledFooter = prd.status === "canceled";
+  const hasSpec = Boolean(prd.context) || Boolean(prd.scope);
+  const [specOpen, setSpecOpen] = useState(true);
 
   return (
     <Card className="gap-0 border border-card-border py-0">
-      <div className="space-y-5 p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-2">
-            <h1
-              className={[
-                "text-3xl font-bold tracking-tight text-foreground",
-                prd.status === "canceled" ? "text-muted-foreground line-through" : undefined,
-              ]
-                .filter(Boolean)
-                .join(" ")}
-            >
-              {prd.title}
-            </h1>
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>Created {formatMetaDate(prd.createdAt)}</span>
-              <span>·</span>
-              <span>Updated {formatMetaDate(prd.updatedAt)}</span>
-              <span>·</span>
-              <span>Rev. {prd.revision}</span>
-              <span>·</span>
-              <span>Audit cycle {prd.auditCycles}</span>
+      <CollapsibleRoot open={specOpen} onOpenChange={setSpecOpen}>
+        <div className="space-y-5 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <h1
+                className={[
+                  "text-3xl font-bold tracking-tight text-foreground",
+                  prd.status === "canceled" ? "text-muted-foreground line-through" : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {prd.title}
+              </h1>
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>Created {formatMetaDate(prd.createdAt)}</span>
+                <span>·</span>
+                <span>Updated {formatMetaDate(prd.updatedAt)}</span>
+                <span>·</span>
+                <span>Rev. {prd.revision}</span>
+                <span>·</span>
+                <span>Audit cycle {prd.auditCycles}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <StatusBadge status={displayStatus} />
+              {isSuperseded && <Badge variant="outline">superseded</Badge>}
+              {hasSpec ? (
+                <CollapseToggleButton ariaLabel={specOpen ? "Collapse spec" : "Expand spec"} />
+              ) : null}
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <StatusBadge status={displayStatus} />
-            {isSuperseded && <Badge variant="outline">superseded</Badge>}
-          </div>
+          {hasSpec ? (
+            <CollapsiblePanel>
+              <div className="space-y-5 pt-1">
+                {prd.context && (
+                  <SpecBlock
+                    label="Context"
+                    value={prd.context}
+                    muted={prd.status === "canceled"}
+                  />
+                )}
+                {prd.scope && (
+                  <SpecBlock label="Scope" value={prd.scope} muted={prd.status === "canceled"} />
+                )}
+              </div>
+            </CollapsiblePanel>
+          ) : null}
         </div>
-
-        {prd.context && (
-          <SpecBlock label="Context" value={prd.context} muted={prd.status === "canceled"} />
-        )}
-        {prd.scope && (
-          <SpecBlock label="Scope" value={prd.scope} muted={prd.status === "canceled"} />
-        )}
-      </div>
+      </CollapsibleRoot>
 
       {showReviewFooter && (
         <Card.Footer className="border-t border-card-border bg-severity-info-soft px-4 py-3 text-xs text-severity-info">

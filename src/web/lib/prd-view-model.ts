@@ -51,6 +51,12 @@ export type StageItem = {
   completedAt: DetailTask["completedAt"];
   blockedReason: DetailTask["blockedReason"];
   skipReason: DetailTask["skipReason"];
+  /**
+   * Set when the item is a synthetic marker for an audit review (not a real
+   * task). The row will route clicks to the review drawer instead of the task
+   * drawer, and the renderer can hide task-specific affordances.
+   */
+  reviewId?: string;
 };
 
 export type StageCard = {
@@ -270,20 +276,76 @@ export function buildStageCards(data: DetailData): StageCard[] {
   const baseTaskCards = buildBaseTaskStageCards(data);
   const reviewCards: StageCard[] = [];
 
+  // For phased PRDs, pin unphased agent reviews to the most plausible phase
+  // so their findings don't pollute an unrelated phase's task list and the
+  // unphased audit doesn't render as a stray "Initial run" section.
+  //
+  // Heuristic: prefer `prd.currentPhase` when set; otherwise the lowest phase
+  // that still has open work (any task not done or skipped). For a PRD with
+  // all phases finished, fall back to the highest phase number so the audit
+  // shows on the last phase the user saw active. Using max(phaseNumbers)
+  // here was wrong — done findings ended up under the not-yet-started phase
+  // 3 instead of the active phase 2.
+  const phaseNumbers = baseTaskCards
+    .map((card) => card.phaseNumber)
+    .filter((n): n is number => n !== null);
+  const isPhased = phaseNumbers.length > 0;
+  const reviewFallbackPhase = isPhased
+    ? (data.prd.currentPhase ?? deriveActivePhase(data.tasks, phaseNumbers))
+    : null;
+
   for (const [index, review] of data.reviews.entries()) {
     const cycleNumber = review.phaseNumber ?? index + 1;
     const findings = review.findings.map((task) =>
       toStageItem(task, data.prd.status === "canceled"),
     );
+    const resolvedPhase =
+      review.phaseNumber ??
+      (review.type === "agent" && reviewFallbackPhase !== null ? reviewFallbackPhase : null);
+
+    // Surface each agent audit as a single synthetic task line ("Agent audit
+    // #N") so the user knows the audit happened without having to read its
+    // findings. Human reviews don't get a marker — they render as their own
+    // "Reviewer feedback" card.
+    const auditMarker: StageItem | null =
+      review.type === "agent"
+        ? {
+            id: `audit-${review.id}`,
+            title: `Agent audit #${cycleNumber}`,
+            status: agentReviewToTaskStatus(review.status),
+            effort: "s",
+            severity: null,
+            createdAt: review.createdAt,
+            startedAt: review.createdAt,
+            completedAt: review.doneAt,
+            blockedReason: null,
+            skipReason: null,
+            reviewId: review.id,
+          }
+        : null;
+
+    // For a properly phased agent audit, findings legitimately belong to the
+    // same phase as the audited work — fold them into the phase work card.
+    // For an UNphased agent audit, findings have no real home: pinning them
+    // to any one phase makes that phase look like it has stray "done" tasks
+    // (the bug repro on the Migration PRD). Hide them from the timeline; the
+    // user can still drill in via the review drawer if they want details.
+    const showFindingsOnTimeline = review.phaseNumber !== null || review.type === "human";
+    const items = auditMarker
+      ? showFindingsOnTimeline
+        ? [auditMarker, ...findings]
+        : [auditMarker]
+      : findings;
+
     const reviewCard: StageCard = {
       id: `review-${review.id}`,
       kind: "review",
       title: `${review.type === "human" ? "Human Review" : "Agent Audit"} #${cycleNumber}`,
       meta: buildReviewMeta(review),
-      items: findings,
+      items,
       review,
       reviewType: review.type,
-      phaseNumber: review.phaseNumber ?? null,
+      phaseNumber: resolvedPhase,
       createdAt: review.createdAt,
       current: false,
       complete: review.status === "done",
@@ -406,22 +468,27 @@ function combineStageCards(baseTaskCards: StageCard[], reviewCards: StageCard[])
 }
 
 function markCurrentStage(cards: StageCard[], data: DetailData): void {
-  const activeReview = [...data.reviews].reverse().find((review) => review.status !== "done");
-  const activeReviewCard = activeReview
-    ? cards.find((card) => card.review?.id === activeReview.id)
+  // Only HUMAN reviews can pre-empt the active phase: a human review in
+  // flight is a real handoff that the user has to act on, so it should be
+  // the visual anchor. Agent audits are background work — they don't change
+  // where the timeline points to.
+  const activeHumanReview = [...data.reviews]
+    .reverse()
+    .find((review) => review.status !== "done" && review.type === "human");
+  const activeReviewCard = activeHumanReview
+    ? cards.find((card) => card.review?.id === activeHumanReview.id)
     : null;
   if (activeReviewCard) {
     activeReviewCard.current = true;
     return;
   }
 
-  if (
-    data.prd.status !== "done" &&
-    data.prd.status !== "canceled" &&
-    data.prd.currentPhase !== null &&
-    data.prd.currentPhase !== undefined
-  ) {
-    const currentPhaseCard = cards.find((card) => card.phaseNumber === data.prd.currentPhase);
+  if (data.prd.status !== "done" && data.prd.status !== "canceled") {
+    // Pre-activation PRDs don't have a real `currentPhase` yet — treat the
+    // first phase as the implicit "next to run" so it surfaces as the active
+    // phase instead of being lost in the timeline ordering.
+    const targetPhase = data.prd.currentPhase ?? 1;
+    const currentPhaseCard = cards.find((card) => card.phaseNumber === targetPhase);
     if (currentPhaseCard) {
       currentPhaseCard.current = true;
       return;
@@ -445,13 +512,17 @@ function orderStageCards(cards: StageCard[]): StageCard[] {
 }
 
 function isFuturePhase(prd: DetailPrd, phaseNumber: number): boolean {
-  return (
-    prd.currentPhase !== null &&
-    prd.currentPhase !== undefined &&
-    phaseNumber > prd.currentPhase &&
-    prd.status !== "done" &&
-    prd.status !== "canceled"
-  );
+  if (prd.status === "done" || prd.status === "canceled") {
+    return false;
+  }
+  // Once activated, only phases strictly after the current one are future.
+  if (prd.currentPhase !== null && prd.currentPhase !== undefined) {
+    return phaseNumber > prd.currentPhase;
+  }
+  // Pre-activation (draft / ready): phase 1 is the implicit "next current",
+  // everything beyond it is future and should fold into the "Future phases"
+  // collapsible instead of cluttering the timeline.
+  return phaseNumber > 1;
 }
 
 export function buildRevisionEntries(data: DetailData): RevisionEntry[] {
@@ -502,6 +573,41 @@ function buildCurrentCycleLabel({
   }
 
   return "Initial run";
+}
+
+function deriveActivePhase(tasks: DetailTask[], phaseNumbers: number[]): number {
+  const sorted = [...phaseNumbers].sort((a, b) => a - b);
+  // Prefer a phase that is mid-flight (has in_progress or blocked work).
+  for (const phase of [...sorted].reverse()) {
+    const isMidFlight = tasks.some(
+      (t) =>
+        t.phaseNumber === phase &&
+        t.reviewId === null &&
+        (t.status === "in_progress" || t.status === "blocked"),
+    );
+    if (isMidFlight) return phase;
+  }
+  // Otherwise pick the highest phase whose work has at least been started or
+  // finished — that's the most recently active phase. An unphased audit is
+  // most plausibly about *that* work, not the next pending phase.
+  for (const phase of [...sorted].reverse()) {
+    const hasTouchedWork = tasks.some(
+      (t) =>
+        t.phaseNumber === phase &&
+        t.reviewId === null &&
+        (t.status === "done" || t.status === "skipped"),
+    );
+    if (hasTouchedWork) return phase;
+  }
+  // Nothing started yet — point at the first phase (the one that will start
+  // first when the PRD activates).
+  return sorted[0] ?? 1;
+}
+
+function agentReviewToTaskStatus(status: DetailReview["status"]): StageItem["status"] {
+  if (status === "done") return "done";
+  if (status === "in_progress") return "in_progress";
+  return "pending";
 }
 
 function toStageItem(task: DetailTask, canceled: boolean): StageItem {
