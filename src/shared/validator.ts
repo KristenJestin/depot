@@ -21,10 +21,14 @@ export type PrdStatus = (typeof VALID_PRD_STATUSES)[number];
 // first-class state. From `review` the human can either approve straight
 // to `done`, or feedback flips the PRD back to `in_progress` so the dev
 // orchestrator can spawn the next coder pass.
+// `in_progress → done` is intentionally NOT allowed: the human-validation
+// gate (`review`) must be crossed before any PRD can ship. The dev
+// orchestrator opens the gate via `depot prd request-review`, and only the
+// user's approval (via `depot prd done` on a review-state PRD) marks it done.
 export const VALID_PRD_TRANSITIONS: Record<PrdStatus, PrdStatus[]> = {
   draft: ["ready", "canceled"],
   ready: ["in_progress", "canceled"],
-  in_progress: ["review", "done", "canceled"],
+  in_progress: ["review", "canceled"],
   review: ["in_progress", "done", "canceled"],
   done: [],
   canceled: [],

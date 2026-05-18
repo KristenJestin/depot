@@ -125,6 +125,8 @@ describe("e2e prd lifecycle", () => {
     const review = await runE(Reviews.createReview({ prdRevisionId: prd.id, type: "agent" }));
     await runE(Reviews.startReview(review.id));
 
+    // Open the review gate so phaseAdvance reaches its invariant checks.
+    await runE(Prds.requestReviewPrd(prd.id));
     await expect(runE(Prds.phaseAdvance(prd.id))).rejects.toThrow(
       /review .* is still 'in_progress'/i,
     );
@@ -175,6 +177,7 @@ describe("e2e prd lifecycle", () => {
     );
     await runE(Reviews.doneReview(review.id));
 
+    await runE(Prds.requestReviewPrd(prd.id));
     await expect(runE(Prds.phaseAdvance(prd.id))).rejects.toThrow(
       new RegExp(
         `review task 'Fix regression' \\(${finding.id}\\) in review ${review.id} is still 'pending'`,
@@ -215,6 +218,7 @@ describe("e2e prd lifecycle", () => {
 
     await runE(Prds.activatePrd(prd.id, workspace.id));
 
+    await runE(Prds.requestReviewPrd(prd.id));
     await expect(runE(Prds.phaseAdvance(prd.id))).rejects.toThrow(
       /task 'Phase 1 task'.* is still 'pending'/i,
     );
@@ -377,6 +381,9 @@ describe("e2e prd lifecycle", () => {
     await runE(Tasks.completeTask(phase1Finding.id));
     await runE(Reviews.doneReview(phase1Review.id));
 
+    // Open the human-review gate, then advance — `phaseAdvance` now flips
+    // back to `in_progress` itself when there's a next phase.
+    await runE(Prds.requestReviewPrd(prd.id));
     const advanced = await runE(Prds.phaseAdvance(prd.id));
     expect(advanced.advanced).toBe(true);
     expect(advanced.prd.currentPhase).toBe(2);
@@ -391,6 +398,7 @@ describe("e2e prd lifecycle", () => {
     expect(donePhase2Review.status).toBe("done");
     expect(donePhase2Review.phaseNumber).toBe(2);
 
+    await runE(Prds.requestReviewPrd(prd.id));
     const closed = await runE(Prds.phaseAdvance(prd.id));
     expect(closed.advanced).toBe(false);
     expect(closed.prd.status).toBe("done");
@@ -447,6 +455,9 @@ describe("e2e prd lifecycle", () => {
     const doneTask2 = await runE(Tasks.completeTask(tasks[1]!.id));
     expect(doneTask2.status).toBe("done");
 
+    // PRDs must cross the human-review gate before closing — `in_progress →
+    // done` is no longer a legal transition.
+    await runE(Prds.requestReviewPrd(prd.id));
     const donePrd = await runE(Prds.donePrd(prd.id));
     expect(donePrd.status).toBe("done");
 

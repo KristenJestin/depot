@@ -262,6 +262,26 @@ export const startTask = (id: string) =>
     const task = yield* getTask(id);
     if (!task) return yield* Effect.fail(new TaskNotFoundError({ id }));
     yield* checkTaskTransition(task.status, "in_progress");
+
+    // Phase gate: a base task (not a review finding) on a multi-phase PRD
+    // cannot start ahead of the PRD's currentPhase. Audit findings (reviewId
+    // set) are part of the current phase's review loop and aren't gated by
+    // phase-advance — they're free to run regardless.
+    const prd = yield* getPrd(task.prdRevisionId);
+    if (
+      prd &&
+      task.reviewId === null &&
+      task.phaseNumber !== null &&
+      prd.currentPhase !== null &&
+      task.phaseNumber > prd.currentPhase
+    ) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Cannot start task '${task.title}' (${task.id}): it is in phase ${task.phaseNumber} but the PRD is on phase ${prd.currentPhase}. Open the review gate (depot prd request-review ${prd.id}) and advance (depot prd phase-advance ${prd.id}) first.`,
+        }),
+      );
+    }
+
     const rows = yield* dbQuery(() =>
       db
         .update(tasks)
@@ -269,7 +289,6 @@ export const startTask = (id: string) =>
         .where(eq(tasks.id, id))
         .returning(),
     );
-    const prd = yield* getPrd(task.prdRevisionId);
     if (prd) {
       yield* logActivity({
         projectId: prd.projectId,

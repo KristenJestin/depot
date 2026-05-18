@@ -29,6 +29,7 @@ import {
   loadPrd,
   reloadPrd,
   phaseAdvance,
+  requestReviewPrd,
   createTask,
   startTask,
   completeTask,
@@ -444,6 +445,9 @@ describe("PRD lifecycle", () => {
     const prd = await createPrd(db, { projectId, title: "My PRD" });
     await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
     await activatePrd(db, prd.id, workspaceId);
+    // Reach `done` via the human-review gate — `in_progress → done` is no
+    // longer a legal transition.
+    await requestReviewPrd(db, prd.id);
     await donePrd(db, prd.id);
     const log = await listActivity(db, { projectId });
     const entry = log.find((e) => e.eventType === "prd_done");
@@ -1254,6 +1258,8 @@ describe("phaseAdvance activity log", () => {
     await startTask(db, phase1Task.id);
     await completeTask(db, phase1Task.id);
 
+    // phaseAdvance now requires the human-review gate to be open first.
+    await requestReviewPrd(db, rev.id);
     await phaseAdvance(db, rev.id);
 
     const activity = await listActivityForRevision(db, rev.id);

@@ -1186,6 +1186,20 @@ const closeCommand = command({
       );
     }
 
+    // `donePrd` only accepts `review` as source now (the human-review gate
+    // is mandatory). `close` is the convenience wrapper that walks the whole
+    // path — activate (if needed) → request-review → done — in one shot so
+    // that small wrap-up PRDs don't have to spell out every transition.
+    if (activated.status === "in_progress") {
+      const reviewed = await runEffect(
+        DomainPrds.requestReviewPrd(activated.id).pipe(
+          Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
+        ),
+      );
+      if (!reviewed) return output.error("not_found", `PRD not found: ${args.prdId}`);
+      activated = reviewed;
+    }
+
     const updated = await runEffect(
       DomainPrds.donePrd(activated.id).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),

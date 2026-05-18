@@ -82,11 +82,10 @@ describe("PRD workflow", () => {
     await expect(markPrdReady(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
   });
 
-  it("marks an in_progress PRD as done", async () => {
+  it("rejects donePrd from in_progress — must cross the review gate first", async () => {
     const prd = await createPrd(db, { projectId, title: "PRD" });
     await db.update(prdRevisions).set({ status: "in_progress" }).where(eq(prdRevisions.id, prd.id));
-    const done = await donePrd(db, prd.id);
-    expect(done.status).toBe("done");
+    await expect(donePrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
   });
 
   it("rejects donePrd on non-in_progress PRD", async () => {
@@ -131,6 +130,130 @@ describe("PRD workflow", () => {
     const prd = await createPrd(db, { projectId, title: "PRD" });
     await db.update(prdRevisions).set({ status: "in_progress" }).where(eq(prdRevisions.id, prd.id));
     await expect(resumePrd(db, prd.id)).rejects.toThrow(/invalid prd transition/i);
+  });
+
+  it("rejects phaseAdvance from in_progress with a hint to open the review gate", async () => {
+    const { phaseAdvance, loadPrd, activatePrd, startTask, completeTask, listTasks } =
+      await import("#/lib/workflow");
+    const project = await createProject(db, { name: "phase-gate-test" });
+    const ws = await addWorkspace(db, {
+      projectId: project.id,
+      label: "main",
+      path: "/tmp/phase-gate-test",
+    });
+    const { prd: rev } = await loadPrd(db, {
+      projectId: project.id,
+      title: "Phased PRD",
+      ready: true,
+      tasks: [
+        {
+          title: "P1",
+          description: "Phase 1 work",
+          doneCriteria: "done",
+          effort: "s",
+          dependsOn: [],
+          phaseNumber: 1,
+        },
+        {
+          title: "P2",
+          description: "Phase 2 work",
+          doneCriteria: "done",
+          effort: "s",
+          dependsOn: [],
+          phaseNumber: 2,
+        },
+      ],
+    });
+    await activatePrd(db, rev.id, ws.id);
+    const p1 = (await listTasks(db, rev.id)).find((t) => t.phaseNumber === 1)!;
+    await startTask(db, p1.id);
+    await completeTask(db, p1.id);
+
+    // PRD is still in_progress — phaseAdvance must reject and hint at the
+    // request-review command.
+    await expect(phaseAdvance(db, rev.id)).rejects.toThrow(/not in 'review'.*request-review/i);
+  });
+
+  it("flips a review PRD back to in_progress when phaseAdvance moves to the next phase", async () => {
+    const { phaseAdvance, loadPrd, activatePrd, startTask, completeTask, listTasks } =
+      await import("#/lib/workflow");
+    const project = await createProject(db, { name: "phase-flip-test" });
+    const ws = await addWorkspace(db, {
+      projectId: project.id,
+      label: "main",
+      path: "/tmp/phase-flip-test",
+    });
+    const { prd: rev } = await loadPrd(db, {
+      projectId: project.id,
+      title: "Phased PRD",
+      ready: true,
+      tasks: [
+        {
+          title: "P1",
+          description: "Phase 1",
+          doneCriteria: "done",
+          effort: "s",
+          dependsOn: [],
+          phaseNumber: 1,
+        },
+        {
+          title: "P2",
+          description: "Phase 2",
+          doneCriteria: "done",
+          effort: "s",
+          dependsOn: [],
+          phaseNumber: 2,
+        },
+      ],
+    });
+    await activatePrd(db, rev.id, ws.id);
+    const p1 = (await listTasks(db, rev.id)).find((t) => t.phaseNumber === 1)!;
+    await startTask(db, p1.id);
+    await completeTask(db, p1.id);
+    await requestReviewPrd(db, rev.id);
+
+    const advanced = await phaseAdvance(db, rev.id);
+    expect(advanced.advanced).toBe(true);
+    expect(advanced.prd.status).toBe("in_progress");
+    expect(advanced.prd.currentPhase).toBe(2);
+  });
+
+  it("rejects starting a base task ahead of currentPhase", async () => {
+    const { loadPrd, activatePrd, startTask, listTasks } = await import("#/lib/workflow");
+    const project = await createProject(db, { name: "task-phase-gate" });
+    const ws = await addWorkspace(db, {
+      projectId: project.id,
+      label: "main",
+      path: "/tmp/task-phase-gate",
+    });
+    const { prd: rev } = await loadPrd(db, {
+      projectId: project.id,
+      title: "Phased PRD",
+      ready: true,
+      tasks: [
+        {
+          title: "P1",
+          description: "Phase 1",
+          doneCriteria: "done",
+          effort: "s",
+          dependsOn: [],
+          phaseNumber: 1,
+        },
+        {
+          title: "P2",
+          description: "Phase 2",
+          doneCriteria: "done",
+          effort: "s",
+          dependsOn: [],
+          phaseNumber: 2,
+        },
+      ],
+    });
+    await activatePrd(db, rev.id, ws.id);
+    const p2 = (await listTasks(db, rev.id)).find((t) => t.phaseNumber === 2)!;
+
+    // Trying to skip ahead — should fail.
+    await expect(startTask(db, p2.id)).rejects.toThrow(/in phase 2 but the PRD is on phase 1/i);
   });
 
   it("forks a ready PRD into a new draft revision", async () => {

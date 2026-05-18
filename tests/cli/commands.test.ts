@@ -1521,13 +1521,16 @@ describe("CLI commands", () => {
       expect(updated!.status).toBe("ready");
     });
 
-    it("prd done marks an in_progress PRD as done", async () => {
+    it("prd done marks a PRD as done from the review state", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const doneCommand = await getSubCommand(prdCommand, "done");
 
       const prd = await createPrd(db, { projectId, title: "Lifecycle PRD" });
       await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
       await activatePrd(db, prd.id, workspaceId);
+      // PRDs must cross the human-review gate before closing.
+      const { requestReviewPrd } = await import("#/lib/workflow");
+      await requestReviewPrd(db, prd.id);
 
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
       await doneCommand.run({ args: { prdId: prd.id } });

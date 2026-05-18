@@ -726,10 +726,18 @@ export const phaseAdvance = (id: string) =>
     const rev = yield* getPrd(id);
     if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
 
-    if (rev.status !== "in_progress") {
+    // Phase advance is the user-approval gate: it must fire from `review`
+    // status (the orchestrator opens that gate via `prd request-review` once
+    // the current phase's coder + auditor passes are wrapped up). Advancing
+    // straight from `in_progress` would skip the human handoff entirely.
+    if (rev.status !== "review") {
+      const hint =
+        rev.status === "in_progress"
+          ? ` Open the human-review gate first with: depot prd request-review ${id}`
+          : "";
       return yield* Effect.fail(
         new ValidationError({
-          reason: `PRD ${id} is not in_progress (status: '${rev.status}'). Phase advance is only allowed for active PRDs.`,
+          reason: `PRD ${id} is not in 'review' (status: '${rev.status}'). Phase advance can only fire after the human-review gate has been opened.${hint}`,
         }),
       );
     }
@@ -793,10 +801,12 @@ export const phaseAdvance = (id: string) =>
     );
 
     if (nextPhaseTasks.length > 0) {
+      // User approved this phase's work — flip back to in_progress AND bump
+      // currentPhase so the orchestrator can spawn the next coder pass.
       const rows = yield* dbQuery(() =>
         db
           .update(prdRevisions)
-          .set({ currentPhase: currentPhase + 1 })
+          .set({ status: "in_progress", currentPhase: currentPhase + 1 })
           .where(eq(prdRevisions.id, id))
           .returning(),
       );

@@ -97,13 +97,25 @@ If the auditor reports findings, continue the loop through a review-driven coder
 
 ### 4. Human Validation Loop
 
-When the auditor reports back (with or without findings), the PRD is now blocked on a human. **Always** mark this explicitly so the kanban surfaces it correctly:
+**Lifecycle contract — the system enforces this, you can't skip it:**
+
+```
+in_progress ──(request-review)──► review ──(phase-advance OR done)──► next phase / done
+                                    ▲                                          │
+                                    └──────── (resume OR feedback rework) ─────┘
+```
+
+- `in_progress → done` is **rejected** by the validator. You MUST cross `review` to close a PRD.
+- `phase-advance` is **rejected** unless the PRD is in `review`. Open the gate first.
+- Starting a task whose `phaseNumber > currentPhase` is **rejected**. Advance the phase first.
+
+So after every coder + auditor pass:
 
 ```
 depot prd request-review <prd-id> [--reason "<short context>"]
 ```
 
-This transitions the PRD from `in_progress` → `review` and emits a `prd_review_requested` event. The dashboard immediately moves the card into the **Review** column. Do this even when you expect the user to approve trivially — the explicit gate is the contract.
+This transitions the PRD from `in_progress` → `review` and emits a `prd_review_requested` event. The dashboard immediately moves the card into the **Review** column. Do this even when you expect the user to approve trivially — the explicit gate is the contract AND the only way the next step (advance / done) will be accepted.
 
 Then ask the user for validation.
 
@@ -185,25 +197,25 @@ Never inject new PRD tasks into an active revision. The phases served their purp
 
 ## Phase Advance (multi-phase PRDs)
 
-When the coder finishes a phase, run the human review loop (section 4 above), then advance the phase:
+When the coder finishes a phase, run the human review loop (section 4 above) — `request-review` flips the PRD to `review` — then advance the phase:
 
 ```
 depot prd phase-advance <prd-id>
 ```
 
-The command refuses to advance if any task or review for the current phase is still open. After advancing, re-launch the coder sub-agent for the new phase with `depot context coder <prd-id>`.
+The command refuses to advance if (a) the PRD is not in `review`, (b) any task for the current phase is still open, or (c) any review for the current phase is still open. After advancing, the PRD flips back to `in_progress` with `currentPhase + 1`; re-launch the coder sub-agent for the new phase with `depot context coder <prd-id>`.
 
-When the last phase completes, `phase-advance` marks the PRD as `done` automatically.
+When the last phase completes, `phase-advance` marks the PRD as `done` automatically (same gate: must be in `review` first).
 
 ## Closing the PRD
 
-When the user approves, mark the PRD done with traceable approval:
+When the user approves, mark the PRD done with traceable approval (the PRD MUST be in `review` first — open the gate via `prd request-review` if it isn't):
 
 ```
 depot prd done <prd-id> --approved-by <user> --comment "<rationale>"
 ```
 
-For a `ready` PRD that doesn't need active execution (e.g. a small PRD activated only to record completion):
+For a `ready` PRD that doesn't need active execution (e.g. a small PRD activated only to record completion), `prd close` walks the whole path (activate → request-review → done) in one step:
 
 ```
 depot prd close <prd-id> --approved-by <user> --comment "<rationale>"
