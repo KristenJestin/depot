@@ -6,6 +6,9 @@ import { normalizeWorkspacePath } from "#/shared/utils";
 import type { Database } from "#/db/client";
 import type { Variables } from "./types";
 import { prdsRoutes } from "./prds";
+import { pendingActionsRoutes } from "./pending-actions";
+import { projectsRoutes } from "./projects";
+import { docsRoutes } from "./docs";
 
 // Cookie used to remember the user's selected workspace across browser
 // sessions and server restarts. Storing it server-readable lets every
@@ -137,7 +140,10 @@ const app = new Hono<{ Variables: Variables }>()
     return c.json({ events }, 200);
   })
   .get("/sessions/current", (c) => c.json({ session: null }, 200))
-  .route("/", prdsRoutes);
+  .route("/", prdsRoutes)
+  .route("/", pendingActionsRoutes)
+  .route("/", projectsRoutes)
+  .route("/", docsRoutes);
 
 export type AppType = typeof app;
 export default app;

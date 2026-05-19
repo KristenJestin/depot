@@ -6,9 +6,9 @@ export const contextCommand = command({
   meta: { name: "context", description: "Emit static agent context for the current workspace" },
   args: {
     mode: {
-      schema: Schema.Literal("prd", "dev", "coder", "auditor"),
+      schema: Schema.Literal("prd", "dev", "coder", "auditor", "doc", "ship"),
       positional: true,
-      description: "Context mode (prd/dev/coder/auditor)",
+      description: "Context mode (prd/dev/coder/auditor/doc/ship)",
     },
     prdTarget: {
       schema: Schema.String,
@@ -20,6 +20,11 @@ export const contextCommand = command({
       schema: Schema.String,
       description: "Review ID to embed in the header (coder mode only)",
     },
+    axis: {
+      schema: Schema.Literal("standards", "spec"),
+      description:
+        "Auditor axis (auditor mode only). Required: the dev orchestrator spawns one auditor per axis.",
+    },
   },
   run: async ({ args, output }) => {
     if (output.isJson()) {
@@ -30,10 +35,19 @@ export const contextCommand = command({
     }
 
     const mode = args.mode;
+
+    if (mode === "auditor" && !args.axis) {
+      return output.error(
+        "missing_axis",
+        "depot context auditor requires --axis standards|spec. The dev orchestrator spawns one auditor per axis in parallel.",
+      );
+    }
+
     const lines: string[] = [];
 
     const modeLabel = mode ? mode.toUpperCase() : "CONTEXT";
-    lines.push(`=== DEPOT CONTEXT — ${modeLabel} ===`);
+    const axisLabel = args.axis ? ` (${args.axis.toUpperCase()})` : "";
+    lines.push(`=== DEPOT CONTEXT — ${modeLabel}${axisLabel} ===`);
 
     if (args.prdTarget) {
       lines.push(`PRD     : ${args.prdTarget}`);
@@ -43,7 +57,11 @@ export const contextCommand = command({
       lines.push(`Review  : ${args.review}`);
     }
 
-    if (args.prdTarget || args.review) {
+    if (args.axis) {
+      lines.push(`Axis    : ${args.axis}`);
+    }
+
+    if (args.prdTarget || args.review || args.axis) {
       lines.push("");
     }
 

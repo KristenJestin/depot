@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { prds, prdRevisions, tasks } from "#/db/schema";
+import { prds, prdRevisions, prdPhaseSnapshots, tasks } from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
 import { VALID_PRD_TRANSITIONS, type PrdStatus, type Effort } from "#/shared/validator";
@@ -15,6 +15,8 @@ import {
 } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { logActivity } from "#/modules/activity/domain";
+import { assertWorkspaceInProject } from "#/lib/cross-entity";
+import { captureSha } from "#/lib/git";
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -184,6 +186,11 @@ export const activatePrd = (id: string, workspaceId: string) =>
     const rev = yield* getPrd(id);
     if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
 
+    // Refuse to attach a PRD to a workspace from a different project — this
+    // is the silent-corruption path that previously slipped through and got
+    // detected only when callers later tried to write activity_log rows.
+    const workspace = yield* assertWorkspaceInProject(workspaceId, rev.projectId);
+
     const activePrd = yield* dbQuery(() =>
       db.query.prdRevisions.findFirst({ where: { workspaceId, status: "in_progress" } }),
     );
@@ -195,10 +202,17 @@ export const activatePrd = (id: string, workspaceId: string) =>
 
     yield* checkPrdTransition(rev.status, "in_progress");
 
+    const sha = yield* captureSha(workspace.path);
+
     const rows = yield* dbQuery(() =>
       db
         .update(prdRevisions)
-        .set({ status: "in_progress", workspaceId, activatedAt: new Date() })
+        .set({
+          status: "in_progress",
+          workspaceId,
+          activatedAt: new Date(),
+          ...(sha ? { activatedAtSha: sha } : {}),
+        })
         .where(eq(prdRevisions.id, id))
         .returning(),
     );
@@ -208,7 +222,7 @@ export const activatePrd = (id: string, workspaceId: string) =>
       workspaceId,
       prdRevisionId: id,
       eventType: "prd_activated",
-      payload: { prdRevisionId: id, title: rev.title },
+      payload: { prdRevisionId: id, title: rev.title, ...(sha ? { sha } : {}) },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
 
     return rows[0]!;
@@ -242,15 +256,29 @@ export const donePrd = (id: string) =>
     const rev = yield* getPrd(id);
     if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
     yield* checkPrdTransition(rev.status, "done");
+
+    // Capture the done SHA — best-effort; never blocks the transition.
+    let sha: string | null = null;
+    if (rev.workspaceId) {
+      const ws = yield* dbQuery(() =>
+        db.query.workspaces.findFirst({ where: { id: rev.workspaceId! } }),
+      );
+      if (ws) sha = yield* captureSha(ws.path);
+    }
+
     const rows = yield* dbQuery(() =>
-      db.update(prdRevisions).set({ status: "done" }).where(eq(prdRevisions.id, id)).returning(),
+      db
+        .update(prdRevisions)
+        .set({ status: "done", ...(sha ? { doneAtSha: sha } : {}) })
+        .where(eq(prdRevisions.id, id))
+        .returning(),
     );
     yield* logActivity({
       projectId: rev.projectId,
       workspaceId: rev.workspaceId ?? undefined,
       prdRevisionId: id,
       eventType: "prd_done",
-      payload: { prdRevisionId: id, title: rev.title },
+      payload: { prdRevisionId: id, title: rev.title, ...(sha ? { sha } : {}) },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
@@ -800,6 +828,19 @@ export const phaseAdvance = (id: string) =>
       }),
     );
 
+    // Capture SHA for the phase snapshot (best-effort).
+    let sha: string | null = null;
+    if (rev.workspaceId) {
+      const ws = yield* dbQuery(() =>
+        db.query.workspaces.findFirst({ where: { id: rev.workspaceId! } }),
+      );
+      if (ws) sha = yield* captureSha(ws.path);
+    }
+
+    // Upsert the phase snapshot. Re-running phaseAdvance on the same phase
+    // is rare but harmless — we update the SHA in place.
+    yield* upsertPhaseSnapshot(id, currentPhase, { advancedAtSha: sha });
+
     if (nextPhaseTasks.length > 0) {
       // User approved this phase's work — flip back to in_progress AND bump
       // currentPhase so the orchestrator can spawn the next coder pass.
@@ -815,29 +856,220 @@ export const phaseAdvance = (id: string) =>
         workspaceId: rev.workspaceId ?? undefined,
         prdRevisionId: id,
         eventType: "phase_advanced",
-        payload: { prdRevisionId: id, fromPhase: currentPhase, toPhase: currentPhase + 1 },
+        payload: {
+          prdRevisionId: id,
+          fromPhase: currentPhase,
+          toPhase: currentPhase + 1,
+          ...(sha ? { sha } : {}),
+        },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       return { prd: rows[0]!, advanced: true as const };
     } else {
       const rows = yield* dbQuery(() =>
-        db.update(prdRevisions).set({ status: "done" }).where(eq(prdRevisions.id, id)).returning(),
+        db
+          .update(prdRevisions)
+          .set({ status: "done", ...(sha ? { doneAtSha: sha } : {}) })
+          .where(eq(prdRevisions.id, id))
+          .returning(),
       );
       yield* logActivity({
         projectId: rev.projectId,
         workspaceId: rev.workspaceId ?? undefined,
         prdRevisionId: id,
         eventType: "phase_advanced",
-        payload: { prdRevisionId: id, fromPhase: currentPhase, toPhase: undefined },
+        payload: {
+          prdRevisionId: id,
+          fromPhase: currentPhase,
+          toPhase: undefined,
+          ...(sha ? { sha } : {}),
+        },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       yield* logActivity({
         projectId: rev.projectId,
         workspaceId: rev.workspaceId ?? undefined,
         prdRevisionId: id,
         eventType: "prd_done",
-        payload: { prdRevisionId: id, title: rev.title },
+        payload: { prdRevisionId: id, title: rev.title, ...(sha ? { sha } : {}) },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       return { prd: rows[0]!, advanced: false as const };
     }
+  });
+
+// ── Phase snapshots ───────────────────────────────────────────────────────────
+
+export const upsertPhaseSnapshot = (
+  prdRevisionId: string,
+  phaseNumber: number,
+  patch: {
+    advancedAtSha?: string | null;
+    reviewBrief?: string | null;
+    suggestedCommitMessage?: string | null;
+  },
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const existing = yield* dbQuery(() =>
+      db.query.prdPhaseSnapshots.findFirst({ where: { prdRevisionId, phaseNumber } }),
+    );
+    if (existing) {
+      const rows = yield* dbQuery(() =>
+        db
+          .update(prdPhaseSnapshots)
+          .set({
+            advancedAtSha:
+              patch.advancedAtSha !== undefined ? patch.advancedAtSha : existing.advancedAtSha,
+            reviewBrief: patch.reviewBrief !== undefined ? patch.reviewBrief : existing.reviewBrief,
+            suggestedCommitMessage:
+              patch.suggestedCommitMessage !== undefined
+                ? patch.suggestedCommitMessage
+                : existing.suggestedCommitMessage,
+          })
+          .where(eq(prdPhaseSnapshots.id, existing.id))
+          .returning(),
+      );
+      return rows[0]!;
+    }
+    const rows = yield* dbQuery(() =>
+      db
+        .insert(prdPhaseSnapshots)
+        .values({
+          id: generateId(),
+          prdRevisionId,
+          phaseNumber,
+          advancedAtSha: patch.advancedAtSha ?? null,
+          advancedAt: new Date(),
+          reviewBrief: patch.reviewBrief ?? null,
+          suggestedCommitMessage: patch.suggestedCommitMessage ?? null,
+        })
+        .returning(),
+    );
+    return rows[0]!;
+  });
+
+export const getPhaseSnapshot = (prdRevisionId: string, phaseNumber: number) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const row = yield* dbQuery(() =>
+      db.query.prdPhaseSnapshots.findFirst({ where: { prdRevisionId, phaseNumber } }),
+    );
+    return row ?? null;
+  });
+
+export const listPhaseSnapshots = (prdRevisionId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    return yield* dbQuery(() =>
+      db.query.prdPhaseSnapshots.findMany({
+        where: { prdRevisionId },
+        orderBy: { phaseNumber: "asc" },
+      }),
+    );
+  });
+
+/**
+ * Capture the merge-commit SHA on the base branch (post-squash). Surviving
+ * the squash that GC'd the feature-branch HEAD requires anchoring the diff
+ * range to a commit that actually lives on `baseBranch`.
+ */
+export const captureMergeSha = (id: string, sha: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    const rows = yield* dbQuery(() =>
+      db.update(prdRevisions).set({ mergedAtSha: sha }).where(eq(prdRevisions.id, id)).returning(),
+    );
+    yield* logActivity({
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId: id,
+      eventType: "note",
+      payload: { message: `Captured merge SHA: ${sha}` },
+      source: "ai",
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return rows[0]!;
+  });
+
+export const updateSuggestedCommitMessage = (id: string, message: string | null) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    const rows = yield* dbQuery(() =>
+      db
+        .update(prdRevisions)
+        .set({ suggestedCommitMessage: message })
+        .where(eq(prdRevisions.id, id))
+        .returning(),
+    );
+    yield* logActivity({
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId: id,
+      eventType: "prd_updated",
+      payload: {
+        prdRevisionId: id,
+        title: rev.title,
+        fields: ["suggestedCommitMessage"],
+      },
+      source: "ai",
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return rows[0]!;
+  });
+
+export const updatePrdSections = (
+  id: string,
+  changes: {
+    problem?: string | null;
+    solution?: string | null;
+    implementationDecisions?: string | null;
+    testingDecisions?: string | null;
+  },
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+    if (rev.status !== "draft") {
+      return yield* Effect.fail(new PrdNotDraftError({ id, status: rev.status }));
+    }
+    const fields: string[] = [];
+    if (changes.problem !== undefined) fields.push("problem");
+    if (changes.solution !== undefined) fields.push("solution");
+    if (changes.implementationDecisions !== undefined) fields.push("implementationDecisions");
+    if (changes.testingDecisions !== undefined) fields.push("testingDecisions");
+    if (fields.length === 0) {
+      return yield* Effect.fail(
+        new DatabaseError({ cause: new Error("No PRD section changes provided") }),
+      );
+    }
+    const rows = yield* dbQuery(() =>
+      db
+        .update(prdRevisions)
+        .set({
+          problem: changes.problem !== undefined ? changes.problem : rev.problem,
+          solution: changes.solution !== undefined ? changes.solution : rev.solution,
+          implementationDecisions:
+            changes.implementationDecisions !== undefined
+              ? changes.implementationDecisions
+              : rev.implementationDecisions,
+          testingDecisions:
+            changes.testingDecisions !== undefined
+              ? changes.testingDecisions
+              : rev.testingDecisions,
+        })
+        .where(eq(prdRevisions.id, id))
+        .returning(),
+    );
+    const updated = rows[0]!;
+    yield* logActivity({
+      projectId: updated.projectId,
+      workspaceId: updated.workspaceId ?? undefined,
+      prdRevisionId: updated.id,
+      eventType: "prd_updated",
+      payload: { prdRevisionId: updated.id, title: updated.title, fields },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return updated;
   });
 
 function validatePhaseSequence(tasksInput: BatchTaskInput[]) {

@@ -1,0 +1,7 @@
+{
+  "name": "depot",
+  "version": "0.1.0",
+  "description": "depot live activity hooks for claude-code: captures Edit/Write/Bash/Read/Grep/Glob + tool failures into depot's activity log.",
+  "homepage": "https://github.com/netsirk/depot",
+  "license": "ISC"
+}

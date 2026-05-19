@@ -64,7 +64,19 @@ function PrdDetailRoute() {
 
   return (
     <PageShell>
-      <PageTopBar>
+      <PageTopBar
+        actions={
+          data.prd.workspaceId ? (
+            <Link
+              to="/prds/$id/review-diff"
+              params={{ id }}
+              className="rounded-md border border-card-border bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground transition-colors hover:bg-accent"
+            >
+              Review the diff
+            </Link>
+          ) : null
+        }
+      >
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>

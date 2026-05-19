@@ -3,7 +3,6 @@ import { activityLog } from "#/db/schema";
 import { Db } from "#/services/database";
 import {
   ProjectNotFoundError,
-  WorkspaceNotFoundError,
   PrdNotFoundError,
   TaskNotFoundError,
   ValidationError,
@@ -11,7 +10,8 @@ import {
 } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { activityPayloadSchemas } from "#/shared/schemas";
-import type { EventType } from "#/shared/validator";
+import type { ActivitySource, EventType } from "#/shared/validator";
+import { assertWorkspaceInProject, assertPrdInProject } from "#/lib/cross-entity";
 
 // ── Functions ─────────────────────────────────────────────────────────────────
 
@@ -22,6 +22,7 @@ export const logActivity = (input: {
   taskId?: string;
   eventType: EventType;
   payload: Record<string, unknown>;
+  source?: ActivitySource;
 }) =>
   Effect.gen(function* () {
     const db = yield* Db;
@@ -43,36 +44,15 @@ export const logActivity = (input: {
     );
     if (!project) return yield* Effect.fail(new ProjectNotFoundError({ id: input.projectId }));
 
-    // Validate workspace (if provided)
+    // Validate workspace (if provided) — delegated to shared helper.
     if (input.workspaceId) {
-      const workspace = yield* dbQuery(() =>
-        db.query.workspaces.findFirst({ where: { id: input.workspaceId } }),
-      );
-      if (!workspace)
-        return yield* Effect.fail(new WorkspaceNotFoundError({ id: input.workspaceId }));
-      if (workspace.projectId !== input.projectId) {
-        return yield* Effect.fail(
-          new CrossEntityError({
-            reason: `Workspace '${input.workspaceId}' does not belong to project '${input.projectId}'`,
-          }),
-        );
-      }
+      yield* assertWorkspaceInProject(input.workspaceId, input.projectId);
     }
 
     // Validate PRD revision (if provided)
     let prdRev = null;
     if (input.prdRevisionId) {
-      prdRev = yield* dbQuery(() =>
-        db.query.prdRevisions.findFirst({ where: { id: input.prdRevisionId } }),
-      );
-      if (!prdRev) return yield* Effect.fail(new PrdNotFoundError({ id: input.prdRevisionId }));
-      if (prdRev.projectId !== input.projectId) {
-        return yield* Effect.fail(
-          new CrossEntityError({
-            reason: `PRD '${input.prdRevisionId}' does not belong to project '${input.projectId}'`,
-          }),
-        );
-      }
+      prdRev = yield* assertPrdInProject(input.prdRevisionId, input.projectId);
       if (
         input.workspaceId &&
         prdRev.workspaceId !== null &&
@@ -138,6 +118,7 @@ export const logActivity = (input: {
           taskId: input.taskId ?? null,
           eventType: input.eventType,
           payload: JSON.stringify(input.payload),
+          source: input.source ?? "ai",
         })
         .returning(),
     );

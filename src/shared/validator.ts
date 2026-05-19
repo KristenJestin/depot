@@ -61,6 +61,79 @@ export type TaskDescriptionFormat = (typeof VALID_TASK_DESCRIPTION_FORMATS)[numb
 export const VALID_EFFORTS = ["xs", "s", "m", "l", "xl"] as const;
 export type Effort = (typeof VALID_EFFORTS)[number];
 
+// ── Task kinds ───────────────────────────────────────────────────────────────
+// `slice`   — a vertical user-facing slice that delivers a user story end-to-end
+// `gate`    — a quality/release gate (audit, security review, doc sync, etc.)
+// `support` — supporting work (refactor, infra, internal helper) without direct UX
+export const VALID_TASK_KINDS = ["slice", "gate", "support"] as const;
+export type TaskKind = (typeof VALID_TASK_KINDS)[number];
+
+// ── Triage / axis / source ────────────────────────────────────────────────────
+// Triage state lives orthogonally to status. Inbound findings start as
+// `needs-triage`; the dev orchestrator routes them to `ready-for-agent`,
+// `needs-info`, `ready-for-human`, or `wontfix`.
+export const VALID_TRIAGE_STATES = [
+  "needs-triage",
+  "needs-info",
+  "ready-for-agent",
+  "ready-for-human",
+  "wontfix",
+] as const;
+export type TriageState = (typeof VALID_TRIAGE_STATES)[number];
+
+// Axis splits an auditor pass into two parallel concerns:
+// `standards` (CLAUDE.md / repo conventions) and `spec` (PRD coverage).
+// `human` is the axis stamped on findings created by a human reviewer.
+export const VALID_REVIEW_AXES = ["standards", "spec", "human"] as const;
+export type ReviewAxis = (typeof VALID_REVIEW_AXES)[number];
+
+// Source of an activity event. Defaults to `ai` for backwards compatibility —
+// most events historically come from agents. Direct human CLI invocations
+// or web UI actions opt-in to `human`.
+export const VALID_ACTIVITY_SOURCES = ["ai", "human"] as const;
+export type ActivitySource = (typeof VALID_ACTIVITY_SOURCES)[number];
+
+// ── Doc artifacts ─────────────────────────────────────────────────────────────
+
+export const VALID_DOC_KINDS = ["context", "adr", "glossary", "freeform"] as const;
+export type DocKind = (typeof VALID_DOC_KINDS)[number];
+
+export const VALID_ADR_STATUSES = ["proposed", "accepted", "superseded"] as const;
+export type AdrStatus = (typeof VALID_ADR_STATUSES)[number];
+
+// ── Pending actions (web → chat bridge) ───────────────────────────────────────
+
+export const VALID_PENDING_ACTION_KINDS = [
+  "advance-phase",
+  "resume-with-review",
+  "run-doc-sync",
+  "run-ship",
+  "submit-review",
+  "custom",
+] as const;
+export type PendingActionKind = (typeof VALID_PENDING_ACTION_KINDS)[number];
+
+export const VALID_PENDING_ACTION_STATUSES = ["pending", "consumed", "dismissed"] as const;
+export type PendingActionStatus = (typeof VALID_PENDING_ACTION_STATUSES)[number];
+
+// ── Project directives ────────────────────────────────────────────────────────
+
+export const VALID_DIRECTIVE_SCOPES = [
+  "always",
+  "pre-review",
+  "pre-commit",
+  "pre-doc-sync",
+  "pre-ship",
+  "on-error",
+] as const;
+export type DirectiveScope = (typeof VALID_DIRECTIVE_SCOPES)[number];
+
+export const VALID_DIRECTIVE_KINDS = ["command", "rule"] as const;
+export type DirectiveKind = (typeof VALID_DIRECTIVE_KINDS)[number];
+
+export const VALID_DIRECTIVE_RUN_STATUSES = ["ok", "fail"] as const;
+export type DirectiveRunStatus = (typeof VALID_DIRECTIVE_RUN_STATUSES)[number];
+
 // ── Reviews ──────────────────────────────────────────────────────────────────
 
 export const VALID_REVIEW_TYPES = ["human", "agent"] as const;
@@ -109,6 +182,16 @@ export const VALID_EVENT_TYPES = [
   "coder_progress",
   "note",
   "error",
+  "git_commit",
+  "git_push",
+  "project_config_changed",
+  "directive_added",
+  "directive_updated",
+  "directive_removed",
+  "directive_run",
+  "pre_review_check",
+  "pre_ship_check",
+  "pre_doc_sync_check",
 ] as const;
 
 export type EventType = (typeof VALID_EVENT_TYPES)[number];

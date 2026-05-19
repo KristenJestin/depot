@@ -6,6 +6,9 @@ import { runEffect } from "#/cli/runtime";
 import * as DomainPrds from "#/modules/prds/domain";
 import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainReviews from "#/modules/reviews/domain";
+import * as DomainStories from "#/modules/prds/stories";
+import * as DomainOutOfScope from "#/modules/prds/out-of-scope";
+import * as DomainDirectives from "#/modules/projects/directives";
 import { logActivity } from "#/modules/activity/domain";
 import { effortSchema } from "#/shared/schemas";
 import { formatDate, formatDateWithRelative } from "#/shared/utils";
@@ -97,6 +100,14 @@ const showCommand = command({
         ["PRD", prd.prdId],
         ["Context", prd.context],
         ["Scope", prd.scope],
+        ["Problem", prd.problem],
+        ["Solution", prd.solution],
+        ["Impl Decisions", prd.implementationDecisions],
+        ["Testing Decisions", prd.testingDecisions],
+        ["Activated SHA", prd.activatedAtSha],
+        ["Done SHA", prd.doneAtSha],
+        ["Merged SHA", prd.mergedAtSha],
+        ["Worktree", prd.worktreePath],
         ["Created", formatDate(prd.createdAt)],
         ["Ready", formatDate(prd.readyAt)],
         ["Activated", prd.activatedAt ? formatDateWithRelative(prd.activatedAt) : "—"],
@@ -324,12 +335,28 @@ const activateCommand = command({
     },
   },
   run: async ({ args, ws, output }) => {
-    const activated = await runEffect(
+    const result = await runEffect(
       DomainPrds.activatePrd(args.prdId, ws.id).pipe(
-        Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
       ),
     );
-    if (!activated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      if (e._tag === "CrossEntityError") {
+        return output.error(
+          "cross_entity",
+          `Cannot activate PRD '${args.prdId}' from this workspace. ${e.message}. Use \`depot workspace list\` to find a workspace in the PRD's project, or run \`cd\` there before activating.`,
+        );
+      }
+      throw e;
+    }
+    const activated = result.item;
     if (output.isJson()) {
       output.success({ item: activated });
     } else {
@@ -1277,12 +1304,493 @@ const discardCommand = command({
   },
 });
 
+// ── PRD sections ──────────────────────────────────────────────────────────────
+
+const sectionsCommand = command({
+  meta: {
+    name: "sections",
+    description: "Update structured PRD sections (problem, solution, decisions)",
+  },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+    problem: { schema: Schema.String, description: "Problem statement" },
+    solution: { schema: Schema.String, description: "Chosen solution / approach summary" },
+    implementationDecisions: {
+      schema: Schema.String,
+      description: "Key implementation decisions",
+    },
+    testingDecisions: { schema: Schema.String, description: "How the work will be tested" },
+  },
+  run: async ({ args, output }) => {
+    const changes: {
+      problem?: string;
+      solution?: string;
+      implementationDecisions?: string;
+      testingDecisions?: string;
+    } = {};
+    if (args.problem !== undefined) changes.problem = args.problem;
+    if (args.solution !== undefined) changes.solution = args.solution;
+    if (args.implementationDecisions !== undefined)
+      changes.implementationDecisions = args.implementationDecisions;
+    if (args.testingDecisions !== undefined) changes.testingDecisions = args.testingDecisions;
+    if (Object.keys(changes).length === 0) {
+      return output.error(
+        "no_changes",
+        "No changes provided. Use --problem, --solution, --implementation-decisions, or --testing-decisions.",
+      );
+    }
+    const updated = await runEffect(DomainPrds.updatePrdSections(args.prdId, changes));
+    if (output.isJson()) output.success({ item: updated });
+    else output.print(`Updated PRD '${updated.title}' (${updated.id}) sections.`);
+  },
+});
+
+// ── User stories ──────────────────────────────────────────────────────────────
+
+const storyAddCommand = command({
+  meta: { name: "add", description: "Add a user story to a PRD" },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+    asRole: { schema: Schema.String.pipe(Schema.minLength(1)), required: true, alias: "a" },
+    want: { schema: Schema.String.pipe(Schema.minLength(1)), required: true, alias: "w" },
+    so: { schema: Schema.String.pipe(Schema.minLength(1)), required: true, alias: "s" },
+    notes: { schema: Schema.String, alias: "n" },
+  },
+  run: async ({ args, output }) => {
+    const story = await runEffect(
+      DomainStories.createUserStory({
+        prdRevisionId: args.prdId,
+        asRole: args.asRole,
+        want: args.want,
+        so: args.so,
+        notes: args.notes,
+      }),
+    );
+    if (output.isJson()) output.success({ item: story });
+    else
+      output.print(
+        `Created user story ${story.id} (#${story.position}): as ${story.asRole}, I want ${story.want}, so ${story.so}`,
+      );
+  },
+});
+
+const storyListCommand = command({
+  meta: { name: "list", description: "List user stories for a PRD" },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const stories = await runEffect(DomainStories.listUserStories(args.prdId));
+    if (output.isJson()) {
+      output.success({ items: stories });
+      return;
+    }
+    if (stories.length === 0) {
+      output.print("No user stories.");
+      return;
+    }
+    for (const s of stories) {
+      output.print(`#${s.position} ${s.id}  As ${s.asRole}, I want ${s.want}, so ${s.so}`);
+    }
+  },
+});
+
+const storyUpdateCommand = command({
+  meta: { name: "update", description: "Update a user story" },
+  args: {
+    storyId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Story ID",
+    },
+    asRole: { schema: Schema.String, alias: "a" },
+    want: { schema: Schema.String, alias: "w" },
+    so: { schema: Schema.String, alias: "s" },
+    notes: { schema: Schema.String, alias: "n" },
+  },
+  run: async ({ args, output }) => {
+    const updated = await runEffect(
+      DomainStories.updateUserStory(args.storyId, {
+        asRole: args.asRole,
+        want: args.want,
+        so: args.so,
+        notes: args.notes,
+      }),
+    );
+    if (output.isJson()) output.success({ item: updated });
+    else output.print(`Updated user story ${updated.id}`);
+  },
+});
+
+const storyRemoveCommand = command({
+  meta: { name: "remove", description: "Remove a user story" },
+  args: {
+    storyId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Story ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    await runEffect(DomainStories.removeUserStory(args.storyId));
+    if (output.isJson()) output.success({ id: args.storyId });
+    else output.print(`Removed user story ${args.storyId}`);
+  },
+});
+
+const storyLinkCommand = command({
+  meta: { name: "link", description: "Link a story to a task" },
+  args: {
+    storyId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Story ID",
+    },
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const link = await runEffect(DomainStories.linkStoryToTask(args.storyId, args.taskId));
+    if (output.isJson()) output.success({ item: link });
+    else output.print(`Linked story ${args.storyId} ↔ task ${args.taskId}`);
+  },
+});
+
+const storyUnlinkCommand = command({
+  meta: { name: "unlink", description: "Unlink a story from a task" },
+  args: {
+    storyId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Story ID",
+    },
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    await runEffect(DomainStories.unlinkStoryFromTask(args.storyId, args.taskId));
+    if (output.isJson()) output.success({ storyId: args.storyId, taskId: args.taskId });
+    else output.print(`Unlinked story ${args.storyId} ↔ task ${args.taskId}`);
+  },
+});
+
+const storyCommand = command({
+  meta: { name: "story", description: "User story management for a PRD" },
+  subCommands: {
+    add: storyAddCommand,
+    list: storyListCommand,
+    update: storyUpdateCommand,
+    remove: storyRemoveCommand,
+    link: storyLinkCommand,
+    unlink: storyUnlinkCommand,
+  },
+});
+
+// ── Out-of-scope items ────────────────────────────────────────────────────────
+
+const oosAddCommand = command({
+  meta: { name: "add", description: "Record a deliberate out-of-scope decision" },
+  workspace: true,
+  args: {
+    title: { schema: Schema.String.pipe(Schema.minLength(1)), required: true, alias: "t" },
+    reason: { schema: Schema.String.pipe(Schema.minLength(1)), required: true, alias: "r" },
+    prdId: { schema: Schema.String.pipe(Schema.minLength(1)), alias: "p" },
+    decidedBy: { schema: Schema.String, alias: "b" },
+  },
+  run: async ({ args, ws, output }) => {
+    const item = await runEffect(
+      DomainOutOfScope.addOutOfScope({
+        projectId: ws.projectId,
+        prdRevisionId: args.prdId,
+        title: args.title,
+        reason: args.reason,
+        decidedBy: args.decidedBy,
+      }),
+    );
+    if (output.isJson()) output.success({ item });
+    else output.print(`Recorded out-of-scope: '${item.title}' (${item.id})`);
+  },
+});
+
+const oosListCommand = command({
+  meta: { name: "list", description: "List out-of-scope items" },
+  workspace: true,
+  args: {
+    prdId: { schema: Schema.String.pipe(Schema.minLength(1)), alias: "p" },
+  },
+  run: async ({ args, ws, output }) => {
+    const items = await runEffect(
+      DomainOutOfScope.listOutOfScope({
+        projectId: ws.projectId,
+        prdRevisionId: args.prdId,
+      }),
+    );
+    if (output.isJson()) {
+      output.success({ items });
+      return;
+    }
+    if (items.length === 0) {
+      output.print("No out-of-scope items.");
+      return;
+    }
+    for (const i of items) {
+      const scope = i.prdRevisionId ? `PRD ${i.prdRevisionId}` : "project-wide";
+      output.print(`${i.id}  [${scope}]  ${i.title} — ${i.reason}`);
+    }
+  },
+});
+
+const oosRemoveCommand = command({
+  meta: { name: "remove", description: "Remove an out-of-scope item" },
+  args: {
+    id: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Out-of-scope item ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    await runEffect(DomainOutOfScope.removeOutOfScope(args.id));
+    if (output.isJson()) output.success({ id: args.id });
+    else output.print(`Removed out-of-scope item ${args.id}`);
+  },
+});
+
+const outOfScopeCommand = command({
+  meta: { name: "out-of-scope", description: "Out-of-scope items" },
+  subCommands: { add: oosAddCommand, list: oosListCommand, remove: oosRemoveCommand },
+});
+
+// ── Phase snapshot artifacts ──────────────────────────────────────────────────
+
+const phaseBriefCommand = command({
+  meta: { name: "phase-brief", description: "Persist the review brief for a phase" },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+    phase: {
+      schema: Schema.Int.pipe(Schema.positive()),
+      coerce: "integer",
+      required: true,
+      description: "Phase number",
+    },
+    content: { schema: Schema.String.pipe(Schema.minLength(1)), required: true },
+  },
+  run: async ({ args, output }) => {
+    const snap = await runEffect(
+      DomainPrds.upsertPhaseSnapshot(args.prdId, args.phase, { reviewBrief: args.content }),
+    );
+    if (output.isJson()) output.success({ item: snap });
+    else output.print(`Saved review brief for PRD ${args.prdId} phase ${args.phase} (${snap.id}).`);
+  },
+});
+
+const captureMergeCommand = command({
+  meta: {
+    name: "capture-merge",
+    description:
+      "Record the post-merge SHA on the base branch — used to recover the diff after a squash merge.",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+    sha: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "Merge commit SHA (defaults to HEAD)",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    let sha = args.sha;
+    if (!sha) {
+      // Capture HEAD of the workspace as the merge SHA. Caller is expected
+      // to have switched to the base branch first.
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execAsync = promisify(execFile);
+      try {
+        const { stdout } = await execAsync("git", ["-C", ws.path, "rev-parse", "HEAD"]);
+        sha = stdout.trim();
+      } catch (e) {
+        return output.error(
+          "git_failed",
+          `Cannot resolve HEAD: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+    const updated = await runEffect(DomainPrds.captureMergeSha(args.prdId, sha));
+    if (output.isJson()) output.success({ item: updated });
+    else output.print(`Captured merge SHA ${sha} on PRD ${args.prdId}`);
+  },
+});
+
+const phaseCommitMessageCommand = command({
+  meta: {
+    name: "phase-commit-message",
+    description: "Persist the suggested commit message for a phase",
+  },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+    phase: {
+      schema: Schema.Int.pipe(Schema.positive()),
+      coerce: "integer",
+      required: true,
+      description: "Phase number",
+    },
+    message: { schema: Schema.String.pipe(Schema.minLength(1)), required: true },
+  },
+  run: async ({ args, output }) => {
+    const snap = await runEffect(
+      DomainPrds.upsertPhaseSnapshot(args.prdId, args.phase, {
+        suggestedCommitMessage: args.message,
+      }),
+    );
+    if (output.isJson()) output.success({ item: snap });
+    else
+      output.print(
+        `Saved suggested commit message for PRD ${args.prdId} phase ${args.phase} (${snap.id}).`,
+      );
+  },
+});
+
+const commitMessageCommand = command({
+  meta: {
+    name: "commit-message",
+    description: "Persist the suggested commit message for the whole PRD",
+  },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+    message: { schema: Schema.String.pipe(Schema.minLength(1)), required: true },
+  },
+  run: async ({ args, output }) => {
+    const updated = await runEffect(
+      DomainPrds.updateSuggestedCommitMessage(args.prdId, args.message),
+    );
+    if (output.isJson()) output.success({ item: updated });
+    else output.print(`Saved suggested commit message for PRD ${args.prdId}.`);
+  },
+});
+
+// ── Pre-X checks ──────────────────────────────────────────────────────────────
+
+const buildCheckCommand = (
+  scope: "pre-review" | "pre-ship",
+  description: string,
+  eventType: "pre_review_check" | "pre_ship_check",
+) =>
+  command({
+    meta: { name: `${scope}-check`, description },
+    workspace: true,
+    args: {
+      prdId: {
+        schema: Schema.String.pipe(Schema.minLength(1)),
+        required: true,
+        positional: true,
+        description: "PRD ID",
+      },
+    },
+    run: async ({ args, ws, output }) => {
+      const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+      if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
+      const result = await runEffect(
+        DomainDirectives.runScopeBlocking(prd.projectId, scope, { wsPath: ws.path }),
+      );
+      await runEffect(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType,
+          payload: {
+            prdRevisionId: prd.id,
+            ok: result.ok,
+            failingDirectiveId: result.failingDirectiveId,
+          },
+        }),
+      );
+      if (output.isJson()) {
+        output.success(result);
+      } else {
+        output.print(`Running ${result.results.length} ${scope} directive(s) for PRD ${prd.id}:`);
+        for (const r of result.results) {
+          const icon = r.ok ? "✓" : "✗";
+          output.print(`  ${icon} ${r.title} — ${r.durationMs}ms`);
+          if (!r.ok && r.stderr) {
+            for (const line of r.stderr.split("\n").slice(0, 10)) {
+              output.print(`    | ${line}`);
+            }
+          }
+        }
+        if (!result.ok) output.print("Stopped at first blocking failure.");
+      }
+      if (!result.ok) process.exitCode = 1;
+    },
+  });
+
+const preReviewCheckCommand = buildCheckCommand(
+  "pre-review",
+  "Run blocking pre-review directives for a PRD",
+  "pre_review_check",
+);
+const preShipCheckCommand = buildCheckCommand(
+  "pre-ship",
+  "Run blocking pre-ship directives for a PRD",
+  "pre_ship_check",
+);
+
 export const prdCommand = command({
   meta: { name: "prd", description: "PRD management" },
   subCommands: {
     create: createCommand,
     show: showCommand,
     update: updateCommand,
+    sections: sectionsCommand,
     list: listCommand,
     activate: activateCommand,
     ready: readyCommand,
@@ -1299,5 +1807,13 @@ export const prdCommand = command({
     status: statusCommand,
     findings: findingsCommand,
     "phase-advance": phaseAdvanceCommand,
+    "commit-message": commitMessageCommand,
+    "phase-brief": phaseBriefCommand,
+    "phase-commit-message": phaseCommitMessageCommand,
+    "capture-merge": captureMergeCommand,
+    "pre-review-check": preReviewCheckCommand,
+    "pre-ship-check": preShipCheckCommand,
+    story: storyCommand,
+    "out-of-scope": outOfScopeCommand,
   },
 });

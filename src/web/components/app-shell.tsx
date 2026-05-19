@@ -1,7 +1,13 @@
 import * as React from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckIcon, ChevronsUpDownIcon, FolderOpenIcon, LayoutDashboardIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronsUpDownIcon,
+  FolderOpenIcon,
+  FoldersIcon,
+  LayoutDashboardIcon,
+} from "lucide-react";
 
 import { cn } from "../lib/utils";
 import { contextQuery, prdsQuery, switchWorkspace, workspacesQuery } from "../lib/queries";
@@ -178,6 +184,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="space-y-6">
             <SidebarSection title="Navigation">
               <SidebarLink to="/" label="Overview" icon={LayoutDashboardIcon} exact />
+              <SidebarLink to="/projects" label="Projects" icon={FoldersIcon} />
             </SidebarSection>
 
             {prds.length > 0 ? (
@@ -222,7 +229,7 @@ function SidebarLink({
   icon: Icon,
   exact,
 }: {
-  to: "/";
+  to: "/" | "/projects";
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   exact?: boolean;

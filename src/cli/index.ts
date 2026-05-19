@@ -8,6 +8,8 @@ import { contextCommand } from "./commands/context";
 import { installCommand } from "./commands/install";
 import { workspaceCommand } from "./commands/workspaces";
 import { reviewCommand } from "./commands/reviews";
+import { docCommand } from "./commands/docs";
+import { pendingCommand } from "./commands/pending";
 import { serveCommand } from "./commands/serve";
 import { command } from "#/cli/command";
 import { setDebug, setJsonMode } from "#/shared/logger";
@@ -60,6 +62,8 @@ const main = command({
     context: contextCommand,
     install: installCommand,
     review: reviewCommand,
+    doc: docCommand,
+    pending: pendingCommand,
     serve: serveCommand,
   },
 });

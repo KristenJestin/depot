@@ -1,5 +1,10 @@
 import { Schema } from "effect";
-import { VALID_EFFORTS, VALID_EVENT_TYPES, type EventType } from "#/shared/validator";
+import {
+  VALID_EFFORTS,
+  VALID_EVENT_TYPES,
+  VALID_TASK_KINDS,
+  type EventType,
+} from "#/shared/validator";
 
 function parseLooseJsonLike(input: string): Record<string, unknown> {
   let index = 0;
@@ -169,6 +174,7 @@ export function parseJsonLike(val: string): Record<string, unknown> {
 
 // Single source of truth: enum values come from validator.ts constants.
 export const effortSchema = Schema.Literal(...VALID_EFFORTS);
+export const taskKindSchema = Schema.Literal(...VALID_TASK_KINDS);
 export const eventTypeSchema = Schema.Literal(...VALID_EVENT_TYPES);
 
 // ── Activity payload schemas ──────────────────────────────────────────────────
@@ -216,6 +222,7 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
   prd_activated: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
+    sha: Schema.optional(Schema.String),
   }),
   prd_ready: Schema.Struct({ prdRevisionId: Schema.optional(Schema.String), title: Schema.String }),
   prd_review_requested: Schema.Struct({
@@ -227,7 +234,11 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
   }),
-  prd_done: Schema.Struct({ prdRevisionId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_done: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    title: Schema.String,
+    sha: Schema.optional(Schema.String),
+  }),
   prd_approved: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),
     approvedBy: Schema.optional(Schema.NullOr(Schema.String)),
@@ -278,16 +289,59 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     prdRevisionId: Schema.String,
     fromPhase: Schema.Number,
     toPhase: Schema.optional(Schema.Number),
+    sha: Schema.optional(Schema.String),
   }),
   coder_progress: Schema.Struct({
-    stage: Schema.Literal("start", "edit", "verify", "tool", "note"),
+    stage: Schema.Literal("start", "edit", "verify", "tool", "note", "error"),
     message: Schema.String,
     taskId: Schema.optional(Schema.String),
     file: Schema.optional(Schema.String),
     tool: Schema.optional(Schema.String),
     command: Schema.optional(Schema.String),
     source: Schema.optional(Schema.Literal("agent", "plugin")),
+    output: Schema.optional(Schema.String),
+    exitCode: Schema.optional(Schema.Number),
   }),
   note: Schema.Struct({ message: Schema.String }),
   error: Schema.Struct({ message: Schema.String, details: Schema.optional(Schema.String) }),
+  git_commit: Schema.Struct({
+    sha: Schema.String,
+    message: Schema.String,
+    filesChanged: Schema.optional(Schema.Number),
+  }),
+  git_push: Schema.Struct({
+    branch: Schema.String,
+    remote: Schema.optional(Schema.String),
+    commitsPushed: Schema.optional(Schema.Number),
+  }),
+  project_config_changed: Schema.Struct({
+    key: Schema.String,
+    previousValue: Schema.optional(Schema.NullOr(Schema.String)),
+    newValue: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  directive_added: Schema.Struct({ directiveId: Schema.String, title: Schema.String }),
+  directive_updated: Schema.Struct({
+    directiveId: Schema.String,
+    fields: Schema.Array(Schema.String),
+  }),
+  directive_removed: Schema.Struct({ directiveId: Schema.String }),
+  directive_run: Schema.Struct({
+    directiveId: Schema.String,
+    status: Schema.String,
+    durationMs: Schema.optional(Schema.Number),
+  }),
+  pre_review_check: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    ok: Schema.Boolean,
+    failingDirectiveId: Schema.optional(Schema.String),
+  }),
+  pre_ship_check: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    ok: Schema.Boolean,
+    failingDirectiveId: Schema.optional(Schema.String),
+  }),
+  pre_doc_sync_check: Schema.Struct({
+    ok: Schema.Boolean,
+    failingDirectiveId: Schema.optional(Schema.String),
+  }),
 };

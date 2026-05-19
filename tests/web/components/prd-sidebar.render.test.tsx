@@ -64,6 +64,10 @@ describe("PrdSidebar", () => {
           title: "Sidebar PRD",
           context: null,
           scope: null,
+          problem: null,
+          solution: null,
+          implementationDecisions: null,
+          testingDecisions: null,
           status: "in_progress",
           auditCycles: 1,
           currentPhase: 1,
@@ -72,6 +76,16 @@ describe("PrdSidebar", () => {
           updatedAt: now,
           readyAt: now,
           activatedAt: now,
+
+          activatedAtSha: null,
+
+          doneAtSha: null,
+
+          mergedAtSha: null,
+
+          suggestedCommitMessage: null,
+
+          worktreePath: null,
         }}
         workspace={{ id: "ws-1", path: "D:/Projects/depot", label: "depot" }}
         revisions={revisions}

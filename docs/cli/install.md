@@ -41,7 +41,11 @@ OpenCode and Claude Code receive static slash-command files that inject live con
 They inject:
 
 - `depot context prd`
-- `depot context dev`
+- `depot context dev $ARGUMENTS`
+
+For `depot-dev`, the argument is optional. Running `/depot-dev` loads the
+current workspace dev context; running `/depot-dev <prd-id>` forwards the ID to
+`depot context dev <prd-id>`.
 
 So the agent receives the rendered context itself, not an instruction telling it to run the command later.
 
@@ -52,6 +56,6 @@ Claude Code uses markdown command files with:
 - `disable-model-invocation: true`
 - `shell: powershell`
 
-Codex custom prompts are deprecated by OpenAI. Depot installs Codex skills instead, following the current Codex guidance that reusable prompts should be packaged as skills. The generated skills disable implicit invocation, so Codex should not select them automatically. Invoke them explicitly with `$depot-prd` or `$depot-dev`, or through the Codex skill/slash-command UI. When invoked, the skill instructs Codex to run `depot context prd` or `depot context dev` immediately and use that rendered output as the working context.
+Codex custom prompts are deprecated by OpenAI. Depot installs Codex skills instead, following the current Codex guidance that reusable prompts should be packaged as skills. The generated skills disable implicit invocation, so Codex should not select them automatically. Invoke them explicitly with `$depot-prd` or `$depot-dev`, or through the Codex skill/slash-command UI. When invoked, the skill instructs Codex to run `depot context prd` or `depot context dev` immediately and use that rendered output as the working context. `$depot-dev <prd-id>` instructs Codex to run `depot context dev <prd-id>`.
 
 This keeps generated integrations static while still loading fresh depot state at invocation time.

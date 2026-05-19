@@ -71,7 +71,11 @@ Stale task state makes the web UI misleading. A task that is being worked on sho
 
 ### 2.5 Monitor Coder Progress
 
-While the coder is running, you can observe what it is doing through the activity log. The coder is required (per its context) to log `coder_progress` events at each task start, major file edit, and criterion verification.
+While the coder is running, you can observe what it is doing through the activity log. If
+the depot **claude-code plugin** is installed, most progress events arrive automatically
+(`source: "plugin"`): `Edit`, `Write`, `MultiEdit`, `Bash` (with `output` + `exitCode`),
+`Read`, `Grep`, `Glob`, and any tool failure. The coder still logs `note` / `verify` /
+`start` manually for the events the plugin can't infer.
 
 ```
 depot log list -n 30                         # latest events across the whole project
@@ -89,11 +93,89 @@ depot log add note --prd <prd-id> --payload '{"message":"received user validatio
 
 ### 3. Delegate Audit
 
-After every coder pass, launch the auditor sub-agent with:
+After every coder pass, launch **two auditor sub-agents in parallel**, one per axis:
 
-- `depot context auditor <prd-id>`
+- `depot context auditor <prd-id> --axis standards` — checks the implementation against
+  CLAUDE.md / AGENTS.md / repo conventions / formatting / archi rules
+- `depot context auditor <prd-id> --axis spec` — checks the implementation against the PRD
+  itself (every user story covered, every done_criterion met, nothing leaked from out-of-scope)
+
+Each spawn writes its findings with `depot review task add --axis <axis>`. Findings on a
+single review row carry their axis so the web review page can render two columns.
 
 If the auditor reports findings, continue the loop through a review-driven coder pass.
+
+### 3a. Triage every inbound finding
+
+Every finding from an auditor or a human review starts in `triageState = needs-triage`.
+Before spawning the next coder pass, walk each finding and set its triage state explicitly:
+
+- `depot review task triage <id> ready-for-agent` — actionable, coder can pick it up
+- `depot review task triage <id> needs-info --reason "..."` — clarification needed from user
+- `depot review task triage <id> ready-for-human` — visible label for the human
+- `depot review task triage <id> wontfix --reason "..."` — explicit no, also creates an
+  `out_of_scope_item` linked back to the review task
+
+**Absolute priority for deferred-questions** — findings whose description is prefixed
+`"User asks: is this deferred?"` (created via the web diff viewer's "deferred?" toggle)
+must be processed **first** on the next spawn, **before** asking the user anything. For
+each one:
+
+1. Check the PRD for future phases or out-of-scope items that cover the concern.
+2. If covered → triage `wontfix` and link to the future phase/item in the reason.
+3. If genuinely missed → triage `ready-for-agent` so the coder picks it up next pass.
+
+Do not ask the user a return question on a deferred-question until you've done this work.
+
+### 3b. Pre-review check
+
+Before opening the human-review gate, run the blocking pre-review directives:
+
+```
+depot prd pre-review-check <prd-id>
+```
+
+If anything blocking fails, fix it and re-run. Only call `prd request-review` after
+`pre-review-check` returns ok.
+
+### 3c. Phase wrap-up brief (multi-phase PRDs)
+
+Before each `depot prd request-review`, produce two artifacts and persist them so the web
+review page can surface them:
+
+1. **Review brief** — short markdown structured in two blocks:
+   - `Things to actually check now` — diff zones that deserve human attention this phase
+   - `Things you might notice but is deferred` — artefacts of the current diff that look
+     incomplete on purpose because they're handled in a later phase (lookup the PRD's
+     future phases / out-of-scope items and reference them by number)
+
+   Persist with:
+
+   ```
+   depot prd phase-brief <prd-id> --phase N --content "<markdown>"
+   ```
+
+2. **Suggested commit message** — Angular-style (`<type>(<scope>): <description>` on line
+   1, short body in subsequent lines). Infer `type` from the dominant task `kind` of the
+   phase (`feat` for slice, `fix` for bugfix, `refactor` for support, etc.) and `scope`
+   from the common path prefix of touched files (e.g. `web`, `cli`, `prd`).
+
+   Persist with:
+
+   ```
+   depot prd phase-commit-message <prd-id> --phase N --message "<message>"
+   ```
+
+   Also persist the best whole-PRD commit message every time you finish a dev pass, even
+   when the PRD is phased. This gives the final no-intermediate-commits path a stable
+   suggestion:
+
+   ```
+   depot prd commit-message <prd-id> --message "<message>"
+   ```
+
+These calls are idempotent — re-running replaces the previous value. `request-review` warns
+if either is empty.
 
 ### 4. Human Validation Loop
 
@@ -175,13 +257,33 @@ Do not launch the coder from a review draft that still requires guessing.
 
 ## Rules
 
-- Always run the auditor after the coder
+- Always run the auditor after the coder — and **always two passes**, `--axis standards`
+  and `--axis spec`, in parallel
 - Never skip human validation
 - Never write code yourself
 - Always enter sub-agents through `depot context coder` and `depot context auditor`
 - Verify that coder task transitions match the real implementation state before treating a coding pass as complete
 - Ask the user when constraints conflict or the PRD is under-specified
 - Keep the review state updated as the conversation evolves instead of waiting for the full answer
+- Every inbound finding starts `needs-triage`. Walk each one before spawning the next coder.
+  Treat `deferred-question` findings as **absolute first priority** — answer them before
+  asking anything else.
+- When you log activity events from the dev orchestrator (notes, triage decisions), tag
+  them with `source: ai`. When the action originates from a direct user CLI invocation,
+  `source: human` (this is set automatically by the CLI for project-config / triage from
+  the web / commit / push events).
+
+## Project directives
+
+Inject and respect the project's directives at every relevant moment:
+
+- `scope = always` → applies to every prompt the dev agent produces
+- `scope = pre-review` → blocked-on by `prd pre-review-check` (see 3b)
+- `scope = pre-commit` → relevant for the coder agent if commits are involved (typically
+  the user commits, so this is informational here)
+
+List with `depot project directive list --scope <scope> --json` and treat blocking
+directives as hard preconditions, non-blocking as advisory.
 
 ## Emerging Requirements
 

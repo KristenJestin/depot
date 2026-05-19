@@ -122,7 +122,55 @@ does not contain all structured headings.
 
 Keep the spec compact, but do not leave execution ambiguity behind.
 
-### 4. Challenge The Draft
+### 4. Structured PRD sections (problem / solution / decisions / stories)
+
+A PRD is a contract, not a narrative. Beyond `title / context / scope`, every PRD must carry
+the structured sections below — fill them via `depot prd sections` and `depot prd story add`.
+
+- `problem` (required): one paragraph stating the user-visible problem in plain language. No
+  proposed solution language here.
+- `solution` (required): one paragraph stating the chosen approach at a high level. The
+  alternatives considered live in the linked ADR, not here.
+- `implementationDecisions` (required): bullet list of the load-bearing choices a future
+  reader would want to know upfront (e.g. "use SQLite triggers for cross-entity invariants",
+  "render diff via homegrown parser, not @pierre/diffs"). Each line one decision.
+- `testingDecisions` (required): how the change is validated. Unit / integration / E2E split,
+  what fixtures are needed, what's deliberately uncovered.
+- `userStories` (≥1, required): every PRD must serve at least one user story. Add with
+  `depot prd story add --as <role> --want <action> --so <benefit>`. Every PRD task should
+  cover at least one story (link with `depot prd story link <storyId> <taskId>`).
+- `outOfScope`: every explicit "no" decided during framing must be recorded with
+  `depot prd out-of-scope add --title ... --reason ...`. The kanban surfaces these later.
+
+### 4b. Design It Twice for interface decisions
+
+For decisions about the shape of an API, module, or component, prefer **Design It Twice**
+over an open-ended question. Spawn ≥3 sub-agents in parallel, each with divergent
+constraints:
+
+- minimize the public surface (fewest methods)
+- maximize flexibility (most parameters / hooks)
+- optimize the common case (simplest call site for 80% of users)
+- imitate a familiar paradigm (mirror a well-known existing API)
+
+Present the variants side-by-side, ask the user to pick, then invoke the **doc agent** to
+write the ADR. Record the rejected designs in the ADR's `Alternatives considered` block, and
+reference the ADR (`docs/adr/NNNN-titre.md`) inside `implementationDecisions`.
+
+### 4c. When to invoke the doc agent
+
+Invoke the doc agent (via `/depot-doc` or by spawning a sub-agent on the `doc` context) when
+a decision matches all three criteria:
+
+1. **Hard-to-reverse** — changing it later costs real engineering work.
+2. **Surprising-without-context** — a future reader would ask "why this way?"
+3. **Real trade-off** — alternatives existed and were considered.
+
+The doc agent writes the ADR, returns the path, and you reference it in
+`implementationDecisions`. For decisions that fail one of the criteria, document inline in
+`implementationDecisions` only.
+
+### 5. Challenge The Draft
 
 Before marking the PRD ready, explicitly surface:
 
@@ -132,7 +180,7 @@ Before marking the PRD ready, explicitly surface:
 
 Resolve them with the user.
 
-### 5. Phase Design (multi-phase PRDs only)
+### 6. Phase Design (multi-phase PRDs only)
 
 For large PRDs where reviewing a full diff at once would be impractical, split tasks into explicit phases. This is a **manual decision** — phases are never inferred automatically from file counts, diff size, or task categories.
 
@@ -172,7 +220,7 @@ The PRD's `currentPhase` advances via `depot prd phase-advance <prd-id>` after h
 
 Single-phase PRDs (no `--phase` set on tasks) behave identically to today.
 
-### 6. Mutability Rules
+### 7. Mutability Rules
 
 The revision status controls what you may change:
 
@@ -191,7 +239,13 @@ depot task update <new-task-id> ...
 depot prd ready <new-prd-id>
 ```
 
-### 7. Finish At Ready
+### 8. Project directives (always scope)
+
+Read `depot project directive list --scope always --json` and respect every `rule`-kind
+directive. These are ground rules the user wants every agent to honor regardless of phase
+(e.g. tone, naming conventions, branching rules).
+
+### 9. Finish At Ready
 
 Only when you are confident that a dev orchestrator can hand the work to a coder without major ambiguity:
 

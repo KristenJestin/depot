@@ -102,6 +102,13 @@ export default defineConfig({
         path.resolve(import.meta.dirname, "dist/migrations"),
         { recursive: true },
       );
+      // Ship the claude-code plugin (hooks + scripts) inside dist/ so
+      // `depot install --claude-code-plugin` can copy it to ~/.claude/plugins/.
+      cpSync(
+        path.resolve(import.meta.dirname, ".claude/plugins/depot"),
+        path.resolve(import.meta.dirname, "dist/plugins/claude-code/depot"),
+        { recursive: true },
+      );
     },
   },
 });

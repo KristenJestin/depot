@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema, Effect } from "effect";
 import { command } from "#/cli/command";
 import { runEffect } from "#/cli/runtime";
 import * as DomainProjects from "#/modules/projects/domain";
@@ -7,6 +7,15 @@ import { normalizeWorkspacePath, formatDate } from "#/shared/utils";
 import { VALID_PROJECT_STATUSES } from "#/shared/validator";
 import * as path from "node:path";
 import { detectGitContext } from "#/modules/workspaces/bootstrap";
+import { Db } from "#/services/database";
+import { dbQuery } from "#/shared/db";
+import * as DomainProjectConfig from "#/modules/projects/config";
+import * as DomainDirectives from "#/modules/projects/directives";
+import {
+  VALID_DIRECTIVE_KINDS,
+  VALID_DIRECTIVE_SCOPES,
+  type DirectiveScope,
+} from "#/shared/validator";
 
 export const initCommand = command({
   meta: {
@@ -233,6 +242,457 @@ const archiveCommand = command({
   },
 });
 
+type DiagnoseFinding =
+  | {
+      kind: "prd_workspace_project_mismatch";
+      prdRevisionId: string;
+      prdTitle: string;
+      prdProjectId: string;
+      workspaceId: string;
+      workspaceProjectId: string;
+    }
+  | {
+      kind: "prd_workspace_missing";
+      prdRevisionId: string;
+      prdTitle: string;
+      workspaceId: string;
+    }
+  | {
+      kind: "task_prd_missing";
+      taskId: string;
+      taskTitle: string;
+      prdRevisionId: string;
+    }
+  | {
+      kind: "review_prd_missing";
+      reviewId: string;
+      prdRevisionId: string;
+    };
+
+const diagnoseCommand = command({
+  meta: { name: "diagnose", description: "Detect cross-entity inconsistencies in the database" },
+  args: {},
+  run: async ({ output }) => {
+    const findings = await runEffect(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const results: DiagnoseFinding[] = [];
+
+        // PRDs with workspaceId — check workspace exists and project matches.
+        const prdRevs = yield* dbQuery(() =>
+          db.query.prdRevisions.findMany({ where: { workspaceId: { isNotNull: true } } }),
+        );
+        for (const rev of prdRevs) {
+          if (!rev.workspaceId) continue;
+          const ws = yield* dbQuery(() =>
+            db.query.workspaces.findFirst({ where: { id: rev.workspaceId! } }),
+          );
+          if (!ws) {
+            results.push({
+              kind: "prd_workspace_missing",
+              prdRevisionId: rev.id,
+              prdTitle: rev.title,
+              workspaceId: rev.workspaceId,
+            });
+            continue;
+          }
+          if (ws.projectId !== rev.projectId) {
+            results.push({
+              kind: "prd_workspace_project_mismatch",
+              prdRevisionId: rev.id,
+              prdTitle: rev.title,
+              prdProjectId: rev.projectId,
+              workspaceId: rev.workspaceId,
+              workspaceProjectId: ws.projectId,
+            });
+          }
+        }
+
+        // Tasks pointing at non-existent PRD revisions.
+        const allTasks = yield* dbQuery(() => db.query.tasks.findMany());
+        for (const t of allTasks) {
+          const rev = yield* dbQuery(() =>
+            db.query.prdRevisions.findFirst({ where: { id: t.prdRevisionId } }),
+          );
+          if (!rev) {
+            results.push({
+              kind: "task_prd_missing",
+              taskId: t.id,
+              taskTitle: t.title,
+              prdRevisionId: t.prdRevisionId,
+            });
+          }
+        }
+
+        // Reviews pointing at non-existent PRD revisions.
+        const allReviews = yield* dbQuery(() => db.query.reviews.findMany());
+        for (const r of allReviews) {
+          const rev = yield* dbQuery(() =>
+            db.query.prdRevisions.findFirst({ where: { id: r.prdRevisionId } }),
+          );
+          if (!rev) {
+            results.push({
+              kind: "review_prd_missing",
+              reviewId: r.id,
+              prdRevisionId: r.prdRevisionId,
+            });
+          }
+        }
+        return results;
+      }),
+    );
+
+    if (output.isJson()) {
+      output.success({ items: findings, count: findings.length });
+    } else {
+      if (findings.length === 0) {
+        output.print("No cross-entity inconsistencies detected.");
+      } else {
+        output.print(`Found ${findings.length} cross-entity issue(s):`);
+        for (const f of findings) {
+          if (f.kind === "prd_workspace_project_mismatch") {
+            output.print(
+              `  [mismatch] PRD ${f.prdRevisionId} ('${f.prdTitle}') project=${f.prdProjectId} but workspace ${f.workspaceId} is in project=${f.workspaceProjectId}`,
+            );
+          } else if (f.kind === "prd_workspace_missing") {
+            output.print(
+              `  [orphan]   PRD ${f.prdRevisionId} ('${f.prdTitle}') references missing workspace ${f.workspaceId}`,
+            );
+          } else if (f.kind === "task_prd_missing") {
+            output.print(
+              `  [orphan]   Task ${f.taskId} ('${f.taskTitle}') references missing PRD revision ${f.prdRevisionId}`,
+            );
+          } else if (f.kind === "review_prd_missing") {
+            output.print(
+              `  [orphan]   Review ${f.reviewId} references missing PRD revision ${f.prdRevisionId}`,
+            );
+          }
+        }
+      }
+    }
+
+    if (findings.length > 0) {
+      process.exitCode = 2;
+    }
+  },
+});
+
+// ── Project config ────────────────────────────────────────────────────────────
+
+const configSetCommand = command({
+  meta: { name: "set", description: "Set a project config key" },
+  workspace: true,
+  args: {
+    key: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Config key",
+    },
+    value: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Config value",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    if (!DomainProjectConfig.isKnownKey(args.key)) {
+      output.print(
+        `Warning: '${args.key}' is not a known config key. Setting anyway (forward-compat).`,
+      );
+    }
+    const item = await runEffect(
+      DomainProjectConfig.setConfig(ws.projectId, args.key, args.value, "human"),
+    );
+    if (output.isJson()) output.success({ item });
+    else output.print(`Set ${item.key} = ${item.value}`);
+  },
+});
+
+const configGetCommand = command({
+  meta: { name: "get", description: "Read a project config key" },
+  workspace: true,
+  args: {
+    key: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Config key",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const item = await runEffect(DomainProjectConfig.getConfig(ws.projectId, args.key));
+    if (!item) return output.error("not_found", `No config value for key '${args.key}'`);
+    if (output.isJson()) output.success({ item });
+    else output.print(item.value);
+  },
+});
+
+const configListCommand = command({
+  meta: { name: "list", description: "List all project config" },
+  workspace: true,
+  args: {},
+  run: async ({ ws, output }) => {
+    const items = await runEffect(DomainProjectConfig.listConfig(ws.projectId));
+    if (output.isJson()) {
+      output.success({ items });
+      return;
+    }
+    if (items.length === 0) {
+      output.print("No config values.");
+      return;
+    }
+    for (const c of items) {
+      output.print(`${c.key} = ${c.value}  [${c.updatedBySource}]`);
+    }
+  },
+});
+
+const configUnsetCommand = command({
+  meta: { name: "unset", description: "Remove a project config key" },
+  workspace: true,
+  args: {
+    key: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Config key",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    await runEffect(DomainProjectConfig.unsetConfig(ws.projectId, args.key));
+    if (output.isJson()) output.success({ key: args.key });
+    else output.print(`Unset ${args.key}`);
+  },
+});
+
+const configCommand = command({
+  meta: { name: "config", description: "Project configuration" },
+  subCommands: {
+    set: configSetCommand,
+    get: configGetCommand,
+    list: configListCommand,
+    unset: configUnsetCommand,
+  },
+});
+
+// ── Project directives ────────────────────────────────────────────────────────
+
+const directiveAddCommand = command({
+  meta: { name: "add", description: "Add a project directive" },
+  workspace: true,
+  args: {
+    scope: {
+      schema: Schema.Literal(...VALID_DIRECTIVE_SCOPES),
+      required: true,
+      description: `Directive scope (${VALID_DIRECTIVE_SCOPES.join("|")})`,
+    },
+    kind: {
+      schema: Schema.Literal(...VALID_DIRECTIVE_KINDS),
+      required: true,
+      description: "Directive kind (command|rule)",
+    },
+    title: { schema: Schema.String.pipe(Schema.minLength(1)), required: true },
+    instruction: { schema: Schema.String.pipe(Schema.minLength(1)), required: true },
+    nonBlocking: { schema: Schema.Boolean, type: "boolean", default: false },
+    position: { schema: Schema.Int, coerce: "integer" },
+  },
+  run: async ({ args, ws, output }) => {
+    const item = await runEffect(
+      DomainDirectives.createDirective({
+        projectId: ws.projectId,
+        scope: args.scope,
+        kind: args.kind,
+        title: args.title,
+        instruction: args.instruction,
+        blocking: !args.nonBlocking,
+        position: args.position,
+      }),
+    );
+    if (output.isJson()) output.success({ item });
+    else output.print(`Created directive ${item.id} (${item.scope}) — '${item.title}'`);
+  },
+});
+
+const directiveListCommand = command({
+  meta: { name: "list", description: "List project directives" },
+  workspace: true,
+  args: {
+    scope: { schema: Schema.Literal(...VALID_DIRECTIVE_SCOPES) },
+    enabledOnly: { schema: Schema.Boolean, type: "boolean", default: false },
+  },
+  run: async ({ args, ws, output }) => {
+    const items = await runEffect(
+      DomainDirectives.listDirectives(ws.projectId, {
+        scope: args.scope,
+        enabledOnly: args.enabledOnly,
+      }),
+    );
+    if (output.isJson()) {
+      output.success({ items });
+      return;
+    }
+    if (items.length === 0) {
+      output.print("No directives.");
+      return;
+    }
+    for (const d of items) {
+      const flags = `${d.enabled ? "enabled" : "disabled"}${d.blocking ? "" : ", non-blocking"}`;
+      output.print(`${d.id}  [${d.scope}] #${d.position}  ${d.title}  (${d.kind}, ${flags})`);
+    }
+  },
+});
+
+const directiveShowCommand = command({
+  meta: { name: "show", description: "Show a directive" },
+  args: {
+    id: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Directive ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const item = await runEffect(DomainDirectives.getDirective(args.id));
+    if (!item) return output.error("not_found", `Directive not found: ${args.id}`);
+    if (output.isJson()) output.success({ item });
+    else {
+      output.fields([
+        ["ID", item.id],
+        ["Scope", item.scope],
+        ["Kind", item.kind],
+        ["Title", item.title],
+        ["Instruction", item.instruction],
+        ["Blocking", item.blocking],
+        ["Enabled", item.enabled],
+        ["Position", item.position],
+        ["Last run", item.lastRunAt?.toISOString() ?? null],
+        ["Last status", item.lastRunStatus],
+      ]);
+    }
+  },
+});
+
+const directiveRunCommand = command({
+  meta: { name: "run", description: "Execute a directive (kind=command only)" },
+  workspace: true,
+  args: {
+    id: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Directive ID",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const result = await runEffect(DomainDirectives.runDirective(args.id, { wsPath: ws.path }));
+    if (output.isJson()) output.success(result);
+    else {
+      output.print(
+        `Directive ${args.id} ${result.ok ? "OK" : "FAILED"} in ${result.durationMs}ms (exit=${result.exitCode})`,
+      );
+      if (result.stdout) output.print(`-- stdout --\n${result.stdout}`);
+      if (result.stderr) output.print(`-- stderr --\n${result.stderr}`);
+    }
+    if (!result.ok) process.exitCode = result.exitCode || 1;
+  },
+});
+
+const directiveRemoveCommand = command({
+  meta: { name: "remove", description: "Remove a directive" },
+  args: {
+    id: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Directive ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    await runEffect(DomainDirectives.removeDirective(args.id));
+    if (output.isJson()) output.success({ id: args.id });
+    else output.print(`Removed directive ${args.id}`);
+  },
+});
+
+const directiveEnableCommand = command({
+  meta: { name: "enable", description: "Enable a directive" },
+  args: {
+    id: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Directive ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const item = await runEffect(DomainDirectives.updateDirective(args.id, { enabled: true }));
+    if (output.isJson()) output.success({ item });
+    else output.print(`Enabled directive ${args.id}`);
+  },
+});
+
+const directiveDisableCommand = command({
+  meta: { name: "disable", description: "Disable a directive" },
+  args: {
+    id: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Directive ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const item = await runEffect(DomainDirectives.updateDirective(args.id, { enabled: false }));
+    if (output.isJson()) output.success({ item });
+    else output.print(`Disabled directive ${args.id}`);
+  },
+});
+
+const directiveReorderCommand = command({
+  meta: { name: "reorder", description: "Reorder directives within a scope" },
+  workspace: true,
+  args: {
+    scope: {
+      schema: Schema.Literal(...VALID_DIRECTIVE_SCOPES),
+      required: true,
+      description: "Scope to reorder",
+    },
+    ids: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      description: "Comma-separated directive IDs in the desired order",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const orderedIds = args.ids
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    const result = await runEffect(
+      DomainDirectives.reorderDirectives(ws.projectId, args.scope as DirectiveScope, orderedIds),
+    );
+    if (output.isJson()) output.success(result);
+    else output.print(`Reordered ${result.count} directive(s) in scope '${result.scope}'`);
+  },
+});
+
+const directiveCommand = command({
+  meta: { name: "directive", description: "Project directive management" },
+  subCommands: {
+    add: directiveAddCommand,
+    list: directiveListCommand,
+    show: directiveShowCommand,
+    run: directiveRunCommand,
+    remove: directiveRemoveCommand,
+    enable: directiveEnableCommand,
+    disable: directiveDisableCommand,
+    reorder: directiveReorderCommand,
+  },
+});
+
 export const projectCommand = command({
   meta: { name: "project", description: "Project management" },
   subCommands: {
@@ -240,5 +700,8 @@ export const projectCommand = command({
     show: showCommand,
     update: updateCommand,
     archive: archiveCommand,
+    diagnose: diagnoseCommand,
+    config: configCommand,
+    directive: directiveCommand,
   },
 });

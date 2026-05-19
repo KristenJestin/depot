@@ -1,8 +1,18 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 
 export type InstallTarget = "opencode" | "claude-code" | "codex";
-export type InstallMode = "prd" | "dev";
+export type InstallMode = "prd" | "dev" | "doc" | "ship";
 export type CommandShell = "powershell" | "bash";
+
+const MODE_DESCRIPTIONS: Record<InstallMode, string> = {
+  prd: "Build a complete first-draft PRD from the code, then grill the user one question at a time until the spec is ready",
+  dev: "Inject the live depot dev context for the current workspace",
+  doc: "Sync the project docs based on a PRD, a time window, or since last sync. Free-text intent supported.",
+  ship: "Wrap up a merged PRD — clean worktree, pull base, mark done, sync docs.",
+};
+
+const MODES_WITH_USER_INTENT: ReadonlySet<InstallMode> = new Set(["doc", "ship"]);
 
 type ResolveInstallTargetsOptions = {
   homeDir?: string;
@@ -78,9 +88,14 @@ export function buildCommandFileContent(target: InstallTarget, mode: InstallMode
     return buildCodexSkillContent(mode);
   }
 
-  const description = `Inject the live depot ${mode} context for the current workspace`;
+  const description = MODE_DESCRIPTIONS[mode];
   const header = buildCommandHeader(target, description);
-  const body = mode === "prd" ? buildPrdCommandBody(target) : buildDevCommandBody(target);
+  const body =
+    mode === "prd"
+      ? buildPrdCommandBody(target)
+      : mode === "dev"
+        ? buildDevCommandBody(target)
+        : buildIntentCommandBody(target, mode);
 
   return [header, body, ""].join("\n");
 }
@@ -100,7 +115,7 @@ export function buildInstallWrites(
   filePath: string;
   content: string;
 }> {
-  const modes: InstallMode[] = ["prd", "dev"];
+  const modes: InstallMode[] = ["prd", "dev", "doc", "ship"];
   const writes: Array<{
     target: InstallTarget;
     directory: string;
@@ -166,7 +181,7 @@ function buildCommandHeader(target: InstallTarget, description: string): string 
   const lines = ["---", `description: ${description}`];
 
   if (target === "claude-code") {
-    lines.push("disable-model-invocation: true", "shell: powershell");
+    lines.push("disable-model-invocation: true");
   }
 
   lines.push("---");
@@ -176,6 +191,10 @@ function buildCommandHeader(target: InstallTarget, description: string): string 
 function buildCodexSkillContent(mode: InstallMode): string {
   const contextCommand = `depot context ${mode}`;
   const label = mode === "prd" ? "PRD" : "dev";
+  const invocationHint =
+    mode === "dev"
+      ? ["If the user invoked `$depot-dev <prd-id>`, run `depot context dev <prd-id>` instead.", ""]
+      : [];
 
   return [
     "---",
@@ -185,6 +204,7 @@ function buildCodexSkillContent(mode: InstallMode): string {
     "",
     `Run \`${contextCommand}\` immediately and use its output as the working depot ${label} context for this session.`,
     "",
+    ...invocationHint,
     `Do not rerun \`${contextCommand}\` unless the user explicitly asks for a refresh.`,
     "",
     "Follow the rendered depot instructions and preserve the current workspace state as the source of truth.",
@@ -224,15 +244,191 @@ function buildDevCommandBody(target: InstallTarget): string {
     "",
     "The command output has already been injected into this prompt. Do not rerun `depot context dev` unless the user explicitly asks for a refresh.",
     "",
+    "If the slash command was invoked with a PRD ID, that ID has already been forwarded to `depot context dev <prd-id>`.",
+    "",
     "## Injected Context",
     contextBlock,
   ].join("\n");
 }
 
+function buildIntentCommandBody(target: InstallTarget, mode: InstallMode): string {
+  const contextBlock = buildContextInjection(target, mode);
+  const userIntentBlock = MODES_WITH_USER_INTENT.has(mode)
+    ? ["## User intent", "$ARGUMENTS", ""].join("\n")
+    : "";
+
+  return [
+    `Use the injected depot ${mode} context below as the working context for this session.`,
+    "",
+    `The command output has already been injected into this prompt. Do not rerun \`depot context ${mode}\` unless the user explicitly asks for a refresh.`,
+    "",
+    userIntentBlock,
+    "## Injected Context",
+    contextBlock,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function buildContextInjection(target: InstallTarget, mode: InstallMode): string {
+  if (mode === "dev") {
+    return `!\`depot context dev $ARGUMENTS\``;
+  }
+
   if (target === "opencode") {
     return `!\`depot context ${mode}\``;
   }
 
   return `!\`depot context ${mode}\``;
 }
+
+// ── Plugin + hook install ─────────────────────────────────────────────────────
+
+export type PluginScope = "user" | "project";
+
+/**
+ * Resolve where the claude-code plugin should land.
+ * - user scope (default): `~/.claude/plugins/depot/`
+ * - project scope: `<cwd>/.claude/plugins/depot/`
+ */
+export function getPluginInstallDirectory(scope: PluginScope, homeDir?: string): string {
+  const home = homeDir ?? getHomeDirectory();
+  if (scope === "project") {
+    return path.join(process.cwd(), ".claude", "plugins", "depot");
+  }
+  return path.join(home, ".claude", "plugins", "depot");
+}
+
+/**
+ * Resolve the source dir to copy from. In dist (after `vp pack`) the plugin
+ * lives at `dist/plugins/claude-code/depot`. In dev it lives at the repo's
+ * `.claude/plugins/depot`. We try dist first, fall back to repo source.
+ */
+export function getPluginSourceDirectory(baseDir = import.meta.dirname): string {
+  // After `vp pack`, `import.meta.dirname` resolves to `<repo>/dist/` because
+  // the entry is bundled into `dist/index.mjs`. The plugin is shipped at
+  // `dist/plugins/claude-code/depot` (see vite.config.ts onSuccess).
+  // In tests / dev runs the module is at `src/modules/install/` and the
+  // plugin source is the repo root's `.claude/plugins/depot`.
+  const isDistRuntime = baseDir.endsWith(path.sep + "dist") || baseDir.endsWith("/dist");
+  if (isDistRuntime) {
+    return path.resolve(baseDir, "plugins", "claude-code", "depot");
+  }
+  return path.resolve(baseDir, "..", "..", "..", ".claude", "plugins", "depot");
+}
+
+export async function copyPluginToInstallDir(options: {
+  source: string;
+  target: string;
+  copyFn?: (src: string, dst: string) => Promise<void>;
+  chmodFn?: (p: string, mode: number) => Promise<void>;
+  walkFn?: (dir: string) => Promise<string[]>;
+}): Promise<{ filesWritten: string[]; chmodApplied: string[] }> {
+  const copyFn = options.copyFn ?? defaultCopy;
+  const chmodFn = options.chmodFn ?? fs.chmod;
+  const walkFn = options.walkFn ?? defaultWalk;
+
+  await fs.mkdir(options.target, { recursive: true });
+  await copyFn(options.source, options.target);
+
+  const filesWritten = await walkFn(options.target);
+  const chmodApplied: string[] = [];
+  for (const file of filesWritten) {
+    if (file.endsWith(".sh")) {
+      await chmodFn(file, 0o755);
+      chmodApplied.push(file);
+    }
+  }
+  return { filesWritten, chmodApplied };
+}
+
+async function defaultCopy(src: string, dst: string): Promise<void> {
+  await fs.cp(src, dst, { recursive: true });
+}
+
+async function defaultWalk(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...(await defaultWalk(full)));
+    } else if (entry.isFile()) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/**
+ * Build the SessionStart hook block that `--with-hooks` merges into
+ * `~/.claude/settings.json`. The matcher targets every session start.
+ */
+export function buildSessionStartHookBlock(scriptPath: string): {
+  SessionStart: Array<{
+    matcher: string;
+    hooks: Array<{ type: "command"; command: string }>;
+  }>;
+} {
+  return {
+    SessionStart: [
+      {
+        matcher: "*",
+        hooks: [{ type: "command", command: scriptPath }],
+      },
+    ],
+  };
+}
+
+/**
+ * Merge our SessionStart hook into an existing `settings.json` payload
+ * without dropping unrelated keys or other hook entries.
+ */
+export function mergeSettingsWithHook(
+  existing: Record<string, unknown>,
+  scriptPath: string,
+): Record<string, unknown> {
+  const next = { ...existing };
+  const hooks = (next.hooks as Record<string, unknown> | undefined) ?? {};
+  const sessionStart = Array.isArray(hooks.SessionStart) ? [...hooks.SessionStart] : [];
+  const ourEntry = {
+    matcher: "*",
+    hooks: [{ type: "command", command: scriptPath }],
+  };
+  const alreadyInstalled = sessionStart.some(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      Array.isArray((entry as { hooks?: unknown[] }).hooks) &&
+      (entry as { hooks: Array<{ command?: string }> }).hooks.some((h) => h.command === scriptPath),
+  );
+  if (!alreadyInstalled) sessionStart.push(ourEntry);
+  next.hooks = { ...hooks, SessionStart: sessionStart };
+  return next;
+}
+
+export function getHooksDirectory(homeDir?: string): string {
+  return path.join(homeDir ?? getHomeDirectory(), ".claude", "hooks");
+}
+
+export function getSettingsPath(homeDir?: string): string {
+  return path.join(homeDir ?? getHomeDirectory(), ".claude", "settings.json");
+}
+
+export const SESSION_START_HOOK_SCRIPT = `#!/usr/bin/env bash
+# depot SessionStart hook — surface pending actions on session start.
+# Best-effort: never fails the session.
+set -e
+
+if ! command -v depot >/dev/null 2>&1; then exit 0; fi
+if ! command -v jq >/dev/null 2>&1; then exit 0; fi
+
+OUTPUT="$(depot --json pending list --status pending 2>/dev/null || echo '{}')"
+COUNT="$(echo "$OUTPUT" | jq '.items | length // 0' 2>/dev/null || echo 0)"
+if [[ "\${COUNT:-0}" -eq 0 ]]; then exit 0; fi
+
+echo "📥 depot has $COUNT pending action(s) for this project:"
+echo "$OUTPUT" | jq -r '.items[] | "  [\\(.id)] \\(.humanReadableLabel) → \\(.slashCommand)"'
+echo ""
+echo "Run \\\`depot pending show <id>\\\` for details, or invoke the slash command directly."
+`;

@@ -6,7 +6,7 @@ import type { TaskRow } from "#/db/schema";
 import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainPrds from "#/modules/prds/domain";
 import * as DomainReviews from "#/modules/reviews/domain";
-import { effortSchema } from "#/shared/schemas";
+import { effortSchema, taskKindSchema } from "#/shared/schemas";
 import { getTaskDescriptionSections } from "#/modules/tasks/spec";
 import { formatDate } from "#/shared/utils";
 import type { CommandOutput } from "#/cli/command";
@@ -126,6 +126,11 @@ const addCommand = command({
       expected: "one of xs, s, m, l, xl",
       description: "Effort estimate (xs/s/m/l/xl)",
     },
+    kind: {
+      schema: taskKindSchema,
+      expected: "one of slice, gate, support",
+      description: "Task kind (slice/gate/support)",
+    },
     depends: {
       schema: Schema.String,
       description: "Comma-separated list of dependency task IDs",
@@ -186,6 +191,7 @@ const addCommand = command({
         description,
         doneCriteria,
         effort: args.effort,
+        kind: args.kind,
         dependsOn: dependencyIds,
         phaseNumber: args.phase,
       }),
@@ -436,6 +442,7 @@ const showCommand = command({
       ["Status", task.status],
       ["Position", task.position],
       ["Effort", task.effort],
+      ["Kind", task.kind],
       ["Format", task.descriptionFormat],
       ["Depends On", deps.length > 0 ? deps.join(", ") : null],
       ["Blocked", task.blockedReason],
@@ -502,6 +509,11 @@ const updateCommand = command({
       expected: "one of xs, s, m, l, xl",
       description: "New effort estimate (xs/s/m/l/xl)",
     },
+    kind: {
+      schema: taskKindSchema,
+      expected: "one of slice, gate, support",
+      description: "New task kind (slice/gate/support)",
+    },
     phase: {
       schema: Schema.Int.pipe(Schema.positive()),
       coerce: "integer",
@@ -553,6 +565,7 @@ const updateCommand = command({
       args.criteria === undefined &&
       args.criteriaFile === undefined &&
       args.effort === undefined &&
+      args.kind === undefined &&
       args.phase === undefined &&
       args.depends === undefined &&
       args.addDepends === undefined &&
@@ -561,7 +574,7 @@ const updateCommand = command({
     ) {
       return output.error(
         "no_changes",
-        "No changes provided. Use --title, --desc, --desc-file, --criteria, --criteria-file, --effort, --phase, --depends, --add-depends, --remove-depends, or --severity.",
+        "No changes provided. Use --title, --desc, --desc-file, --criteria, --criteria-file, --effort, --kind, --phase, --depends, --add-depends, --remove-depends, or --severity.",
       );
     }
 
@@ -604,6 +617,7 @@ const updateCommand = command({
         description,
         doneCriteria,
         effort: args.effort,
+        kind: args.kind,
         phaseNumber: args.phase,
         dependsOn: splitIds(args.depends),
         addDependsOn: splitIds(args.addDepends),

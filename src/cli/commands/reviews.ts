@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import { command } from "#/cli/command";
 import { runEffect } from "#/cli/runtime";
 import * as DomainReviews from "#/modules/reviews/domain";
+import * as DomainTasks from "#/modules/tasks/domain";
+import * as DomainPrds from "#/modules/prds/domain";
+import * as DomainOutOfScope from "#/modules/prds/out-of-scope";
 import { formatDate, formatRelativeTime } from "#/shared/utils";
 import { parseJsonSchema } from "#/lib/json";
 
@@ -194,6 +197,11 @@ const taskAddCommand = command({
       expected: "one of critical, major, minor, or info",
       description: "Finding severity",
     },
+    axis: {
+      schema: Schema.Literal("standards", "spec", "human"),
+      expected: "one of standards, spec, or human",
+      description: "Review axis (standards/spec for audit reviews, human for human reviews)",
+    },
   },
   run: async ({ args, output }) => {
     const task = await runEffect(
@@ -202,6 +210,7 @@ const taskAddCommand = command({
         description: args.description,
         doneCriteria: args.doneCriteria,
         severity: args.severity,
+        axis: args.axis,
       }),
     );
     if (output.isJson()) {
@@ -316,12 +325,68 @@ const taskListCommand = command({
   },
 });
 
+const taskTriageCommand = command({
+  meta: { name: "triage", description: "Set the triage state on a review task" },
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+    state: {
+      schema: Schema.Literal(
+        "needs-triage",
+        "needs-info",
+        "ready-for-agent",
+        "ready-for-human",
+        "wontfix",
+      ),
+      required: true,
+      positional: true,
+      description: "Triage state",
+    },
+    reason: { schema: Schema.String, alias: "r", description: "Reason for the triage decision" },
+  },
+  run: async ({ args, output }) => {
+    const updated = await runEffect(
+      DomainTasks.triageTask(args.taskId, args.state, {
+        reason: args.reason,
+        source: "human",
+      }),
+    );
+
+    // wontfix on a review task also writes an out-of-scope item linked back.
+    if (args.state === "wontfix") {
+      const prd = await runEffect(DomainPrds.getPrd(updated.prdRevisionId));
+      if (prd) {
+        await runEffect(
+          DomainOutOfScope.addOutOfScope({
+            projectId: prd.projectId,
+            prdRevisionId: prd.id,
+            title: updated.title,
+            reason: args.reason ?? "Triaged wontfix from review",
+            linkedReviewTaskId: updated.id,
+          }),
+        );
+      }
+    }
+
+    if (output.isJson()) output.success({ item: updated });
+    else
+      output.print(
+        `Task ${updated.id} triaged → ${args.state}${args.reason ? ` (${args.reason})` : ""}`,
+      );
+  },
+});
+
 const taskCommand = command({
   meta: { name: "task", description: "Manage review tasks" },
   subCommands: {
     add: taskAddCommand,
     "add-batch": taskAddBatchCommand,
     list: taskListCommand,
+    triage: taskTriageCommand,
   },
 });
 

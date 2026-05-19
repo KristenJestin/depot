@@ -51,7 +51,8 @@ describe("agent install helpers", () => {
 
     expect(content).toContain("description: Inject the live depot dev context");
     expect(content).toContain("Use the injected depot dev context below");
-    expect(content).toContain("!`depot context dev`");
+    expect(content).toContain("!`depot context dev $ARGUMENTS`");
+    expect(content).toContain("forwarded to `depot context dev <prd-id>`");
     expect(content).not.toContain("--ws");
   });
 
@@ -76,7 +77,7 @@ describe("agent install helpers", () => {
     const content = buildCommandFileContent("claude-code", "prd");
 
     expect(content).toContain("disable-model-invocation: true");
-    expect(content).toContain("shell: powershell");
+    expect(content).not.toContain("shell:");
   });
 
   it("builds codex skills that tell Codex to load live context", () => {
@@ -85,6 +86,8 @@ describe("agent install helpers", () => {
     expect(content).toContain("name: depot-dev");
     expect(content).toContain("description: Load the live depot dev context");
     expect(content).toContain("Run `depot context dev` immediately");
+    expect(content).toContain("If the user invoked `$depot-dev <prd-id>`");
+    expect(content).toContain("run `depot context dev <prd-id>` instead");
     expect(content).toContain("Do not rerun `depot context dev`");
   });
 
@@ -103,11 +106,16 @@ describe("agent install helpers", () => {
       },
     ]);
 
-    expect(writes).toHaveLength(2);
+    expect(writes).toHaveLength(4);
     expect(writes.map((write) => write.filePath.replace(/\\/g, "/"))).toEqual([
       "/home/tester/.config/opencode/commands/depot-prd.md",
       "/home/tester/.config/opencode/commands/depot-dev.md",
+      "/home/tester/.config/opencode/commands/depot-doc.md",
+      "/home/tester/.config/opencode/commands/depot-ship.md",
     ]);
+    expect(writes.find((write) => write.mode === "dev")?.content).toContain(
+      "!`depot context dev $ARGUMENTS`",
+    );
     for (const write of writes) {
       expect(write.content).toContain("!`depot context");
       expect(write.content).not.toContain("--ws");
@@ -123,19 +131,36 @@ describe("agent install helpers", () => {
       },
     ]);
 
-    expect(writes).toHaveLength(4);
-    expect(writes.map((write) => write.kind)).toEqual(["skill", "skill", "skill", "skill"]);
+    expect(writes).toHaveLength(8);
+    expect(writes.map((write) => write.kind)).toEqual([
+      "skill",
+      "skill",
+      "skill",
+      "skill",
+      "skill",
+      "skill",
+      "skill",
+      "skill",
+    ]);
     expect(writes.map((write) => write.filePath.replace(/\\/g, "/"))).toEqual([
       "/home/tester/.agents/skills/depot-prd/SKILL.md",
       "/home/tester/.agents/skills/depot-prd/agents/openai.yaml",
       "/home/tester/.agents/skills/depot-dev/SKILL.md",
       "/home/tester/.agents/skills/depot-dev/agents/openai.yaml",
+      "/home/tester/.agents/skills/depot-doc/SKILL.md",
+      "/home/tester/.agents/skills/depot-doc/agents/openai.yaml",
+      "/home/tester/.agents/skills/depot-ship/SKILL.md",
+      "/home/tester/.agents/skills/depot-ship/agents/openai.yaml",
     ]);
     expect(writes.map((write) => write.directory.replace(/\\/g, "/"))).toEqual([
       "/home/tester/.agents/skills/depot-prd",
       "/home/tester/.agents/skills/depot-prd/agents",
       "/home/tester/.agents/skills/depot-dev",
       "/home/tester/.agents/skills/depot-dev/agents",
+      "/home/tester/.agents/skills/depot-doc",
+      "/home/tester/.agents/skills/depot-doc/agents",
+      "/home/tester/.agents/skills/depot-ship",
+      "/home/tester/.agents/skills/depot-ship/agents",
     ]);
     expect(writes.map((write) => write.content)).toContain(
       [

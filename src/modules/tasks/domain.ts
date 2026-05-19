@@ -8,6 +8,8 @@ import {
   type TaskStatus,
   type Effort,
   type SeverityLevel,
+  type TaskKind,
+  type TriageState,
 } from "#/shared/validator";
 import { Db } from "#/services/database";
 import {
@@ -42,6 +44,7 @@ export const createTask = (input: {
   effort: Effort;
   dependsOn?: string[];
   phaseNumber?: number;
+  kind?: TaskKind;
 }) =>
   Effect.gen(function* () {
     if (!input.doneCriteria || input.doneCriteria.trim() === "") {
@@ -72,6 +75,7 @@ export const createTask = (input: {
           doneCriteria: input.doneCriteria,
           dependsOn: JSON.stringify(input.dependsOn ?? []),
           effort: input.effort,
+          kind: input.kind ?? "slice",
           phaseNumber: input.phaseNumber ?? null,
           status: "pending",
           blockedReason: null,
@@ -103,6 +107,7 @@ export const updateTask = (
     description?: string;
     doneCriteria?: string;
     effort?: Effort;
+    kind?: TaskKind;
     phaseNumber?: number | null;
     dependsOn?: string[];
     addDependsOn?: string[];
@@ -120,6 +125,7 @@ export const updateTask = (
       changes.description !== undefined ? "description" : null,
       changes.doneCriteria !== undefined ? "doneCriteria" : null,
       changes.effort !== undefined ? "effort" : null,
+      changes.kind !== undefined ? "kind" : null,
       changes.phaseNumber !== undefined ? "phaseNumber" : null,
       changes.dependsOn !== undefined ||
       changes.addDependsOn !== undefined ||
@@ -195,6 +201,7 @@ export const updateTask = (
           descriptionFormat: storedDescription?.descriptionFormat ?? task.descriptionFormat,
           doneCriteria: changes.doneCriteria ?? task.doneCriteria,
           effort: changes.effort ?? task.effort,
+          kind: changes.kind ?? task.kind,
           phaseNumber: changes.phaseNumber !== undefined ? changes.phaseNumber : task.phaseNumber,
           dependsOn: nextDependsOn ?? task.dependsOn,
           severity: changes.severity !== undefined ? changes.severity : task.severity,
@@ -465,6 +472,40 @@ export const skipTask = (id: string, reason: string) =>
         taskId: id,
         eventType: "task_skipped",
         payload: { taskId: task.id, title: task.title, reason },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
+    return rows[0]!;
+  });
+
+// ── Triage ────────────────────────────────────────────────────────────────────
+
+export const triageTask = (
+  id: string,
+  state: TriageState,
+  options: { reason?: string; source?: "ai" | "human" } = {},
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const task = yield* getTask(id);
+    if (!task) return yield* Effect.fail(new TaskNotFoundError({ id }));
+
+    const previousState = task.triageState;
+    const rows = yield* dbQuery(() =>
+      db.update(tasks).set({ triageState: state }).where(eq(tasks.id, id)).returning(),
+    );
+
+    const prd = yield* getPrd(task.prdRevisionId);
+    if (prd) {
+      yield* logActivity({
+        projectId: prd.projectId,
+        workspaceId: prd.workspaceId ?? undefined,
+        prdRevisionId: prd.id,
+        taskId: id,
+        eventType: "note",
+        payload: {
+          message: `Triage: ${previousState} → ${state}${options.reason ? ` (${options.reason})` : ""}`,
+        },
+        source: options.source ?? "ai",
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     }
     return rows[0]!;

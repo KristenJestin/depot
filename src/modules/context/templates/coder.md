@@ -84,12 +84,23 @@ For each finding task:
 
 The web UI watches the activity log to display what you are doing in near-real time. Without progress events, the user has no way to know whether you are working, stuck, or thinking.
 
-You MUST log a `coder_progress` event at each of these moments:
+**If the depot claude-code plugin is installed** (recommended for claude-code users), most
+progress events are emitted automatically by the plugin (`source: "plugin"`):
 
-- **start of a task** (right after `depot task start`)
-- **major file edit** (when you finish editing a file or set of related files)
-- **criterion verified** (when you confirm a `done_criterion` is satisfied during self-verification)
-- **note** (when you want to record a thought, decision, or finding inline — optional but encouraged)
+- `Edit` / `Write` / `MultiEdit` / `NotebookEdit` → emitted as `stage: edit`
+- `Bash` → emitted as `stage: tool` with `output` (500 chars) and `exitCode`
+- `Read` / `Grep` / `Glob` → emitted as `stage: note` (compact, path / pattern only)
+- Any tool failure → emitted as `stage: error`
+
+You only need to manually log the events the plugin can't infer:
+
+- **start of a task** (right after `depot task start`) — `stage: start`
+- **criterion verified** (when you confirm a `done_criterion` is met) — `stage: verify`
+- **note** (decisions, findings, blockers worth recording inline) — `stage: note`
+
+**Fallback for opencode / codex / no-plugin sessions** — log every moment manually:
+
+- **start of a task**, **major file edit**, **criterion verified**, **note**
 
 Use this command shape:
 
@@ -100,7 +111,10 @@ depot log add coder_progress \
   --payload '{"stage":"start","message":"<short human-readable summary>","taskId":"<task-id>"}'
 ```
 
-Stages: `"start" | "edit" | "verify" | "note"`. Always include the `taskId` in the payload when working on a specific task. For `edit`, also include `"file":"<path>"`. Keep `message` short (one sentence).
+Stages: `"start" | "edit" | "verify" | "tool" | "note" | "error"`. Always include the
+`taskId` in the payload when working on a specific task. For `edit`, also include
+`"file":"<path>"`. For `tool` (Bash), include `command`, optionally `output` and `exitCode`.
+Keep `message` short (one sentence).
 
 If you go more than ~2 minutes without logging during real work, you are silently invisible — log a `note` even if just `"thinking through approach"`.
 

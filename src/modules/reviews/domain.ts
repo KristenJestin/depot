@@ -8,6 +8,8 @@ import {
   type ReviewType,
   type SeverityLevel,
   type Effort,
+  type ReviewAxis,
+  type TriageState,
 } from "#/shared/validator";
 import { Db } from "#/services/database";
 import { InvalidTransitionError, ValidationError } from "#/shared/errors";
@@ -296,6 +298,12 @@ export const addReviewTask = (
     doneCriteria: string;
     severity?: SeverityLevel;
     effort?: Effort;
+    axis?: ReviewAxis;
+    triageState?: TriageState;
+    linkedFilePath?: string;
+    linkedStartLine?: number;
+    linkedEndLine?: number;
+    linkedDiffSha?: string;
   },
 ) =>
   Effect.gen(function* () {
@@ -326,6 +334,25 @@ export const addReviewTask = (
     const nextPosition = existing.length + 1;
     const storedDescription = normalizeTaskDescriptionForStorage(input.description);
 
+    // Validate axis matches review type — `standards`/`spec` for audit,
+    // `human` for human reviews.
+    if (input.axis !== undefined) {
+      if (review.type === "human" && input.axis !== "human") {
+        return yield* Effect.fail(
+          new ValidationError({
+            reason: `Review task on a human review can only have axis 'human' (got '${input.axis}')`,
+          }),
+        );
+      }
+      if (review.type === "agent" && input.axis === "human") {
+        return yield* Effect.fail(
+          new ValidationError({
+            reason: `Review task on an agent (audit) review must have axis 'standards' or 'spec' (got 'human')`,
+          }),
+        );
+      }
+    }
+
     const id = generateId();
     const rows = yield* dbQuery(() =>
       db
@@ -343,6 +370,12 @@ export const addReviewTask = (
           status: "pending",
           reviewId,
           severity: input.severity ?? null,
+          axis: input.axis ?? null,
+          triageState: input.triageState ?? "needs-triage",
+          linkedFilePath: input.linkedFilePath ?? null,
+          linkedStartLine: input.linkedStartLine ?? null,
+          linkedEndLine: input.linkedEndLine ?? null,
+          linkedDiffSha: input.linkedDiffSha ?? null,
           blockedReason: null,
           skipReason: null,
           startedAt: null,
