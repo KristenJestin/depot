@@ -56,7 +56,6 @@ export function StageTimeline({ cards }: { cards: StageCard[] }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Tasks</p>
       {futurePhases.length > 0 ? (
         <FuturePhases phases={futurePhases} defaultOpenId={defaultOpenId ?? null} />
       ) : null}

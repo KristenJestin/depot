@@ -90,13 +90,16 @@ function DocsRoute() {
       <PageContent className="mx-auto w-full max-w-4xl space-y-8 p-6">
         {docsQ.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
         {docsQ.error && (
-          <p className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+          <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
             {(docsQ.error as Error).message}
           </p>
         )}
 
         {data && (
           <>
+            {data.artifacts.length === 0 && (
+              <EmptyState message="No documentation artifacts yet. Run `depot doc sync` to generate docs from shipped PRDs." />
+            )}
             <ArtifactSection title="Architecture Decision Records (ADR)" items={adrs} />
             <ArtifactSection title="CONTEXT" items={contexts} />
             <ArtifactSection title="Glossary" items={glossaries} />

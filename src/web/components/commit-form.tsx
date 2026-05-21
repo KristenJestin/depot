@@ -18,21 +18,50 @@ type GitStatus = {
 export function CommitForm({
   prdId,
   suggestedCommitMessage,
+  repos,
   onCommitted,
 }: {
   prdId: string;
   suggestedCommitMessage?: string | null;
+  /** Repo names of a multi-repo PRD. Omitted/empty for a mono-repo PRD. */
+  repos?: string[];
   onCommitted?: (sha: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [unchecked, setUnchecked] = React.useState<Set<string>>(new Set());
+  const isMultiRepo = (repos?.length ?? 0) > 1;
+  const [activeRepo, setActiveRepo] = React.useState<string | null>(
+    isMultiRepo ? (repos?.[0] ?? null) : null,
+  );
+
+  // The `repos` prop can arrive after first render (it derives from the diff
+  // query). Keep `activeRepo` pointed at a valid repo once they load.
+  React.useEffect(() => {
+    if (!isMultiRepo) {
+      if (activeRepo !== null) setActiveRepo(null);
+      return;
+    }
+    if (!activeRepo || !repos?.includes(activeRepo)) {
+      setActiveRepo(repos?.[0] ?? null);
+    }
+  }, [isMultiRepo, repos, activeRepo]);
+
+  // When committing per repo, the file selection must reset between repos —
+  // the `unchecked` set holds paths scoped to one repo at a time.
+  const selectRepo = (repo: string) => {
+    setActiveRepo(repo);
+    setUnchecked(new Set());
+  };
 
   const statusQ = useQuery({
-    queryKey: ["prds", prdId, "git-status"],
+    queryKey: ["prds", prdId, "git-status", activeRepo ?? null],
     queryFn: async () => {
-      const res = await fetch(`/api/prds/${prdId}/git-status`);
+      const url = activeRepo
+        ? `/api/prds/${prdId}/git-status?repo=${encodeURIComponent(activeRepo)}`
+        : `/api/prds/${prdId}/git-status`;
+      const res = await fetch(url);
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);
@@ -48,7 +77,7 @@ export function CommitForm({
       const res = await fetch(`/api/prds/${prdId}/commit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message, files }),
+        body: JSON.stringify({ message, files, ...(activeRepo ? { repo: activeRepo } : {}) }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -57,10 +86,14 @@ export function CommitForm({
       return (await res.json()) as { sha: string; message: string; filesChanged: number };
     },
     onSuccess: ({ sha }) => {
-      setOpen(false);
       setMessage("");
+      setUnchecked(new Set());
       onCommitted?.(sha);
       void queryClient.invalidateQueries({ queryKey: ["prds", prdId] });
+      void statusQ.refetch();
+      // Keep the dialog open for multi-repo PRDs so the next repo can be
+      // committed without reopening; close it for the single-repo case.
+      if (!isMultiRepo) setOpen(false);
     },
   });
 
@@ -73,7 +106,7 @@ export function CommitForm({
     });
   };
 
-  const fileCount = statusQ.data?.files.length ?? 0;
+  const fileCount = statusQ.data?.files?.length ?? 0;
   const selectedCount = fileCount - unchecked.size;
 
   return (
@@ -88,6 +121,23 @@ export function CommitForm({
           <Dialog.Description className="mt-1 text-xs text-muted-foreground">
             {statusQ.data?.branch ? `Branch: ${statusQ.data.branch}` : "Resolving git status…"}
           </Dialog.Description>
+
+          {isMultiRepo && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Repo:</span>
+              {repos?.map((r) => (
+                <Button
+                  key={r}
+                  type="button"
+                  size="sm"
+                  variant={activeRepo === r ? "primary" : "secondary"}
+                  onClick={() => selectRepo(r)}
+                >
+                  {r}
+                </Button>
+              ))}
+            </div>
+          )}
 
           <label className="mt-4 block text-xs font-medium text-muted-foreground">
             Commit message
@@ -121,6 +171,7 @@ export function CommitForm({
 
           <label className="mt-4 block text-xs font-medium text-muted-foreground">
             Files ({selectedCount}/{fileCount} selected)
+            {isMultiRepo && activeRepo ? ` — ${activeRepo}` : ""}
           </label>
           <div className="mt-1 max-h-48 overflow-auto rounded-md border border-card-border bg-background p-2 text-xs">
             {statusQ.isLoading && <span className="text-muted-foreground">Loading…</span>}
@@ -149,14 +200,18 @@ export function CommitForm({
 
           <div className="mt-5 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
+              {isMultiRepo ? "Done" : "Cancel"}
             </Button>
             <Button
               variant="primary"
               onClick={() => commitM.mutate()}
               disabled={!message.trim() || selectedCount === 0 || commitM.isPending}
             >
-              {commitM.isPending ? "Committing…" : "Commit"}
+              {commitM.isPending
+                ? "Committing…"
+                : isMultiRepo && activeRepo
+                  ? `Commit ${activeRepo}`
+                  : "Commit"}
             </Button>
           </div>
         </Dialog.Popup>

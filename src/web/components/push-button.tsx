@@ -12,12 +12,15 @@ type GitStatus = {
   files: Array<{ path: string; status: string; staged: boolean }>;
 };
 
-export function PushButton({ prdId }: { prdId: string }) {
+export function PushButton({ prdId, repo }: { prdId: string; repo?: string }) {
   const queryClient = useQueryClient();
   const statusQ = useQuery({
-    queryKey: ["prds", prdId, "git-status"],
+    queryKey: ["prds", prdId, "git-status", repo ?? null],
     queryFn: async () => {
-      const res = await fetch(`/api/prds/${prdId}/git-status`);
+      const url = repo
+        ? `/api/prds/${prdId}/git-status?repo=${encodeURIComponent(repo)}`
+        : `/api/prds/${prdId}/git-status`;
+      const res = await fetch(url);
       if (!res.ok) return null;
       return (await res.json()) as GitStatus;
     },
@@ -25,7 +28,11 @@ export function PushButton({ prdId }: { prdId: string }) {
 
   const pushM = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/prds/${prdId}/push`, { method: "POST" });
+      const res = await fetch(`/api/prds/${prdId}/push`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(repo ? { repo } : {}),
+      });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);
@@ -48,7 +55,7 @@ export function PushButton({ prdId }: { prdId: string }) {
       disabled={pushM.isPending}
       title={pushM.error ? (pushM.error as Error).message : `Push ${ahead} commit(s)`}
     >
-      {pushM.isPending ? "Pushing…" : `Push (${ahead})`}
+      {pushM.isPending ? "Pushing…" : `Push ${repo ? `${repo} ` : ""}(${ahead})`}
     </Button>
   );
 }

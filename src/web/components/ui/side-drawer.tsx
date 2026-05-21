@@ -34,7 +34,7 @@ export function SideDrawer({ open, onOpenChange, children, ariaLabel }: Props) {
 export function SideDrawerCloseButton() {
   return (
     <Drawer.Close
-      className="inline-flex size-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       aria-label="Close drawer"
     >
       <XIcon className="size-4" />

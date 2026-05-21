@@ -1,14 +1,15 @@
 import * as React from "react";
+
 import { cn } from "#/web/lib/utils";
 
 /**
- * Horizontal resizable split. Two children separated by a draggable divider.
+ * Horizontal `split-resizable` layout: a fixed-width-but-draggable left pane
+ * and a right pane that fills the remaining space.
  *
- * Width is persisted in localStorage when `storageKey` is provided. Falls back
- * to `defaultLeftWidth` (px) when no persisted value exists.
- *
- * Intentionally minimal — no library, no virtualization, just a draggable
- * divider that resizes the left pane in pixels. Right pane fills the rest.
+ * The left pane width is held in a ref during a drag so the pointer handlers
+ * never re-bind mid-gesture (the earlier implementation kept `width` in the
+ * effect deps, which captured a stale value on pointer-up). React state is
+ * updated for rendering; `localStorage` persistence happens once on release.
  */
 export interface ResizableSplitProps {
   left: React.ReactNode;
@@ -25,62 +26,88 @@ export function ResizableSplit({
   right,
   storageKey,
   defaultLeftWidth = 320,
-  minLeftWidth = 200,
-  maxLeftWidth = 720,
+  minLeftWidth = 220,
+  maxLeftWidth = 640,
   className,
 }: ResizableSplitProps) {
+  const clamp = React.useCallback(
+    (value: number) => Math.min(maxLeftWidth, Math.max(minLeftWidth, value)),
+    [maxLeftWidth, minLeftWidth],
+  );
+
   const [width, setWidth] = React.useState<number>(() => {
     if (storageKey && typeof window !== "undefined") {
       const stored = window.localStorage.getItem(storageKey);
       const parsed = stored ? Number(stored) : NaN;
-      if (Number.isFinite(parsed) && parsed >= minLeftWidth && parsed <= maxLeftWidth) {
-        return parsed;
-      }
+      if (Number.isFinite(parsed)) return clamp(parsed);
     }
     return defaultLeftWidth;
   });
-  const dragging = React.useRef(false);
-  const containerRef = React.useRef<HTMLDivElement>(null);
 
-  const onMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    document.body.style.cursor = "col-resize";
-  };
+  const widthRef = React.useRef(width);
+  widthRef.current = width;
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const draggingRef = React.useRef(false);
 
   React.useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!dragging.current || !containerRef.current) return;
+    const onMove = (event: PointerEvent) => {
+      if (!draggingRef.current || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const next = Math.min(maxLeftWidth, Math.max(minLeftWidth, e.clientX - rect.left));
-      setWidth(next);
+      setWidth(clamp(event.clientX - rect.left));
     };
     const onUp = () => {
-      if (!dragging.current) return;
-      dragging.current = false;
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
       document.body.style.cursor = "";
-      if (storageKey) window.localStorage.setItem(storageKey, String(width));
+      document.body.style.userSelect = "";
+      if (storageKey) {
+        try {
+          window.localStorage.setItem(storageKey, String(widthRef.current));
+        } catch {
+          // Persistence is best-effort — ignore quota / availability errors.
+        }
+      }
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
     };
-  }, [maxLeftWidth, minLeftWidth, storageKey, width]);
+  }, [clamp, storageKey]);
+
+  const startDrag = (event: React.PointerEvent) => {
+    event.preventDefault();
+    draggingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  const nudge = (delta: number) => setWidth((current) => clamp(current + delta));
 
   return (
     <div ref={containerRef} className={cn("flex min-h-0 flex-1", className)}>
-      <div style={{ width }} className="shrink-0 overflow-auto">
+      <div style={{ width }} className="flex min-h-0 shrink-0 flex-col overflow-hidden">
         {left}
       </div>
       <div
         role="separator"
         aria-orientation="vertical"
-        onMouseDown={onMouseDown}
-        className="w-1 shrink-0 cursor-col-resize bg-card-border transition-colors hover:bg-primary/40"
+        aria-label="Resize panel"
+        tabIndex={0}
+        onPointerDown={startDrag}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            nudge(-16);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            nudge(16);
+          }
+        }}
+        className="w-1 shrink-0 cursor-col-resize bg-card-border transition-colors hover:bg-primary/40 focus-visible:bg-primary/60 focus-visible:outline-none"
       />
-      <div className="min-w-0 flex-1 overflow-auto">{right}</div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{right}</div>
     </div>
   );
 }

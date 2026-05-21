@@ -11,6 +11,7 @@ import * as DomainReviews from "#/modules/reviews/domain";
 import * as DomainActivity from "#/modules/activity/domain";
 import * as DomainOutOfScope from "#/modules/prds/out-of-scope";
 import * as DomainProjectConfig from "#/modules/projects/config";
+import { resolveProjectRepos, type ResolvedRepo } from "#/modules/projects/repos";
 import { logActivity } from "#/modules/activity/domain";
 import type { Variables } from "./types";
 
@@ -31,6 +32,8 @@ async function readGitStatus(wsPath: string): Promise<
 > {
   try {
     const { stdout } = await execFileAsync("git", [
+      "-c",
+      "core.excludesFile=",
       "-C",
       wsPath,
       "status",
@@ -64,6 +67,128 @@ async function readGitStatus(wsPath: string): Promise<
     return { ok: true, branch, upstream, ahead, behind, files };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Resolve which repo a repo-aware git endpoint should target.
+ *
+ * Goes through `resolveProjectRepos` so a mono-repo project (no `project_repo`
+ * rows) transparently resolves to its single implicit repo. When the project
+ * has registered repos and `repoName` is provided, the named repo is returned;
+ * when `repoName` is omitted, the primary repo (or the first one) is used so
+ * the legacy single-repo behaviour still has a sensible default.
+ */
+async function resolveTargetRepo(
+  projectId: string,
+  workspacePath: string,
+  repoName: string | null,
+): Promise<{ ok: true; repo: ResolvedRepo } | { ok: false; error: string }> {
+  const repos = await getRuntime().runPromise(resolveProjectRepos(projectId, workspacePath));
+  if (repos.length === 0) {
+    return { ok: false, error: "Project has no resolvable repo" };
+  }
+  if (repoName) {
+    const match = repos.find((r) => r.name === repoName);
+    if (!match) {
+      return {
+        ok: false,
+        error: `Unknown repo '${repoName}'. Known repos: ${repos.map((r) => r.name).join(", ")}`,
+      };
+    }
+    return { ok: true, repo: match };
+  }
+  const primary = repos.find((r) => r.isPrimary) ?? repos[0]!;
+  return { ok: true, repo: primary };
+}
+
+type DiffFile = { path: string; additions: number; deletions: number };
+
+type RepoDiff = {
+  repoName: string;
+  repoPath: string;
+  sha: string | null;
+  diff: string;
+  files: DiffFile[];
+};
+
+/** Parse `git --numstat` output into per-file additions/deletions. */
+function parseNumstat(stdout: string): DiffFile[] {
+  return stdout
+    .trim()
+    .split("\n")
+    .filter((l) => l.length > 0)
+    .map((line) => {
+      const [add, del, p] = line.split("\t");
+      return {
+        path: p ?? "",
+        additions: Number(add) || 0,
+        deletions: Number(del) || 0,
+      };
+    });
+}
+
+/** Diff the working tree of a repo against HEAD (best-effort file summary). */
+async function computeWorkingTreeDiff(
+  repoPath: string,
+): Promise<{ diff: string; files: DiffFile[] }> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", repoPath, "diff", "HEAD"], {
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    let files: DiffFile[] = [];
+    try {
+      const stat = await execFileAsync("git", ["-C", repoPath, "diff", "--numstat", "HEAD"], {
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      files = parseNumstat(stat.stdout);
+    } catch {
+      // best-effort summary
+    }
+    return { diff: stdout, files };
+  } catch {
+    // A repo path that is not a git checkout (or git unavailable) yields an
+    // empty diff rather than failing the whole aggregation.
+    return { diff: "", files: [] };
+  }
+}
+
+/** Diff a `since..until` commit range in a repo. Throws on git failure. */
+async function computeRangeDiff(
+  repoPath: string,
+  since: string,
+  until: string,
+): Promise<{ diff: string; files: DiffFile[] }> {
+  const range = `${since}..${until}`;
+  const { stdout } = await execFileAsync("git", ["-C", repoPath, "diff", range], {
+    maxBuffer: 50 * 1024 * 1024,
+  });
+  let files: DiffFile[] = [];
+  try {
+    const stat = await execFileAsync("git", ["-C", repoPath, "diff", "--numstat", range], {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    files = parseNumstat(stat.stdout);
+  } catch {
+    // best-effort summary
+  }
+  return { diff: stdout, files };
+}
+
+/**
+ * Diff a single squash-merge commit (`<sha>^..<sha>`). Used post-merge: each
+ * `prd_merge` anchors one commit per repo. Falls back to an empty diff when
+ * the commit or repo cannot be resolved so one missing repo never fails the
+ * whole aggregation.
+ */
+async function computeShowDiff(
+  repoPath: string,
+  sha: string,
+): Promise<{ diff: string; files: DiffFile[] }> {
+  try {
+    return await computeRangeDiff(repoPath, `${sha}^`, sha);
+  } catch {
+    return { diff: "", files: [] };
   }
 }
 
@@ -336,6 +461,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       eventType: a.eventType,
       payload: JSON.parse(a.payload) as Record<string, unknown>,
       taskId: a.taskId,
+      source: a.source,
       createdAt: a.createdAt,
     }));
 
@@ -368,15 +494,18 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
   })
   .get("/prds/:id/git-status", async (c) => {
     const { id } = c.req.param();
+    const repoName = c.req.query("repo") ?? null;
     const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
     if (!prd) return c.json({ error: "Not found" }, 404);
     const ws = prd.workspaceId
       ? await c.var.db.query.workspaces.findFirst({ where: { id: prd.workspaceId } })
       : null;
     if (!ws) return c.json({ error: "PRD has no workspace" }, 400);
-    const status = await readGitStatus(ws.path);
+    const target = await resolveTargetRepo(prd.projectId, ws.path, repoName);
+    if (!target.ok) return c.json({ error: target.error }, 400);
+    const status = await readGitStatus(target.repo.path);
     if (!status.ok) return c.json({ error: status.error }, 500);
-    return c.json(status, 200);
+    return c.json({ ...status, repo: target.repo.name }, 200);
   })
   .get("/prds/:id/commit-suggestion", async (c) => {
     const { id } = c.req.param();
@@ -415,18 +544,21 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       : null;
     if (!ws) return c.json({ error: "PRD has no workspace" }, 400);
 
-    const body = (await c.req.json()) as { message?: string; files?: string[] };
+    const body = (await c.req.json()) as { message?: string; files?: string[]; repo?: string };
     const message = body.message?.trim();
     if (!message) return c.json({ error: "Commit message is required" }, 422);
 
-    const status = await readGitStatus(ws.path);
+    const target = await resolveTargetRepo(prd.projectId, ws.path, body.repo ?? null);
+    if (!target.ok) return c.json({ error: target.error }, 400);
+    const repoPath = target.repo.path;
+
+    const status = await readGitStatus(repoPath);
     if (!status.ok) return c.json({ error: status.error }, 500);
 
-    // Resolve base branch from project config (default to common protected names).
-    const baseBranchRow = await getRuntime().runPromise(
-      DomainProjectConfig.getConfig(prd.projectId, "baseBranch"),
-    );
-    const baseBranch = baseBranchRow?.value ?? "main";
+    // The base branch comes from the targeted repo (a `project_repo` carries
+    // its own `baseBranch`). For the implicit mono-repo it falls back to the
+    // project config / `main` — `resolveProjectRepos` already applies that.
+    const baseBranch = target.repo.baseBranch;
     if (
       status.branch &&
       (status.branch === baseBranch || PROTECTED_BASE_BRANCHES.has(status.branch))
@@ -460,12 +592,12 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
 
     try {
       if (filesToCommit.length > 0) {
-        await execFileAsync("git", ["-C", ws.path, "add", "--", ...filesToCommit]);
+        await execFileAsync("git", ["-C", repoPath, "add", "--", ...filesToCommit]);
       }
-      await execFileAsync("git", ["-C", ws.path, "commit", "-m", message]);
+      await execFileAsync("git", ["-C", repoPath, "commit", "-m", message]);
       const { stdout: shaStdout } = await execFileAsync("git", [
         "-C",
-        ws.path,
+        repoPath,
         "rev-parse",
         "HEAD",
       ]);
@@ -476,11 +608,14 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
           workspaceId: prd.workspaceId ?? undefined,
           prdRevisionId: prd.id,
           eventType: "git_commit",
-          payload: { sha, message, filesChanged: filesToCommit.length },
+          payload: { sha, message, filesChanged: filesToCommit.length, repo: target.repo.name },
           source: "human",
         }),
       );
-      return c.json({ sha, message, filesChanged: filesToCommit.length }, 201);
+      return c.json(
+        { sha, message, filesChanged: filesToCommit.length, repo: target.repo.name },
+        201,
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return c.json({ error: `git commit failed: ${msg}` }, 422);
@@ -495,7 +630,12 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       : null;
     if (!ws) return c.json({ error: "PRD has no workspace" }, 400);
 
-    const status = await readGitStatus(ws.path);
+    const body = (await c.req.json().catch(() => ({}))) as { repo?: string };
+    const target = await resolveTargetRepo(prd.projectId, ws.path, body.repo ?? null);
+    if (!target.ok) return c.json({ error: target.error }, 400);
+    const repoPath = target.repo.path;
+
+    const status = await readGitStatus(repoPath);
     if (!status.ok) return c.json({ error: status.error }, 500);
     if (status.branch && PROTECTED_BASE_BRANCHES.has(status.branch)) {
       return c.json({ error: `Refusing to push from protected branch '${status.branch}'` }, 403);
@@ -514,7 +654,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
     }
 
     try {
-      await execFileAsync("git", ["-C", ws.path, "push", "origin", status.branch ?? "HEAD"]);
+      await execFileAsync("git", ["-C", repoPath, "push", "origin", status.branch ?? "HEAD"]);
       const commitsPushed = status.ahead;
       await getRuntime().runPromise(
         logActivity({
@@ -526,11 +666,15 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
             branch: status.branch ?? "HEAD",
             remote: "origin",
             commitsPushed,
+            repo: target.repo.name,
           },
           source: "human",
         }),
       );
-      return c.json({ branch: status.branch ?? "HEAD", commitsPushed }, 200);
+      return c.json(
+        { branch: status.branch ?? "HEAD", commitsPushed, repo: target.repo.name },
+        200,
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return c.json({ error: `git push failed: ${msg}` }, 500);
@@ -630,44 +774,82 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       return c.json({ error: "PRD is not associated with a workspace" }, 400);
     }
 
-    let mode: "working-tree" | "phase" | "full" = "working-tree";
-    let since: string | null = null;
-    let until: string | null = null;
-    const gitArgs: string[] = ["-C", workspace.path, "diff"];
-
     if (fullParam === "true") {
-      // If the feature branch was squash-merged, `activatedAtSha` / `doneAtSha`
-      // may now refer to garbage-collected commits. When that happens and we
-      // have a `mergedAtSha` (post-merge commit on the base branch), fall
-      // back to that single commit's diff — git show <mergedAtSha> via the
-      // `mergedAtSha^..mergedAtSha` range gives the full PRD diff in one go.
-      const reachable = prd.activatedAtSha
-        ? await execFileAsync("git", [
-            "-C",
-            workspace.path,
-            "cat-file",
-            "-e",
-            prd.activatedAtSha,
-          ]).then(
-            () => true,
-            () => false,
-          )
-        : false;
+      // Post-merge view: aggregate one `git show` per anchored merge commit.
+      // For a multi-repo PRD this yields N repo diffs; a mono-repo PRD has a
+      // single `prd_merge` row (or falls back to the legacy `mergedAtSha`).
+      const merges = await getRuntime().runPromise(DomainPrds.listMerges(id));
+      const repoDiffs: RepoDiff[] = [];
 
-      if (!reachable && prd.mergedAtSha) {
-        mode = "full";
-        since = `${prd.mergedAtSha}^`;
-        until = prd.mergedAtSha;
-        gitArgs.push(`${since}..${until}`);
-      } else if (prd.activatedAtSha) {
-        mode = "full";
-        since = prd.activatedAtSha;
-        until = prd.doneAtSha ?? "HEAD";
-        gitArgs.push(`${since}..${until}`);
+      if (merges.length > 0) {
+        for (const merge of merges) {
+          const diff = await computeShowDiff(merge.repoPath, merge.mergeSha);
+          repoDiffs.push({
+            repoName: merge.repoName,
+            repoPath: merge.repoPath,
+            sha: merge.mergeSha,
+            ...diff,
+          });
+        }
       } else {
-        return c.json({ error: "PRD has not been activated; no full diff range" }, 400);
+        // Legacy fallback: no `prd_merge` row, but a `mergedAtSha` /
+        // reachable `activatedAtSha` range on the implicit repo.
+        const repos = await getRuntime().runPromise(
+          resolveProjectRepos(prd.projectId, workspace.path),
+        );
+        const repo = repos.find((r) => r.isPrimary) ?? repos[0];
+        if (!repo) {
+          return c.json({ error: "PRD has no resolvable repo" }, 400);
+        }
+        const reachable = prd.activatedAtSha
+          ? await execFileAsync("git", [
+              "-C",
+              repo.path,
+              "cat-file",
+              "-e",
+              prd.activatedAtSha,
+            ]).then(
+              () => true,
+              () => false,
+            )
+          : false;
+        if (!reachable && prd.mergedAtSha) {
+          const diff = await computeRangeDiff(repo.path, `${prd.mergedAtSha}^`, prd.mergedAtSha);
+          repoDiffs.push({
+            repoName: repo.name,
+            repoPath: repo.path,
+            sha: prd.mergedAtSha,
+            ...diff,
+          });
+        } else if (prd.activatedAtSha) {
+          const until = prd.doneAtSha ?? "HEAD";
+          const diff = await computeRangeDiff(repo.path, prd.activatedAtSha, until);
+          repoDiffs.push({
+            repoName: repo.name,
+            repoPath: repo.path,
+            sha: prd.activatedAtSha,
+            ...diff,
+          });
+        } else {
+          return c.json({ error: "PRD has not been activated; no full diff range" }, 400);
+        }
       }
-    } else if (phaseParam) {
+
+      const first = repoDiffs[0];
+      return c.json(
+        {
+          mode: "full" as const,
+          since: null,
+          until: first?.sha ?? null,
+          diff: first?.diff ?? "",
+          files: first?.files ?? [],
+          repos: repoDiffs,
+        },
+        200,
+      );
+    }
+
+    if (phaseParam) {
       const phaseN = Number(phaseParam);
       if (!Number.isFinite(phaseN) || phaseN <= 0) {
         return c.json({ error: "Invalid phase" }, 400);
@@ -675,50 +857,63 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       const allSnaps = await getRuntime().runPromise(DomainPrds.listPhaseSnapshots(id));
       const target = allSnaps.find((s) => s.phaseNumber === phaseN);
       const prev = allSnaps.find((s) => s.phaseNumber === phaseN - 1);
-      since = prev?.advancedAtSha ?? prd.activatedAtSha;
-      until = target?.advancedAtSha ?? "HEAD";
+      const since = prev?.advancedAtSha ?? prd.activatedAtSha;
+      const until = target?.advancedAtSha ?? "HEAD";
       if (!since) {
         return c.json({ error: "Cannot resolve phase range; PRD not activated" }, 400);
       }
-      mode = "phase";
-      gitArgs.push(`${since}..${until}`);
-    } else {
-      gitArgs.push("HEAD");
-    }
-
-    let stdout = "";
-    try {
-      const result = await execFileAsync("git", gitArgs, { maxBuffer: 50 * 1024 * 1024 });
-      stdout = result.stdout;
-    } catch (e) {
+      // Phase snapshots anchor a single SHA — phase diffs stay mono-repo
+      // (per-repo phase capture is a documented follow-up).
+      const diff = await computeRangeDiff(workspace.path, since, until).catch((e) => e as Error);
+      if (diff instanceof Error) {
+        return c.json({ error: `git diff failed: ${diff.message}` }, 500);
+      }
       return c.json(
-        { error: `git diff failed: ${e instanceof Error ? e.message : String(e)}` },
-        500,
+        {
+          mode: "phase" as const,
+          since,
+          until,
+          diff: diff.diff,
+          files: diff.files,
+          repos: [
+            {
+              repoName: "(default)",
+              repoPath: workspace.path,
+              sha: until,
+              diff: diff.diff,
+              files: diff.files,
+            },
+          ],
+        },
+        200,
       );
     }
 
-    // Lightweight file summary from git numstat (additions/deletions per file).
-    let files: Array<{ path: string; additions: number; deletions: number }> = [];
-    try {
-      const statArgs = [...gitArgs.slice(0, -1), "--numstat", gitArgs[gitArgs.length - 1]!];
-      const stat = await execFileAsync("git", statArgs, { maxBuffer: 10 * 1024 * 1024 });
-      files = stat.stdout
-        .trim()
-        .split("\n")
-        .filter((l) => l.length > 0)
-        .map((line) => {
-          const [add, del, path] = line.split("\t");
-          return {
-            path: path ?? "",
-            additions: Number(add) || 0,
-            deletions: Number(del) || 0,
-          };
-        });
-    } catch {
-      // best-effort summary
+    // Working-tree view: `git diff HEAD` per registered repo (one implicit
+    // repo for a mono-repo project).
+    const repos = await getRuntime().runPromise(resolveProjectRepos(prd.projectId, workspace.path));
+    const repoDiffs: RepoDiff[] = [];
+    for (const repo of repos) {
+      const diff = await computeWorkingTreeDiff(repo.path);
+      repoDiffs.push({
+        repoName: repo.name,
+        repoPath: repo.path,
+        sha: null,
+        ...diff,
+      });
     }
-
-    return c.json({ mode, since, until, diff: stdout, files }, 200);
+    const first = repoDiffs[0];
+    return c.json(
+      {
+        mode: "working-tree" as const,
+        since: null,
+        until: null,
+        diff: first?.diff ?? "",
+        files: first?.files ?? [],
+        repos: repoDiffs,
+      },
+      200,
+    );
   })
   .get("/prds/:id/context-panel", async (c) => {
     const { id } = c.req.param();

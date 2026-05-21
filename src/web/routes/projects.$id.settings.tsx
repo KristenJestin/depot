@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
 
 import { PageContent, PageShell, PageTopBar } from "#/web/components/page-shell";
+import { SettingsTree, type SettingsSection } from "#/web/components/settings-tree";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -12,6 +13,8 @@ import {
 } from "#/web/components/ui/breadcrumb";
 import { Button } from "#/web/components/ui/button";
 import { Badge } from "#/web/components/ui/badge";
+import { Checkbox } from "#/web/components/ui/checkbox";
+import { EmptyState } from "#/web/components/ui/empty-state";
 import { Input } from "#/web/components/ui/input";
 import {
   Select,
@@ -21,6 +24,7 @@ import {
   SelectValue,
 } from "#/web/components/ui/select";
 import { Textarea } from "#/web/components/ui/textarea";
+import { cn } from "#/web/lib/utils";
 
 type ConfigItem = {
   key: string;
@@ -38,11 +42,32 @@ type Directive = {
   title: string;
   instruction: string;
   kind: "command" | "rule";
+  repoTarget: string;
   blocking: boolean;
   position: number;
   enabled: boolean;
   lastRunAt: string | null;
   lastRunStatus: "ok" | "fail" | null;
+};
+
+type Repo = {
+  id: string | null;
+  name: string;
+  path: string;
+  isPrimary: boolean;
+  baseBranch: string;
+  implicit?: boolean;
+};
+
+type DocProfile = {
+  id: string;
+  name: string;
+  targetRoot: string;
+  language: string;
+  style: string;
+  sources: string;
+  guardrails: string;
+  commitPolicy: string;
 };
 
 export const Route = createFileRoute("/projects/$id/settings")({
@@ -120,11 +145,7 @@ function ConfigKeyEditor({ projectId, item }: { projectId: string; item: ConfigI
           </span>
         )}
       </div>
-      {error && (
-        <p className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
-          {error}
-        </p>
-      )}
+      {error && <SettingsError message={error} className="mt-2" />}
     </div>
   );
 }
@@ -142,6 +163,7 @@ function DirectivesSection({ projectId }: { projectId: string }) {
 
   const [newScope, setNewScope] = React.useState("pre-review");
   const [newKind, setNewKind] = React.useState<"command" | "rule">("command");
+  const [newRepoTarget, setNewRepoTarget] = React.useState("auto");
   const [newTitle, setNewTitle] = React.useState("");
   const [newInstruction, setNewInstruction] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
@@ -155,6 +177,7 @@ function DirectivesSection({ projectId }: { projectId: string }) {
         body: JSON.stringify({
           scope: newScope,
           kind: newKind,
+          repoTarget: newRepoTarget,
           title: newTitle,
           instruction: newInstruction,
         }),
@@ -169,6 +192,7 @@ function DirectivesSection({ projectId }: { projectId: string }) {
     onSuccess: () => {
       setNewTitle("");
       setNewInstruction("");
+      setNewRepoTarget("auto");
       void queryClient.invalidateQueries({ queryKey: ["projects", projectId, "directives"] });
     },
   });
@@ -241,6 +265,11 @@ function DirectivesSection({ projectId }: { projectId: string }) {
                   <Badge variant="outline" className="text-[10px]">
                     {d.kind}
                   </Badge>
+                  {d.kind === "command" && (
+                    <Badge variant="subtle" className="text-[10px]">
+                      repo: {d.repoTarget}
+                    </Badge>
+                  )}
                   {d.blocking && (
                     <Badge variant="outline" className="text-[10px]">
                       blocking
@@ -325,6 +354,18 @@ function DirectivesSection({ projectId }: { projectId: string }) {
             </Select>
           </label>
         </div>
+        {newKind === "command" && (
+          <label className="mt-3 block text-xs">
+            Repo target
+            <Input
+              type="text"
+              value={newRepoTarget}
+              onChange={(e) => setNewRepoTarget(e.target.value)}
+              placeholder="auto | all | workspace | <repo-name>"
+              className="mt-1"
+            />
+          </label>
+        )}
         <Input
           type="text"
           placeholder="Title (e.g. Format code)"
@@ -343,11 +384,7 @@ function DirectivesSection({ projectId }: { projectId: string }) {
           rows={3}
           className="mt-3"
         />
-        {error && (
-          <p className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
-            {error}
-          </p>
-        )}
+        {error && <SettingsError message={error} className="mt-2" />}
         <div className="mt-3 flex justify-end">
           <Button
             size="sm"
@@ -362,59 +399,328 @@ function DirectivesSection({ projectId }: { projectId: string }) {
   );
 }
 
-type SettingsSection = "configuration" | "directives";
+function ReposSection({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const reposQ = useQuery({
+    queryKey: ["projects", projectId, "repos"],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/repos`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as { items: Repo[]; implicit: boolean };
+    },
+  });
 
-function SettingsTree({
-  active,
-  onSelect,
-}: {
-  active: SettingsSection;
-  onSelect: (s: SettingsSection) => void;
-}) {
+  const [newName, setNewName] = React.useState("");
+  const [newPath, setNewPath] = React.useState("");
+  const [newBaseBranch, setNewBaseBranch] = React.useState("main");
+  const [newPrimary, setNewPrimary] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "repos"] });
+
+  const addM = useMutation({
+    mutationFn: async () => {
+      setError(null);
+      const res = await fetch(`/api/projects/${projectId}/repos`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: newName,
+          path: newPath,
+          baseBranch: newBaseBranch,
+          isPrimary: newPrimary,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      return res.json();
+    },
+    onError: (e) => setError((e as Error).message),
+    onSuccess: () => {
+      setNewName("");
+      setNewPath("");
+      setNewBaseBranch("main");
+      setNewPrimary(false);
+      void invalidate();
+    },
+  });
+
+  const patchM = useMutation({
+    mutationFn: async ({ id, baseBranch }: { id: string; baseBranch: string }) => {
+      const res = await fetch(`/api/projects/${projectId}/repos/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseBranch }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+    onSuccess: () => invalidate(),
+  });
+
+  const removeM = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/projects/${projectId}/repos/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+    onSuccess: () => invalidate(),
+  });
+
+  const items = reposQ.data?.items ?? [];
+  const implicit = reposQ.data?.implicit ?? false;
+
   return (
-    <nav className="w-56 shrink-0 border-r border-card-border bg-card p-3 text-sm">
-      <p className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Settings
+    <section>
+      <h2 className="mb-3 text-sm font-semibold">Repos</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        The git repos that make up this project. Multi-repo projects register one entry per repo so
+        merge anchoring, directives, and diffs target each repo independently.
       </p>
-      <button
-        type="button"
-        onClick={() => onSelect("configuration")}
-        className={
-          "mt-1 block w-full rounded-md px-2 py-1.5 text-left transition-colors " +
-          (active === "configuration"
-            ? "bg-accent text-accent-foreground"
-            : "hover:bg-accent/60 hover:text-foreground")
-        }
-      >
-        Configuration
-      </button>
-      <button
-        type="button"
-        onClick={() => onSelect("directives")}
-        className={
-          "block w-full rounded-md px-2 py-1.5 text-left transition-colors " +
-          (active === "directives"
-            ? "bg-accent text-accent-foreground"
-            : "hover:bg-accent/60 hover:text-foreground")
-        }
-      >
-        Directives
-      </button>
-    </nav>
+
+      {implicit ? (
+        <div className="mb-4 rounded-md border border-card-border bg-card p-3 text-sm">
+          {items.map((r) => (
+            <div key={r.name} className="flex items-center gap-2">
+              <span className="font-medium">{r.name}</span>
+              <Badge variant="subtle" className="text-[10px]">
+                implicit
+              </Badge>
+              <code className="text-[11px] text-muted-foreground">{r.path}</code>
+              <code className="ml-auto text-[11px] text-muted-foreground">{r.baseBranch}</code>
+            </div>
+          ))}
+          <p className="mt-2 text-xs text-muted-foreground">
+            This project uses a single implicit repo (the current workspace). Add entries here only
+            for multi-repo projects.
+          </p>
+        </div>
+      ) : (
+        <ul className="mb-4 space-y-2">
+          {items.map((r) => (
+            <RepoRow
+              key={r.id ?? r.name}
+              repo={r}
+              onSave={(baseBranch) => r.id && patchM.mutate({ id: r.id, baseBranch })}
+              onRemove={() => r.id && removeM.mutate(r.id)}
+            />
+          ))}
+        </ul>
+      )}
+
+      <div className="rounded-md border border-dashed border-card-border bg-card p-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Add repo
+        </h3>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Input
+            type="text"
+            placeholder="Name (e.g. api)"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+          />
+          <Input
+            type="text"
+            placeholder="Base branch (e.g. main)"
+            value={newBaseBranch}
+            onChange={(e) => setNewBaseBranch(e.target.value)}
+          />
+        </div>
+        <Input
+          type="text"
+          placeholder="Path (absolute or relative to the workspace)"
+          value={newPath}
+          onChange={(e) => setNewPath(e.target.value)}
+          className="mt-3"
+        />
+        <label className="mt-3 flex items-center gap-2 text-xs">
+          <Checkbox
+            checked={newPrimary}
+            onCheckedChange={(checked) => setNewPrimary(checked === true)}
+          />
+          Primary repo
+        </label>
+        {error && <SettingsError message={error} className="mt-2" />}
+        <div className="mt-3 flex justify-end">
+          <Button
+            size="sm"
+            onClick={() => addM.mutate()}
+            disabled={!newName.trim() || !newPath.trim() || addM.isPending}
+          >
+            Add
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RepoRow({
+  repo,
+  onSave,
+  onRemove,
+}: {
+  repo: Repo;
+  onSave: (baseBranch: string) => void;
+  onRemove: () => void;
+}) {
+  const [baseBranch, setBaseBranch] = React.useState(repo.baseBranch);
+  React.useEffect(() => {
+    setBaseBranch(repo.baseBranch);
+  }, [repo.baseBranch]);
+
+  return (
+    <li className="rounded-md border border-card-border bg-card p-3 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="font-medium">{repo.name}</span>
+        {repo.isPrimary && (
+          <Badge variant="outline" className="text-[10px]">
+            primary
+          </Badge>
+        )}
+        <code className="text-[11px] text-muted-foreground">{repo.path}</code>
+        <div className="ml-auto flex items-center gap-2">
+          <Input
+            type="text"
+            value={baseBranch}
+            onChange={(e) => setBaseBranch(e.target.value)}
+            className="w-40 py-1"
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => onSave(baseBranch)}
+            disabled={baseBranch === repo.baseBranch}
+          >
+            Save
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onRemove}>
+            Remove
+          </Button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function ConfigurationSection({ projectId }: { projectId: string }) {
+  const configQ = useQuery({
+    queryKey: ["projects", projectId, "config"],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/config`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as { items: ConfigItem[]; knownKeys: string[] };
+    },
+  });
+
+  return (
+    <section>
+      <h2 className="mb-1 text-sm font-semibold">Configuration</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Per-project overrides for the keys depot reads at runtime. Empty fields fall back to the
+        listed default.
+      </p>
+      {configQ.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {configQ.error && <SettingsError message={(configQ.error as Error).message} />}
+      {configQ.data &&
+        (configQ.data.items.length === 0 ? (
+          <EmptyState message="No configurable keys for this project." />
+        ) : (
+          <div className="space-y-3">
+            {configQ.data.items.map((item) => (
+              <ConfigKeyEditor key={item.key} projectId={projectId} item={item} />
+            ))}
+          </div>
+        ))}
+    </section>
+  );
+}
+
+function DocProfilesSection({ projectId }: { projectId: string }) {
+  const docsQ = useQuery({
+    queryKey: ["projects", projectId, "docs"],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/docs`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as { profiles: DocProfile[] };
+    },
+  });
+
+  const profiles = docsQ.data?.profiles ?? [];
+
+  return (
+    <section>
+      <h2 className="mb-1 text-sm font-semibold">Doc profiles</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        The doc-sync profiles agents use to keep documentation in step with shipped PRDs. Manage
+        them from the CLI; the full sync history lives on the project docs page.
+      </p>
+      {docsQ.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {docsQ.error && <SettingsError message={(docsQ.error as Error).message} />}
+      {docsQ.data &&
+        (profiles.length === 0 ? (
+          <EmptyState
+            message="No doc profiles configured."
+            action={
+              <Link
+                to="/projects/$id/docs"
+                params={{ id: projectId }}
+                className="rounded-md border border-card-border bg-secondary px-3 py-1 text-xs transition-colors hover:bg-accent"
+              >
+                Open docs page
+              </Link>
+            }
+          />
+        ) : (
+          <ul className="space-y-2">
+            {profiles.map((p) => (
+              <li key={p.id} className="rounded-md border border-card-border bg-card p-3 text-sm">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-medium">{p.name}</span>
+                  <Badge variant="outline" className="text-[10px]">
+                    {p.style}
+                  </Badge>
+                  <Badge variant="subtle" className="text-[10px]">
+                    {p.commitPolicy}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Target: <code>{p.targetRoot}</code> · Language: {p.language}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ))}
+      {profiles.length > 0 && (
+        <Link
+          to="/projects/$id/docs"
+          params={{ id: projectId }}
+          className="mt-3 inline-block text-xs text-primary hover:underline"
+        >
+          View doc artifacts and sync history →
+        </Link>
+      )}
+    </section>
+  );
+}
+
+function SettingsError({ message, className }: { message: string; className?: string }) {
+  return (
+    <p
+      className={cn(
+        "rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive",
+        className,
+      )}
+    >
+      {message}
+    </p>
   );
 }
 
 function SettingsRoute() {
   const { id } = Route.useParams();
   const [section, setSection] = React.useState<SettingsSection>("configuration");
-  const configQ = useQuery({
-    queryKey: ["projects", id, "config"],
-    queryFn: async () => {
-      const res = await fetch(`/api/projects/${id}/config`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return (await res.json()) as { items: ConfigItem[]; knownKeys: string[] };
-    },
-  });
 
   return (
     <PageShell>
@@ -436,17 +742,10 @@ function SettingsRoute() {
       <div className="flex min-h-0 flex-1">
         <SettingsTree active={section} onSelect={setSection} />
         <PageContent className="mx-auto w-full max-w-3xl space-y-8 p-6">
-          {section === "configuration" && (
-            <section>
-              <h2 className="mb-3 text-sm font-semibold">Configuration</h2>
-              <div className="space-y-3">
-                {configQ.data?.items.map((item) => (
-                  <ConfigKeyEditor key={item.key} projectId={id} item={item} />
-                ))}
-              </div>
-            </section>
-          )}
+          {section === "configuration" && <ConfigurationSection projectId={id} />}
+          {section === "repos" && <ReposSection projectId={id} />}
           {section === "directives" && <DirectivesSection projectId={id} />}
+          {section === "doc-profiles" && <DocProfilesSection projectId={id} />}
         </PageContent>
       </div>
     </PageShell>

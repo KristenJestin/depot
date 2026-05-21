@@ -29,6 +29,35 @@ export class WorkspaceHasLinkedPrdsError extends Data.TaggedError("WorkspaceHasL
   }
 }
 
+// ── Project repos ─────────────────────────────────────────────────────────────
+
+export class RepoNotRegisteredError extends Data.TaggedError("RepoNotRegisteredError")<{
+  projectId: string;
+  repoRootPath: string;
+  knownRepos: string[];
+}> {
+  get message() {
+    const known =
+      this.knownRepos.length > 0
+        ? `Known repos: ${this.knownRepos.join(", ")}.`
+        : "No repos registered for this project.";
+    return (
+      `Repo at '${this.repoRootPath}' is not registered for project '${this.projectId}'. ${known} ` +
+      `Register it with \`depot project repo add\` (or the project settings page), ` +
+      `or pass an explicit --repo/--sha.`
+    );
+  }
+}
+
+export class ShaNotFoundError extends Data.TaggedError("ShaNotFoundError")<{
+  repoPath: string;
+  sha: string;
+}> {
+  get message() {
+    return `Commit '${this.sha}' does not exist in repo '${this.repoPath}'.`;
+  }
+}
+
 // ── PRDs ──────────────────────────────────────────────────────────────────────
 
 export class PrdNotFoundError extends Data.TaggedError("PrdNotFoundError")<{

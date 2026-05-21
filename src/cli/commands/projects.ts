@@ -11,6 +11,8 @@ import { Db } from "#/services/database";
 import { dbQuery } from "#/shared/db";
 import * as DomainProjectConfig from "#/modules/projects/config";
 import * as DomainDirectives from "#/modules/projects/directives";
+import * as DomainRepos from "#/modules/projects/repos";
+import { existsSync } from "node:fs";
 import {
   VALID_DIRECTIVE_KINDS,
   VALID_DIRECTIVE_SCOPES,
@@ -497,6 +499,10 @@ const directiveAddCommand = command({
     instruction: { schema: Schema.String.pipe(Schema.minLength(1)), required: true },
     nonBlocking: { schema: Schema.Boolean, type: "boolean", default: false },
     position: { schema: Schema.Int, coerce: "integer" },
+    repoTarget: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "Repo target for command directives (auto|all|workspace|<repo-name>)",
+    },
   },
   run: async ({ args, ws, output }) => {
     const item = await runEffect(
@@ -508,6 +514,7 @@ const directiveAddCommand = command({
         instruction: args.instruction,
         blocking: !args.nonBlocking,
         position: args.position,
+        repoTarget: args.repoTarget,
       }),
     );
     if (output.isJson()) output.success({ item });
@@ -563,6 +570,7 @@ const directiveShowCommand = command({
         ["ID", item.id],
         ["Scope", item.scope],
         ["Kind", item.kind],
+        ["Repo target", item.repoTarget],
         ["Title", item.title],
         ["Instruction", item.instruction],
         ["Blocking", item.blocking],
@@ -693,6 +701,148 @@ const directiveCommand = command({
   },
 });
 
+// ── Project repos ─────────────────────────────────────────────────────────────
+
+const repoAddCommand = command({
+  meta: { name: "add", description: "Register a git repo for the project" },
+  workspace: true,
+  args: {
+    name: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      description: "Repo name (unique per project, e.g. front, api, common)",
+    },
+    path: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      description: "Path to the repo (absolute or relative to the workspace)",
+    },
+    primary: { schema: Schema.Boolean, type: "boolean", default: false },
+    baseBranch: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "Base branch for this repo (default: main)",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const resolvedPath = path.isAbsolute(args.path) ? args.path : path.resolve(ws.path, args.path);
+    if (!existsSync(resolvedPath)) {
+      return output.error("not_found", `Path does not exist: ${resolvedPath}`);
+    }
+    if (!existsSync(path.join(resolvedPath, ".git"))) {
+      return output.error("not_a_repo", `Path is not a git repo (no .git): ${resolvedPath}`);
+    }
+    const item = await runEffect(
+      DomainRepos.addRepo({
+        projectId: ws.projectId,
+        name: args.name,
+        path: resolvedPath,
+        isPrimary: args.primary,
+        baseBranch: args.baseBranch,
+      }),
+    );
+    if (output.isJson()) output.success({ item });
+    else
+      output.print(
+        `Registered repo '${item.name}' -> ${item.path} (base ${item.baseBranch}${item.isPrimary ? ", primary" : ""})`,
+      );
+  },
+});
+
+const repoListCommand = command({
+  meta: { name: "list", description: "List the project's registered repos" },
+  workspace: true,
+  args: {},
+  run: async ({ ws, output }) => {
+    const repos = await runEffect(DomainRepos.listRepos(ws.projectId));
+    if (repos.length === 0) {
+      const resolved = await runEffect(DomainRepos.resolveProjectRepos(ws.projectId, ws.path));
+      if (output.isJson()) {
+        output.success({ items: resolved, implicit: true });
+        return;
+      }
+      const implicit = resolved[0]!;
+      output.print(`${implicit.name}  ${implicit.path}  (base ${implicit.baseBranch})`);
+      output.print("implicit — add repos to enable multi-repo");
+      return;
+    }
+    if (output.isJson()) {
+      output.success({ items: repos });
+      return;
+    }
+    for (const r of repos) {
+      output.print(
+        `${r.id}  ${r.name}  ${r.path}  (base ${r.baseBranch}${r.isPrimary ? ", primary" : ""})`,
+      );
+    }
+  },
+});
+
+const repoRemoveCommand = command({
+  meta: { name: "remove", description: "Remove a registered repo" },
+  workspace: true,
+  args: {
+    name: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Repo name",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const repo = await runEffect(DomainRepos.getRepo(ws.projectId, args.name));
+    if (!repo) return output.error("not_found", `Repo not found: ${args.name}`);
+    await runEffect(DomainRepos.removeRepo(repo.id));
+    if (output.isJson()) output.success({ id: repo.id, name: repo.name });
+    else output.print(`Removed repo '${repo.name}'`);
+  },
+});
+
+const repoSetCommand = command({
+  meta: { name: "set", description: "Update a registered repo's base branch" },
+  workspace: true,
+  args: {
+    name: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Repo name",
+    },
+    baseBranch: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "New base branch",
+    },
+    primary: { schema: Schema.Boolean, type: "boolean" },
+  },
+  run: async ({ args, ws, output }) => {
+    const repo = await runEffect(DomainRepos.getRepo(ws.projectId, args.name));
+    if (!repo) return output.error("not_found", `Repo not found: ${args.name}`);
+    if (args.baseBranch === undefined && args.primary === undefined) {
+      return output.error("no_changes", "No changes provided. Use --base-branch or --primary.");
+    }
+    const item = await runEffect(
+      DomainRepos.updateRepo(repo.id, {
+        baseBranch: args.baseBranch,
+        isPrimary: args.primary,
+      }),
+    );
+    if (output.isJson()) output.success({ item });
+    else
+      output.print(
+        `Updated repo '${item.name}' (base ${item.baseBranch}${item.isPrimary ? ", primary" : ""})`,
+      );
+  },
+});
+
+const repoCommand = command({
+  meta: { name: "repo", description: "Project git repo registry" },
+  subCommands: {
+    add: repoAddCommand,
+    list: repoListCommand,
+    remove: repoRemoveCommand,
+    set: repoSetCommand,
+  },
+});
+
 export const projectCommand = command({
   meta: { name: "project", description: "Project management" },
   subCommands: {
@@ -703,5 +853,6 @@ export const projectCommand = command({
     diagnose: diagnoseCommand,
     config: configCommand,
     directive: directiveCommand,
+    repo: repoCommand,
   },
 });

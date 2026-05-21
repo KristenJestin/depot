@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowRightIcon, CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 
+import { ActivityTimeline, type TimelineEntry } from "#/web/components/activity-timeline";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
 import { CollapseChevron } from "#/web/components/ui/collapse-chevron";
@@ -42,97 +43,143 @@ export function PrdSidebar({
 }) {
   return (
     <aside className="w-full shrink-0 space-y-4 xl:w-72">
-      <SidebarWidget title="Info">
-        <InfoRows prd={prd} workspace={workspace} summary={summary} />
-      </SidebarWidget>
-
-      <SidebarWidget title="Revisions" maxHeight>
-        <div className="space-y-3">
-          {revisions.map((revision) => (
-            <div key={revision.id} className="flex items-start gap-3">
-              <StatusDot
-                tone={
-                  revision.isHead
-                    ? revision.status === "done"
-                      ? "done"
-                      : "timeline"
-                    : "timeline-muted"
-                }
-              />
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={
-                      revision.isCurrentView
-                        ? "text-sm font-medium text-foreground"
-                        : "text-sm text-muted-foreground"
-                    }
-                  >
-                    Rev. {revision.revision}
-                  </span>
-                  {revision.isHead ? (
-                    <Badge variant="current">current</Badge>
-                  ) : (
-                    <Badge variant="outline">superseded</Badge>
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {formatMetaDate(revision.createdAt)}
-                </div>
-              </div>
-              {revision.isCurrentView ? (
-                <span className="text-xs text-muted-foreground">current view</span>
-              ) : (
-                <Link
-                  to="/prds/$id"
-                  params={{ id: revision.id }}
-                  className="inline-flex items-center text-xs text-primary hover:underline"
-                >
-                  <ArrowRightIcon className="size-3" />
-                </Link>
-              )}
-            </div>
-          ))}
-        </div>
-      </SidebarWidget>
-
-      {reviews.length > 0 ? (
-        <SidebarWidget title="Reviews" maxHeight>
-          <div className="space-y-3">
-            {[...reviews].reverse().map((review, index) => (
-              <ReviewItem
-                key={review.id}
-                review={review}
-                index={reviews.length - index}
-                defaultOpen={index === 0}
-              />
-            ))}
-          </div>
-        </SidebarWidget>
-      ) : null}
-
-      <SidebarWidget title="Activity" maxHeight>
-        <div className="space-y-4">
-          {[...activity].reverse().map((entry, index, entries) => (
-            <div key={entry.id} className="flex gap-3">
-              <div className="flex w-3 shrink-0 flex-col items-center pt-1">
-                <StatusDot tone={index === 0 ? "timeline" : "timeline-muted"} />
-                {index < entries.length - 1 ? (
-                  <div className="mt-2 flex-1 border-l border-dashed border-timeline-line" />
-                ) : null}
-              </div>
-              <div className="pb-4">
-                <p className="text-xs leading-5 text-secondary-foreground">
-                  {activityLabel(entry)}
-                </p>
-                <p className="text-xs text-muted-foreground">{formatMetaDate(entry.createdAt)}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </SidebarWidget>
+      <PrdInfoWidget prd={prd} workspace={workspace} summary={summary} />
+      <PrdRevisionsWidget revisions={revisions} />
+      <PrdReviewsWidget reviews={reviews} />
+      <PrdActivityWidget activity={activity} />
     </aside>
   );
+}
+
+export function PrdInfoWidget({
+  prd,
+  workspace,
+  summary,
+}: {
+  prd: DetailPrd;
+  workspace: DetailWorkspace;
+  summary: DetailSummary;
+}) {
+  return (
+    <SidebarWidget title="Info">
+      <InfoRows prd={prd} workspace={workspace} summary={summary} />
+    </SidebarWidget>
+  );
+}
+
+export function PrdRevisionsWidget({ revisions }: { revisions: RevisionEntry[] }) {
+  return (
+    <SidebarWidget title="Revisions" maxHeight>
+      <div className="space-y-3">
+        {revisions.map((revision) => (
+          <div key={revision.id} className="flex items-start gap-3">
+            <StatusDot
+              tone={
+                revision.isHead
+                  ? revision.status === "done"
+                    ? "done"
+                    : "timeline"
+                  : "timeline-muted"
+              }
+            />
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex items-center gap-2">
+                <span
+                  className={
+                    revision.isCurrentView
+                      ? "text-sm font-medium text-foreground"
+                      : "text-sm text-muted-foreground"
+                  }
+                >
+                  Rev. {revision.revision}
+                </span>
+                {revision.isHead ? (
+                  <Badge variant="current">current</Badge>
+                ) : (
+                  <Badge variant="outline">superseded</Badge>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {formatMetaDate(revision.createdAt)}
+              </div>
+            </div>
+            {revision.isCurrentView ? (
+              <span className="text-xs text-muted-foreground">current view</span>
+            ) : (
+              <Link
+                to="/prds/$id"
+                params={{ id: revision.id }}
+                className="inline-flex items-center text-xs text-primary hover:underline"
+              >
+                <ArrowRightIcon className="size-3" />
+              </Link>
+            )}
+          </div>
+        ))}
+      </div>
+    </SidebarWidget>
+  );
+}
+
+export function PrdReviewsWidget({ reviews }: { reviews: DetailReview[] }) {
+  if (reviews.length === 0) return null;
+  return (
+    <SidebarWidget title="Reviews" maxHeight>
+      <div className="space-y-3">
+        {[...reviews].reverse().map((review, index) => (
+          <ReviewItem
+            key={review.id}
+            review={review}
+            index={reviews.length - index}
+            defaultOpen={index === 0}
+          />
+        ))}
+      </div>
+    </SidebarWidget>
+  );
+}
+
+export function PrdActivityWidget({
+  activity,
+  onFileClick,
+}: {
+  activity: DetailActivity[];
+  onFileClick?: (file: string) => void;
+}) {
+  const entries = buildActivityEntries(activity);
+  return (
+    <SidebarWidget title="Activity" maxHeight>
+      <ActivityTimeline
+        entries={entries}
+        emptyMessage="No activity recorded yet."
+        onFileClick={onFileClick}
+      />
+    </SidebarWidget>
+  );
+}
+
+function buildActivityEntries(activity: DetailActivity[]): TimelineEntry[] {
+  return [...activity].reverse().map((entry, index) => {
+    const payload = entry.payload as Record<string, unknown>;
+    const isCoderProgress = entry.eventType === "coder_progress";
+    return {
+      id: entry.id,
+      createdAt: entry.createdAt,
+      label: activityLabel(entry),
+      source: resolveActivitySource(entry),
+      file: isCoderProgress && typeof payload.file === "string" ? payload.file : null,
+      command: isCoderProgress && typeof payload.command === "string" ? payload.command : null,
+      output: isCoderProgress && typeof payload.output === "string" ? payload.output : null,
+      emphasis: index === 0,
+    };
+  });
+}
+
+function resolveActivitySource(entry: DetailActivity): TimelineEntry["source"] {
+  const payload = entry.payload as Record<string, unknown>;
+  if (payload.source === "plugin") return "plugin";
+  const source = (entry as { source?: string }).source;
+  return source === "human" ? "human" : "ai";
 }
 
 function ReviewItem({

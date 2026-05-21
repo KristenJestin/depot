@@ -9,7 +9,7 @@ function CardRoot({ className, ...props }: CardProps) {
     <div
       data-slot="card"
       className={cn(
-        "flex flex-col gap-4 rounded-xl bg-card py-4 text-foreground shadow-sm overflow-hidden",
+        "flex flex-col gap-4 overflow-hidden rounded-xl border border-card-border bg-card py-4 text-card-foreground shadow-card",
         "**:data-[slot=table-header]:border-t",
         className,
       )}

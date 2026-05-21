@@ -113,6 +113,15 @@ describe("KanbanBoard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows a homogenized empty state when there are no PRDs", () => {
+    render(<KanbanBoard columns={[{ id: "ready", title: "Todo", cards: [] }]} />);
+
+    const empty = document.querySelector('[data-slot="empty-state"]');
+    expect(empty).not.toBeNull();
+    expect(empty).toHaveTextContent(/no prds yet/i);
+    expect(empty).toHaveTextContent("depot prd create");
+  });
+
   it("does not repeat done status or render the footer timestamp for done cards", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-30T10:01:00.000Z"));

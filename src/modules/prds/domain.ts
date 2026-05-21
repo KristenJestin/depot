@@ -1,9 +1,15 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { prds, prdRevisions, prdPhaseSnapshots, tasks } from "#/db/schema";
+import { prds, prdRevisions, prdPhaseSnapshots, prdMerges, tasks } from "#/db/schema";
+import type { PrdMergeRow } from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
-import { VALID_PRD_TRANSITIONS, type PrdStatus, type Effort } from "#/shared/validator";
+import {
+  VALID_PRD_TRANSITIONS,
+  type PrdStatus,
+  type Effort,
+  type MergeCaptureSource,
+} from "#/shared/validator";
 import { Db } from "#/services/database";
 import {
   PrdNotFoundError,
@@ -12,11 +18,34 @@ import {
   InvalidTransitionError,
   DatabaseError,
   ValidationError,
+  ShaNotFoundError,
 } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { logActivity } from "#/modules/activity/domain";
 import { assertWorkspaceInProject } from "#/lib/cross-entity";
 import { captureSha } from "#/lib/git";
+import { assertShaExists } from "#/lib/repo-guard";
+import { resolveProjectRepos } from "#/modules/projects/repos";
+
+/**
+ * Capture a single HEAD SHA for a PRD lifecycle transition.
+ *
+ * For a mono-repo project (no `project_repo` rows) this resolves the implicit
+ * repo and captures its HEAD — unchanged behaviour, zero config. For a
+ * multi-repo project a single blind HEAD capture would record a SHA from
+ * whichever repo `workspacePath` happens to sit in, so we skip and defer the
+ * per-repo capture to `capture-merge`.
+ */
+const captureLifecycleSha = (projectId: string, workspacePath: string) =>
+  Effect.gen(function* () {
+    const repos = yield* resolveProjectRepos(projectId, workspacePath).pipe(
+      Effect.catchAll(() => Effect.succeed([])),
+    );
+    if (repos.length === 1 && repos[0]!.implicit) {
+      return yield* captureSha(repos[0]!.path);
+    }
+    return null;
+  });
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -202,7 +231,18 @@ export const activatePrd = (id: string, workspaceId: string) =>
 
     yield* checkPrdTransition(rev.status, "in_progress");
 
-    const sha = yield* captureSha(workspace.path);
+    const sha = yield* captureLifecycleSha(rev.projectId, workspace.path);
+    if (!sha) {
+      yield* logActivity({
+        projectId: rev.projectId,
+        workspaceId,
+        prdRevisionId: id,
+        eventType: "note",
+        payload: {
+          message: "multi-repo project — per-repo SHA capture deferred to capture-merge",
+        },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    }
 
     const rows = yield* dbQuery(() =>
       db
@@ -258,12 +298,26 @@ export const donePrd = (id: string) =>
     yield* checkPrdTransition(rev.status, "done");
 
     // Capture the done SHA — best-effort; never blocks the transition.
+    // Multi-repo projects skip the blind capture (deferred to capture-merge).
     let sha: string | null = null;
     if (rev.workspaceId) {
       const ws = yield* dbQuery(() =>
         db.query.workspaces.findFirst({ where: { id: rev.workspaceId! } }),
       );
-      if (ws) sha = yield* captureSha(ws.path);
+      if (ws) {
+        sha = yield* captureLifecycleSha(rev.projectId, ws.path);
+        if (!sha) {
+          yield* logActivity({
+            projectId: rev.projectId,
+            workspaceId: rev.workspaceId,
+            prdRevisionId: id,
+            eventType: "note",
+            payload: {
+              message: "multi-repo project — per-repo SHA capture deferred to capture-merge",
+            },
+          }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+        }
+      }
     }
 
     const rows = yield* dbQuery(() =>
@@ -967,27 +1021,101 @@ export const listPhaseSnapshots = (prdRevisionId: string) =>
   });
 
 /**
- * Capture the merge-commit SHA on the base branch (post-squash). Surviving
- * the squash that GC'd the feature-branch HEAD requires anchoring the diff
- * range to a commit that actually lives on `baseBranch`.
+ * Anchor a post-squash merge commit for one repo of a PRD.
+ *
+ * Replaces the single-SHA `captureMergeSha`: a multi-repo PRD anchors N
+ * `prd_merge` rows, one per repo. The row is an upsert on
+ * `(prdRevisionId, repoName)` so re-capturing a repo replaces its SHA.
+ *
+ * `repo` is a resolved repo (real `project_repo` or the implicit mono-repo).
+ * The SHA is validated against the repo on disk via `assertShaExists` before
+ * the row is written — anchoring a commit that does not exist is refused.
+ *
+ * The legacy `prd_revision.mergedAtSha` column is kept in sync with the most
+ * recent capture so the diff API's legacy fallback still resolves.
  */
-export const captureMergeSha = (id: string, sha: string) =>
+export const captureMerge = (input: {
+  prdRevisionId: string;
+  repo: { id: string | null; name: string; path: string };
+  sha: string;
+  capturedFrom: MergeCaptureSource;
+}): Effect.Effect<PrdMergeRow, PrdNotFoundError | ShaNotFoundError | DatabaseError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const rev = yield* getPrd(id);
-    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
-    const rows = yield* dbQuery(() =>
-      db.update(prdRevisions).set({ mergedAtSha: sha }).where(eq(prdRevisions.id, id)).returning(),
+    const rev = yield* getPrd(input.prdRevisionId);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id: input.prdRevisionId }));
+
+    yield* assertShaExists(input.repo.path, input.sha);
+
+    const existing = yield* dbQuery(() =>
+      db.query.prdMerges.findFirst({
+        where: { prdRevisionId: input.prdRevisionId, repoName: input.repo.name },
+      }),
     );
+
+    let row: PrdMergeRow;
+    if (existing) {
+      const rows = yield* dbQuery(() =>
+        db
+          .update(prdMerges)
+          .set({
+            repoId: input.repo.id,
+            repoPath: input.repo.path,
+            mergeSha: input.sha,
+            mergedAt: new Date(),
+            capturedFrom: input.capturedFrom,
+          })
+          .where(eq(prdMerges.id, existing.id))
+          .returning(),
+      );
+      row = rows[0]!;
+    } else {
+      const rows = yield* dbQuery(() =>
+        db
+          .insert(prdMerges)
+          .values({
+            id: generateId(),
+            prdRevisionId: input.prdRevisionId,
+            repoId: input.repo.id,
+            repoName: input.repo.name,
+            repoPath: input.repo.path,
+            mergeSha: input.sha,
+            mergedAt: new Date(),
+            capturedFrom: input.capturedFrom,
+          })
+          .returning(),
+      );
+      row = rows[0]!;
+    }
+
+    yield* dbQuery(() =>
+      db
+        .update(prdRevisions)
+        .set({ mergedAtSha: input.sha })
+        .where(eq(prdRevisions.id, input.prdRevisionId)),
+    );
+
     yield* logActivity({
       projectId: rev.projectId,
       workspaceId: rev.workspaceId ?? undefined,
-      prdRevisionId: id,
+      prdRevisionId: input.prdRevisionId,
       eventType: "note",
-      payload: { message: `Captured merge SHA: ${sha}` },
+      payload: { message: `Captured merge SHA ${input.sha} for repo '${input.repo.name}'` },
       source: "ai",
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    return rows[0]!;
+    return row;
+  });
+
+/** List the merge anchors of a PRD revision, ordered by repo name. */
+export const listMerges = (prdRevisionId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    return yield* dbQuery(() =>
+      db.query.prdMerges.findMany({
+        where: { prdRevisionId },
+        orderBy: { repoName: "asc" },
+      }),
+    );
   });
 
 export const updateSuggestedCommitMessage = (id: string, message: string | null) =>

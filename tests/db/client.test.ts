@@ -149,6 +149,53 @@ describe("db client", () => {
     expect(result.client).toBe(clients[1]);
   });
 
+  it("aborts the migration fail-loud when cross-entity corruption is seeded", async () => {
+    const baseDir = await createTempDir();
+    const dbPath = path.join(baseDir, "corrupt.db");
+    // First open runs all migrations cleanly, installing the consistency
+    // triggers — this represents an already-migrated database.
+    const { db, client } = openDatabase(dbPath);
+
+    const raw = (db as unknown as { $client: { exec: (sql: string) => void } }).$client;
+    // Simulate a database whose `cross_entity_triggers` migration has not yet
+    // run by removing the trigger, then seed a PRD revision that violates the
+    // project/workspace invariant the migration is about to enforce.
+    raw.exec("DROP TRIGGER IF EXISTS prd_revisions_workspace_consistency_insert;");
+    raw.exec("DROP TRIGGER IF EXISTS prd_revisions_workspace_consistency_update;");
+    raw.exec(`
+      INSERT INTO projects (id, name, status, created_at, updated_at)
+        VALUES ('proj-a', 'A', 'active', 0, 0), ('proj-b', 'B', 'active', 0, 0);
+      INSERT INTO workspaces (id, project_id, path, created_at, updated_at)
+        VALUES ('ws-b', 'proj-b', '/tmp/ws-b', 0, 0);
+      INSERT INTO prds (id, project_id, created_at, updated_at)
+        VALUES ('prd-a', 'proj-a', 0, 0);
+      INSERT INTO prd_revisions
+        (id, prd_id, project_id, workspace_id, revision, title, status, audit_cycles, created_at, updated_at)
+        VALUES ('rev-corrupt', 'prd-a', 'proj-a', 'ws-b', 1, 'Corrupt PRD', 'in_progress', 0, 0, 0);
+    `);
+    client.close();
+
+    // Re-opening must run the consistency guard before the (now pending)
+    // triggers migration and abort fail-loud.
+    expect(() => openDatabase(dbPath)).toThrow(/Migration aborted/);
+    expect(() => openDatabase(dbPath)).toThrow(/depot project diagnose/);
+    expect(() => openDatabase(dbPath)).toThrow(/rev-corrupt/);
+  });
+
+  it("does not abort when no cross-entity corruption exists", async () => {
+    const baseDir = await createTempDir();
+    const dbPath = path.join(baseDir, "clean.db");
+    const { db, client } = openDatabase(dbPath);
+    const raw = (db as unknown as { $client: { exec: (sql: string) => void } }).$client;
+    raw.exec("DROP TRIGGER IF EXISTS prd_revisions_workspace_consistency_insert;");
+    raw.exec("DROP TRIGGER IF EXISTS prd_revisions_workspace_consistency_update;");
+    client.close();
+
+    const reopened = openDatabase(dbPath);
+    expect(reopened.db).toBeTruthy();
+    reopened.client.close();
+  });
+
   it("closes the handle when migrations fail after opening the DB", async () => {
     const distDir = await createTempDir();
     await createMigrationLayout(path.join(distDir, "migrations"));

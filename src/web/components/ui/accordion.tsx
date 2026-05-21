@@ -42,6 +42,7 @@ export function AccordionTrigger({
     <BaseAccordion.Trigger
       className={cn(
         "group flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-panel-muted",
+        "outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         className,
       )}
       {...props}

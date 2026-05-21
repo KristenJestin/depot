@@ -1,23 +1,10 @@
-import { Card } from "#/web/components/ui/card";
+import { ActivityTimeline, type TimelineEntry } from "#/web/components/activity-timeline";
 import { Badge } from "#/web/components/ui/badge";
+import { Card } from "#/web/components/ui/card";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
-import { formatMetaDate } from "#/web/lib/view-format";
 
 type DetailActivity = PrdDetailResponse["activity"][number];
 type DetailTask = PrdDetailResponse["tasks"][number];
-
-type CoderProgressEntry = {
-  id: string;
-  createdAt: DetailActivity["createdAt"];
-  stage: string;
-  message: string;
-  tool: string | null;
-  file: string | null;
-  command: string | null;
-  source: string | null;
-  taskId: string | null;
-  taskTitle: string | null;
-};
 
 const MAX_ENTRIES = 50;
 
@@ -27,15 +14,20 @@ const MAX_ENTRIES = 50;
  * Renders only when the PRD is `in_progress`. Picks up new events through
  * the same React Query polling that already drives the rest of the detail
  * page (`liveQueryOptions`, 4 s) — no extra endpoint or transport needed.
+ * The stream is presented through the shared `ActivityTimeline` so it shares
+ * the day-grouping, source badges, and expandable bash output of the rest of
+ * the app.
  */
 export function LiveActivityPanel({
   prdStatus,
   activity,
   tasks,
+  onFileClick,
 }: {
   prdStatus: PrdDetailResponse["prd"]["status"];
   activity: DetailActivity[];
   tasks: DetailTask[];
+  onFileClick?: (file: string) => void;
 }) {
   if (prdStatus !== "in_progress") {
     return null;
@@ -56,53 +48,22 @@ export function LiveActivityPanel({
         </span>
       </div>
 
-      <Card className="border border-card-border p-0">
-        {entries.length === 0 ? (
-          <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-            Waiting for the coder to log progress…
-          </p>
-        ) : (
-          <div className="max-h-[420px] overflow-y-auto divide-y divide-card-border">
-            {entries.map((entry) => (
-              <LiveActivityRow key={entry.id} entry={entry} />
-            ))}
-          </div>
-        )}
+      <Card className="border border-card-border p-4">
+        <div className="max-h-[420px] overflow-y-auto">
+          <ActivityTimeline
+            entries={entries}
+            emptyMessage="Waiting for the coder to log progress…"
+            onFileClick={onFileClick}
+          />
+        </div>
       </Card>
     </section>
   );
 }
 
-function LiveActivityRow({ entry }: { entry: CoderProgressEntry }) {
-  return (
-    <div className="space-y-1 px-3 py-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={stageVariant(entry.stage)}>{entry.stage}</Badge>
-        {entry.tool ? (
-          <span className="font-mono text-xs text-muted-foreground">[{entry.tool}]</span>
-        ) : null}
-        {entry.source === "plugin" ? <Badge variant="outline">plugin</Badge> : null}
-        <span className="ml-auto text-xs text-muted-foreground">
-          {formatMetaDate(entry.createdAt)}
-        </span>
-      </div>
-
-      <p className="text-xs leading-5 text-secondary-foreground">{entry.message}</p>
-
-      {entry.file ? <p className="font-mono text-xs text-muted-foreground">{entry.file}</p> : null}
-      {entry.command ? (
-        <p className="font-mono text-xs text-muted-foreground">$ {entry.command}</p>
-      ) : null}
-      {entry.taskTitle ? (
-        <p className="text-xs text-muted-foreground">↳ {entry.taskTitle}</p>
-      ) : null}
-    </div>
-  );
-}
-
-function buildEntries(activity: DetailActivity[], tasks: DetailTask[]): CoderProgressEntry[] {
+function buildEntries(activity: DetailActivity[], tasks: DetailTask[]): TimelineEntry[] {
   const taskById = new Map(tasks.map((task) => [task.id, task]));
-  const entries: CoderProgressEntry[] = [];
+  const entries: TimelineEntry[] = [];
 
   // Activity is delivered oldest-first; we want newest-first capped at MAX_ENTRIES.
   for (let i = activity.length - 1; i >= 0 && entries.length < MAX_ENTRIES; i--) {
@@ -111,17 +72,28 @@ function buildEntries(activity: DetailActivity[], tasks: DetailTask[]): CoderPro
 
     const payload = event.payload as Record<string, unknown>;
     const taskId = typeof payload.taskId === "string" ? payload.taskId : (event.taskId ?? null);
+    const stage = typeof payload.stage === "string" ? payload.stage : "note";
+    const tool = typeof payload.tool === "string" ? payload.tool : null;
+    const message = typeof payload.message === "string" ? payload.message : "";
+    const taskTitle = taskId ? (taskById.get(taskId)?.title ?? null) : null;
+
     entries.push({
       id: event.id,
       createdAt: event.createdAt,
-      stage: typeof payload.stage === "string" ? payload.stage : "note",
-      message: typeof payload.message === "string" ? payload.message : "",
-      tool: typeof payload.tool === "string" ? payload.tool : null,
+      label: tool ? (
+        <>
+          <span className="font-mono text-muted-foreground">[{tool}]</span> {message}
+        </>
+      ) : (
+        message
+      ),
+      tag: { text: stage, variant: stageVariant(stage) },
+      source: payload.source === "plugin" ? "plugin" : "ai",
       file: typeof payload.file === "string" ? payload.file : null,
       command: typeof payload.command === "string" ? payload.command : null,
-      source: typeof payload.source === "string" ? payload.source : null,
-      taskId,
-      taskTitle: taskId ? (taskById.get(taskId)?.title ?? null) : null,
+      output: typeof payload.output === "string" ? payload.output : null,
+      detail: taskTitle,
+      emphasis: entries.length === 0,
     });
   }
 
@@ -138,6 +110,8 @@ function stageVariant(stage: string): React.ComponentProps<typeof Badge>["varian
       return "severityInfo";
     case "tool":
       return "outline";
+    case "error":
+      return "severityCritical";
     case "note":
       return "neutral";
     default:

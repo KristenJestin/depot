@@ -47,6 +47,18 @@ describe("context template registry", () => {
     expect(content).toContain("The draft should evolve in real time");
   });
 
+  it("returns a repo-aware ship context", () => {
+    const content = getContextTemplate("ship");
+    expect(content).toContain("Ship Agent");
+    expect(content).toContain("multiple git repos");
+    expect(content).toContain("Per-repo state");
+    expect(content).toContain("git -C <repoPath> switch <repo.baseBranch>");
+    expect(content).toContain("git -C <repoPath> pull --ff-only");
+    expect(content).toContain("git -C <repoPath> worktree remove <worktreePath>");
+    expect(content).toContain("--repo <name1>=<sha1>");
+    expect(content).toContain("do **not** mark the PRD done");
+  });
+
   it("throws on unknown context mode", () => {
     expect(() => getContextTemplate("unknown")).toThrow(/Unknown context mode/);
   });

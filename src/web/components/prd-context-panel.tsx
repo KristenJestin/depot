@@ -32,7 +32,7 @@ export function PrdContextPanel({
 
   if (isEmpty) {
     return (
-      <aside className={cn("w-80 border-r border-card-border bg-card p-4", className)}>
+      <aside className={cn("w-80 border-l border-card-border bg-card p-4", className)}>
         <p className="text-sm text-muted-foreground">No additional context available.</p>
       </aside>
     );
@@ -40,7 +40,7 @@ export function PrdContextPanel({
 
   return (
     <aside
-      className={cn("w-80 shrink-0 overflow-auto border-r border-card-border bg-card", className)}
+      className={cn("w-80 shrink-0 overflow-auto border-l border-card-border bg-card", className)}
     >
       {data.reviewBrief && (
         <section className="border-b border-card-border bg-secondary/20 p-4">

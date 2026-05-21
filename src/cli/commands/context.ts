@@ -1,6 +1,77 @@
 import { Schema } from "effect";
 import { command } from "#/cli/command";
 import { getContextTemplate } from "#/modules/context";
+import { runEffect, resolveCurrentWorkspace } from "#/cli/runtime";
+import { getPrd } from "#/modules/prds/domain";
+import { resolveRepoShipState, renderRepoShipState } from "#/modules/context/ship-state";
+import { resolveDocState, renderDocState } from "#/modules/context/doc-state";
+import { listProfiles, listSyncRuns } from "#/modules/docs/sync";
+
+/**
+ * Whether a doc sync has already run for a given PRD, across all of the
+ * project's doc profiles. Best-effort — resolution failures report `false`.
+ */
+async function docSyncRanForPrd(projectId: string, prdId: string): Promise<boolean> {
+  try {
+    const profiles = await runEffect(listProfiles(projectId));
+    for (const profile of profiles) {
+      const runs = await runEffect(listSyncRuns(profile.id, { prdId, limit: 1 }));
+      if (runs.length > 0) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve and render the precomputed ship state for `context ship`.
+ *
+ * Best-effort: the static ship manual is always emitted, so any failure to
+ * resolve the workspace, PRD, or repos degrades to a one-line note instead of
+ * aborting. The block names the PRD being shipped, tells the ship agent (per
+ * repo) which base branch to pull, which worktree to remove, and whether it is
+ * clean, and reports whether the doc sync has already run for this PRD.
+ */
+async function renderShipState(prdTarget: string): Promise<string> {
+  try {
+    const { ws } = await resolveCurrentWorkspace({ autoCreate: false });
+    if (!prdTarget) {
+      return "Repos   : (no PRD specified — pass a PRD id to see per-repo state)";
+    }
+    const prd = await runEffect(getPrd(prdTarget));
+    if (!prd) {
+      return `Repos   : (PRD '${prdTarget}' not found — per-repo state unavailable)`;
+    }
+    const states = await runEffect(
+      resolveRepoShipState(prd.projectId, ws.path, prd.worktreePath ?? null),
+    );
+    const docSynced = await docSyncRanForPrd(prd.projectId, prd.id);
+    const lines = [
+      `Shipping: ${prd.title} (${prd.id}) [${prd.status}]`,
+      `Doc sync: ${docSynced ? "already ran for this PRD" : "not yet run for this PRD"}`,
+      renderRepoShipState(states),
+    ];
+    return lines.join("\n");
+  } catch {
+    return "Repos   : (per-repo state unavailable — could not resolve the workspace)";
+  }
+}
+
+/**
+ * Resolve and render the precomputed doc state for `context doc`: the active
+ * doc profiles and the last `doc_sync_run` per profile. Best-effort — degrades
+ * to a one-line note when the workspace cannot be resolved.
+ */
+async function renderDocContextState(): Promise<string> {
+  try {
+    const { ws } = await resolveCurrentWorkspace({ autoCreate: false });
+    const states = await runEffect(resolveDocState(ws.projectId));
+    return renderDocState(states);
+  } catch {
+    return "Doc     : (doc state unavailable — could not resolve the workspace)";
+  }
+}
 
 export const contextCommand = command({
   meta: { name: "context", description: "Emit static agent context for the current workspace" },
@@ -14,7 +85,7 @@ export const contextCommand = command({
       schema: Schema.String,
       positional: true,
       default: "",
-      description: "PRD ID or title to embed in the header (dev/coder/auditor mode)",
+      description: "PRD ID or title to embed in the header (dev/coder/auditor/ship mode)",
     },
     review: {
       schema: Schema.String,
@@ -61,7 +132,15 @@ export const contextCommand = command({
       lines.push(`Axis    : ${args.axis}`);
     }
 
-    if (args.prdTarget || args.review || args.axis) {
+    if (mode === "ship") {
+      lines.push(await renderShipState(args.prdTarget ?? ""));
+    }
+
+    if (mode === "doc") {
+      lines.push(await renderDocContextState());
+    }
+
+    if (args.prdTarget || args.review || args.axis || mode === "ship" || mode === "doc") {
       lines.push("");
     }
 

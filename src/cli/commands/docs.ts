@@ -449,8 +449,21 @@ const preSyncCheckCommand = command({
       );
       for (const r of result.results) {
         const icon = r.ok ? "✓" : "✗";
-        output.print(`  ${icon} ${r.title} — ${r.durationMs}ms`);
-        if (!r.ok && r.stderr) {
+        output.print(`  ${icon} ${r.title} [repo: ${r.repoTarget}] — ${r.durationMs}ms`);
+        if (r.noOp) {
+          output.print(`    (no modified repo detected — skipped)`);
+        }
+        if (r.repoResults.length > 1) {
+          for (const rr of r.repoResults) {
+            const ricon = rr.ok ? "✓" : "✗";
+            output.print(`    ${ricon} ${rr.repoName}`);
+            if (!rr.ok && rr.stderr) {
+              for (const line of rr.stderr.split("\n").slice(0, 8)) {
+                output.print(`      | ${line}`);
+              }
+            }
+          }
+        } else if (!r.ok && r.stderr) {
           for (const line of r.stderr.split("\n").slice(0, 10)) {
             output.print(`    | ${line}`);
           }

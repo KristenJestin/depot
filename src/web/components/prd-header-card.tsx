@@ -21,7 +21,13 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
   const showActiveFooter = prd.status === "in_progress" && !showReviewFooter;
   const showDoneFooter = prd.status === "done";
   const showCanceledFooter = prd.status === "canceled";
-  const hasSpec = Boolean(prd.context) || Boolean(prd.scope);
+  const hasSpec =
+    Boolean(prd.context) ||
+    Boolean(prd.scope) ||
+    Boolean(prd.problem) ||
+    Boolean(prd.solution) ||
+    Boolean(prd.implementationDecisions) ||
+    Boolean(prd.testingDecisions);
   const [specOpen, setSpecOpen] = useState(true);
 
   return (
@@ -70,8 +76,36 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
                     muted={prd.status === "canceled"}
                   />
                 )}
+                {prd.problem && (
+                  <SpecBlock
+                    label="Problem"
+                    value={prd.problem}
+                    muted={prd.status === "canceled"}
+                  />
+                )}
+                {prd.solution && (
+                  <SpecBlock
+                    label="Solution"
+                    value={prd.solution}
+                    muted={prd.status === "canceled"}
+                  />
+                )}
                 {prd.scope && (
                   <SpecBlock label="Scope" value={prd.scope} muted={prd.status === "canceled"} />
+                )}
+                {prd.implementationDecisions && (
+                  <SpecBlock
+                    label="Implementation decisions"
+                    value={prd.implementationDecisions}
+                    muted={prd.status === "canceled"}
+                  />
+                )}
+                {prd.testingDecisions && (
+                  <SpecBlock
+                    label="Testing decisions"
+                    value={prd.testingDecisions}
+                    muted={prd.status === "canceled"}
+                  />
                 )}
               </div>
             </CollapsiblePanel>

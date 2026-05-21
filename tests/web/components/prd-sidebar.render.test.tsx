@@ -96,6 +96,7 @@ describe("PrdSidebar", () => {
             taskId: null,
             eventType: "prd_activated",
             payload: {},
+            source: "ai",
             createdAt: now,
           },
         ]}

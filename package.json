@@ -1,6 +1,6 @@
 {
   "name": "@netsirk/depot",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "AI agent task and PRD management CLI",
   "keywords": [
     "agent",
@@ -34,7 +34,7 @@
     "check": "vp check",
     "prepublishOnly": "vp pack && vp build",
     "test:smoke": "vp pack && vp build && vp test tests/build",
-    "depot": "vp pack && node --env-file-if-exists=.env dist/index.mjs --",
+    "depot": "vp pack && node --env-file-if-exists=.env dist/index.mjs",
     "dev:web": "vp dev",
     "dev:web:local": "bun --env-file=.env run dev:web",
     "db:check": "drizzle-kit check",
@@ -59,7 +59,8 @@
   "dependencies": {
     "@base-ui/react": "^1.4.1",
     "@fontsource-variable/inter": "^5.2.8",
-    "@fontsource-variable/space-grotesk": "^5.2.10",
+    "@pierre/diffs": "1.1.22",
+    "@pierre/trees": "1.0.0-beta.4",
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-query": "5.100.2",
     "@tanstack/react-router": "1.168.24",

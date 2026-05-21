@@ -1,4 +1,5 @@
 import { KanbanColumn } from "#/web/components/kanban/kanban-column";
+import { EmptyState } from "#/web/components/ui/empty-state";
 import type { BoardColumn } from "#/web/lib/prd-view-model";
 
 export function KanbanBoard({
@@ -25,14 +26,15 @@ export function KanbanBoard({
       </div>
 
       {total === 0 ? (
-        <div className="rounded-xl border border-dashed border-card-border bg-muted px-6 py-10">
-          <div className="max-w-sm space-y-2">
-            <p className="text-sm font-medium text-foreground">No PRDs yet</p>
-            <p className="text-sm text-muted-foreground">
-              Create the first one from the CLI to start filling this board.
-            </p>
-            <p className="font-mono text-xs text-muted-foreground">depot prd create</p>
-          </div>
+        <div className="rounded-xl border border-dashed border-card-border bg-muted">
+          <EmptyState
+            message="No PRDs yet. Create the first one from the CLI to start filling this board."
+            action={
+              <code className="rounded bg-secondary px-2 py-1 font-mono text-xs text-muted-foreground">
+                depot prd create
+              </code>
+            }
+          />
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-x-auto">

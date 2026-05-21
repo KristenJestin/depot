@@ -1,6 +1,9 @@
 import { Hono } from "hono";
+import path from "node:path";
+import { existsSync } from "node:fs";
 import * as DomainProjectConfig from "#/modules/projects/config";
 import * as DomainDirectives from "#/modules/projects/directives";
+import * as DomainRepos from "#/modules/projects/repos";
 import { getRuntime } from "#/services/database";
 import { logActivity } from "#/modules/activity/domain";
 import { KNOWN_PROJECT_CONFIG_KEYS, isKnownProjectConfigKey } from "#/shared/project-config-keys";
@@ -112,6 +115,73 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
     );
     return c.json({ item }, 200);
   })
+  .get("/projects/:id/repos", async (c) => {
+    const { id } = c.req.param();
+    const db = c.var.db;
+    const repos = await getRuntime().runPromise(DomainRepos.listRepos(id));
+    if (repos.length > 0) {
+      return c.json({ items: repos, implicit: false }, 200);
+    }
+    const workspace = await db.query.workspaces.findFirst({ where: { projectId: id } });
+    const resolved = await getRuntime().runPromise(
+      DomainRepos.resolveProjectRepos(id, workspace?.path ?? process.cwd()),
+    );
+    return c.json({ items: resolved, implicit: true }, 200);
+  })
+  .post("/projects/:id/repos", async (c) => {
+    const { id } = c.req.param();
+    const db = c.var.db;
+    type Body = {
+      name?: string;
+      path?: string;
+      isPrimary?: boolean;
+      baseBranch?: string;
+    };
+    const body = (await c.req.json()) as Body;
+    if (!body.name || !body.path) {
+      return c.json({ error: "name and path are required" }, 422);
+    }
+    const workspace = await db.query.workspaces.findFirst({ where: { projectId: id } });
+    const resolvedPath = path.isAbsolute(body.path)
+      ? body.path
+      : path.resolve(workspace?.path ?? process.cwd(), body.path);
+    if (!existsSync(resolvedPath)) {
+      return c.json({ error: `Path does not exist: ${resolvedPath}` }, 422);
+    }
+    if (!existsSync(path.join(resolvedPath, ".git"))) {
+      return c.json({ error: `Path is not a git repo (no .git): ${resolvedPath}` }, 422);
+    }
+    try {
+      const item = await getRuntime().runPromise(
+        DomainRepos.addRepo({
+          projectId: id,
+          name: body.name,
+          path: resolvedPath,
+          isPrimary: body.isPrimary,
+          baseBranch: body.baseBranch,
+        }),
+      );
+      return c.json({ item }, 201);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
+    }
+  })
+  .patch("/projects/:id/repos/:repoId", async (c) => {
+    const { repoId } = c.req.param();
+    type Body = { baseBranch?: string; isPrimary?: boolean };
+    const body = (await c.req.json()) as Body;
+    try {
+      const item = await getRuntime().runPromise(DomainRepos.updateRepo(repoId, body));
+      return c.json({ item }, 200);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
+    }
+  })
+  .delete("/projects/:id/repos/:repoId", async (c) => {
+    const { repoId } = c.req.param();
+    await getRuntime().runPromise(DomainRepos.removeRepo(repoId));
+    return c.json({ id: repoId }, 200);
+  })
   .get("/projects/:id/directives", async (c) => {
     const { id } = c.req.param();
     const scopeQuery = c.req.query("scope") as DirectiveScope | undefined;
@@ -129,6 +199,7 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
       instruction?: string;
       blocking?: boolean;
       position?: number;
+      repoTarget?: string;
     };
     const body = (await c.req.json()) as Body;
     if (!body.scope || !body.kind || !body.title || !body.instruction) {
@@ -150,6 +221,7 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
           instruction: body.instruction,
           blocking: body.blocking,
           position: body.position,
+          repoTarget: body.repoTarget,
         }),
       );
       await getRuntime().runPromise(
@@ -174,6 +246,7 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
       blocking?: boolean;
       position?: number;
       enabled?: boolean;
+      repoTarget?: string;
     };
     const body = (await c.req.json()) as Body;
     try {

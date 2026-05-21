@@ -1,120 +1,128 @@
 # Depot Web Design System
 
-This document is the short-form guide to the depot web UI conventions. It exists
-to keep new pages consistent with the existing primitives and layouts, and to
-point contributors at the catalog references we draw from.
+Short-form guide to the depot web UI conventions. It keeps new pages consistent
+with the existing primitives and layouts, and points at the catalog references
+we draw from.
 
 ## Stack
 
-- React 19 + TanStack Router
-- Tailwind v4 (config in `vite.config.ts`)
-- Base UI (`@base-ui/react`) — accessibility-first primitives
-- Internal primitives in `src/web/components/ui/` — wrappers over Base UI that
-  apply our tokens
+- React + TanStack Router (file-based routes in `src/web/routes/`)
+- Tailwind v4 via the `@tailwindcss/vite` plugin; tokens live in
+  `src/web/styles/globals.css`
+- Base UI (`@base-ui/react`) — accessibility-first headless primitives
+- Internal primitives in `src/web/components/ui/` — thin wrappers over Base UI
+  that apply the depot tokens
+- TanStack Query for data fetching
+
+The stack is already aligned with [coss-ui](https://coss.com/ui) (Base UI +
+Tailwind v4, copy-paste model). There is no framework migration — coss-ui is the
+source we copy from, not a dependency.
 
 ## Token conventions
 
-We follow [coss-ui's](https://coss.com/ui) semantic token model. Use these CSS
-variables (defined in `src/web/styles/`) rather than hard-coded colors or
-spacing:
+Tokens are defined in `src/web/styles/globals.css`: CSS custom properties under
+`:root` (light) and `.dark`, re-exported as Tailwind colors inside `@theme
+inline`. Use the Tailwind utilities that resolve through these tokens rather
+than hard-coded values.
 
-- Colors: `background`, `foreground`, `card`, `card-border`, `primary`,
-  `secondary`, `muted`, `accent`, `destructive`, `border`, `input`, `ring`.
-- Spacing scale: `--spacing-1` … `--spacing-12`.
-- Radius scale: `--radius-sm`, `--radius`, `--radius-lg`.
-- Font scale: `--font-size-xs` … `--font-size-2xl`, `--leading-*`.
+- Core semantic colors (coss-ui set): `background`, `foreground`, `card`,
+  `card-foreground`, `card-border`, `popover`, `primary`, `secondary`, `muted`,
+  `accent`, `destructive`, `border`, `border-subtle`, `input`, `ring`.
+- Depot-specific roles: `success`/`warning`/`info` (+ `-soft` variants),
+  `status-*` (draft/ready/in-progress/done/canceled), `task-*`,
+  `severity-*` (critical/major/minor/info), `timeline-*`, `sidebar-*`.
+- Radius scale: `--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-xl`,
+  `--radius-2xl`, derived from a single `--radius` base.
+- Fonts: `--font-sans` (Inter Variable), `--font-mono`.
 
-Never hard-code hex colors. If a value is one-off, prefer a Tailwind utility
-that resolves through the token (e.g. `bg-primary text-primary-foreground`).
+Light and dark variants are both defined; no user-facing theme toggle is wired
+(out of scope — see PRD 14 Notes). Never hard-code hex/oklch colors in
+components. A handful of custom utility classes exist for surfaces that Tailwind
+can't express directly: `bg-panel-muted`, `border-card-border`, `shadow-card`,
+`shadow-card-hover`, `depot-logo-gradient`.
 
 ## Primitives
 
-All shared primitives live under `src/web/components/ui/`. When adding a new
-one:
+Shared primitives live in `src/web/components/ui/`:
 
-1. Start from the [coss-ui catalog](https://coss.com/ui/docs). Copy the source
-   verbatim — that's the model — then adjust imports and tokens.
-2. Keep the exported name aligned with the consumer code (don't rename without
-   a search-and-replace).
-3. Forward `className` so callers can extend with extra utility classes.
+- Form / control: `button`, `input`, `textarea`, `checkbox`, `select`
+- Surface / container: `card`, `side-drawer`, `accordion`, `collapsible`,
+  `collapse-chevron`
+- Status / data: `badge`, `status-badge`, `status-dot`, `task-indicator`,
+  `empty-state`
+- Layout: `resizable-panel` (exports `ResizableSplit` + `FloatingToolbar`)
+- Navigation: `breadcrumb`
+- Feedback: `dot-loader/` (loading spinner)
+
+When adding a new primitive:
+
+1. Find the closest match in the [coss-ui catalog](https://coss.com/ui/docs).
+   Copy the source verbatim — that's the model — then adjust imports and tokens.
+2. Replace any hard-coded colors with depot tokens; drop deps the catalog brings
+   that we don't want.
+3. Keep the exported name aligned with consumer code (don't rename without a
+   search-and-replace).
+4. Forward `className` so callers can extend with extra utility classes.
 
 ## Layouts
 
-We assemble pages from a small set of layouts from
+Pages are assembled from a small set of layouts from
 [devl.dev](https://www.devl.dev):
 
-| Route family                                   | Layout                                 | Notes                                                                   |
-| ---------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------- |
-| App shell (`__root.tsx`)                       | `app-shell` / `workspace-rail`         | Sidebar projects + main content.                                        |
-| PRD detail (`prds.$id.tsx`)                    | `three-pane`                           | Left: tasks/phases. Center: PRD content. Right: activity + reviews.     |
-| Review diff (`prds.$id.review-diff.tsx`)       | `split-resizable` + `floating-toolbar` | Left: context. Center: diff. Right: annotations. Toolbar pinned bottom. |
-| Project settings (`projects.$id.settings.tsx`) | `docs-tree`                            | Tree sidebar (config / directives / profiles) + main form pane.         |
+| Route family                                   | Layout                                 | Component(s)                                                       |
+| ---------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------ |
+| App shell (`__root.tsx`)                       | `app-shell`                            | `app-shell.tsx` + `app-sidebar.tsx` (`<AppShell>`, `<AppSidebar>`) |
+| PRD detail (`prds.$id.tsx`)                    | `three-pane`                           | `three-pane.tsx` (`<ThreePane>`)                                   |
+| Review diff (`prds.$id.review-diff.tsx`)       | `split-resizable` + `floating-toolbar` | `ui/resizable-panel.tsx` (`<ResizableSplit>`, `<FloatingToolbar>`) |
+| Project settings (`projects.$id.settings.tsx`) | `docs-tree`                            | `settings-tree.tsx` (`<SettingsTree>`)                             |
+| Other pages (lists, docs)                      | `app-shell` single column              | `page-shell.tsx` (`<PageShell>`/`<PageTopBar>`/`<PageContent>`)    |
 
-When a new page doesn't fit one of these, default to the simplest one that
-works (typically `app-shell` with a single content column) and don't invent a
-new layout.
+- **`app-shell`** — left sidebar (`<AppSidebar>`: project switcher, contextual
+  nav, "new project" link; collapse state persisted in `localStorage` via
+  `lib/use-persisted-state.ts`) + main content. No top nav.
+- **`three-pane`** — left: tasks/phases; center: PRD content; right: activity +
+  reviews (fine, collapsible).
+- **`split-resizable`** — draggable divider between context panel and diff;
+  split position persisted in `localStorage`. `floating-toolbar` keeps the
+  commit / push / submit-review actions pinned to the bottom regardless of
+  scroll.
+- **`docs-tree`** — tree sidebar (Configuration / Repos / Directives / Doc
+  profiles) + main form pane.
+
+When a new page doesn't fit one of these, default to `app-shell` with a single
+`<PageContent>` column. Don't invent a new layout.
 
 ## Pattern libraries
 
-These cover the small-but-important UI elements:
-
-- **Timelines** — activity log rendering. Pattern from devl.dev _Timelines_
-  category. Required: group by day/session, badge `source` (`ai` / `human` /
-  `plugin`), expansion for Bash output.
-- **Empty states** — every list that can be empty needs one. Pattern from
-  devl.dev _Empty States_ category. Required: clear next-action button.
-- **Toasts** — `<TriggerActionButton>` (web ↔ chat bridge) emits these.
-  Pattern from devl.dev _Toasts & Banners_ category. Required: secondary
-  "Copy slash command" button for the level-1 fallback.
-- **Tables** — PRD list, doc artifact list. Pattern from devl.dev _Tables_
-  category. Required: sortable headers, density toggle, row hover.
-- **Settings forms** — project config editor. Pattern from devl.dev _Settings_
-  category. Required: granular save (per-key) plus reset-to-default.
+- **Timelines** — `activity-timeline.tsx` (`<ActivityTimeline>`) is the shared
+  pattern, copied from the devl.dev _Timelines_ category. It groups entries
+  under day headers, carries a `source` badge (`ai` / `human` / `plugin`),
+  renders clickable file links, and expands Bash output. `live-activity-panel.tsx`
+  consumes it. Refactor the view-model, not the component, when adding fields.
+- **Empty states** — every list that can be empty uses `<EmptyState>` from
+  `ui/empty-state.tsx` (devl.dev _Empty States_ category). Pass `message` and an
+  optional `action`.
+- **Toasts / banners** — inline banners use `prd-notice-banner.tsx`
+  (`<PrdNoticeBanner>`). Keep banner styling on the `destructive` / `warning` /
+  `info` soft tokens.
+- **Tables** — list views (PRD list, doc artifacts) are built from `card` +
+  `badge` compositions rather than a generic table primitive.
 
 ## Adding a new page
 
-1. Pick the layout from the table above (or default to `app-shell`).
+1. Pick the layout from the table above (or default to `app-shell` +
+   `<PageContent>`).
 2. Compose primitives from `src/web/components/ui/` — don't reach for raw
-   `<button>` or `<input>`.
+   `<button>` / `<input>`.
 3. Use semantic tokens for every visual property.
-4. Empty / loading / error states are mandatory. Use the standard
-   `<EmptyState>` primitive.
-5. Add a Playwright smoke test if the page is on a critical path.
+4. Empty / loading / error states are mandatory. Use `<EmptyState>` and
+   `dot-loader` for those.
+5. Add a Playwright test if the page is on a critical path (see
+   `tests/e2e/`). Screenshot tests cover the key pages in
+   `tests/e2e/visual.spec.ts`.
 
-## Adding a new primitive
+## Convention
 
-1. Find the closest match on [coss-ui](https://coss.com/ui/docs).
-2. Copy the JSX into `src/web/components/ui/<name>.tsx`.
-3. Replace any hard-coded colors with tokens; remove any deps the catalog brings
-   but we don't want.
-4. Export with a stable name. Document the props inline if non-obvious.
-
-## Migration ledger
-
-Pages migrated to the system (as of this commit):
-
-- **App shell** — Sidebar + main content, no top nav. Workspace switcher,
-  project nav, PRD list. (`src/web/components/app-shell.tsx`,
-  `src/web/routes/__root.tsx`)
-- **Overview** — Dashboard with pending actions panel + kanban board, plus
-  Docs / Settings links in the header when a workspace is selected.
-- **PRD detail (`/prds/:id`)** — Three-pane composition: tasks/phases left,
-  PRD content center, activity/reviews right. "Review the diff" CTA in top
-  bar.
-- **Review diff (`/prds/:id/review-diff`)** — `split-resizable` layout
-  (context panel + diff, divider draggable, width persisted in localStorage)
-  - `floating-toolbar` (commit / push / submit review pinned to bottom).
-- **Project settings (`/projects/:id/settings`)** — `docs-tree` layout:
-  Configuration / Directives sections accessible via a sidebar tree.
-- **Project docs (`/projects/:id/docs`)** — Grouped artifact lists (ADR /
-  CONTEXT / Glossary / Freeform) + read-only doc-profiles + sync history.
-
-Pages that may still benefit from further polish in a future iteration:
-
-- Activity timeline grouping by day/session (currently flat).
-- Empty-state homogenization across all list views.
-- Toast / banner pattern unification (we have ad-hoc ones; coss-ui has a
-  consistent palette to copy from).
-- Mobile / responsive sweep (desktop-only today by design).
-
-The migration is functionally complete; further work is polish, not blocker.
+Start from coss-ui for new components: copy-paste the catalog source, then adapt
+it to depot tokens and naming. We add inline JSX rather than an npm dependency,
+so there is no bundle-size cost beyond the copied markup.

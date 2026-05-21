@@ -70,7 +70,14 @@ function ProjectsIndexRoute() {
         )}
         {projectsQ.data &&
           (projectsQ.data.items.length === 0 ? (
-            <EmptyState message="No projects yet. Run `depot init` in a workspace to create one." />
+            <EmptyState
+              message="No projects yet. Run `depot init` in a workspace to create one."
+              action={
+                <code className="rounded bg-secondary px-2 py-1 font-mono text-xs text-muted-foreground">
+                  depot init
+                </code>
+              }
+            />
           ) : (
             <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {projectsQ.data.items.map((p) => (

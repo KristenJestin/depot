@@ -88,6 +88,84 @@ export function resolveMigrationsFolder(baseDir = import.meta.dirname): string {
   return found;
 }
 
+/**
+ * Row shape returned by the cross-entity corruption diagnostic.
+ */
+type CrossEntityCorruptRow = {
+  id: string;
+  title: string;
+  project_id: string;
+  workspace_id: string;
+  workspace_project_id: string;
+};
+
+/**
+ * Pre-migration fail-loud guard for the `cross_entity_triggers` migration.
+ *
+ * That migration installs SQLite triggers that enforce, from then on, the
+ * invariant `prd_revisions.workspace_id` belongs to the same project as
+ * `prd_revisions.project_id`. The triggers only fire on future writes — they
+ * cannot retroactively reject rows that are already corrupt, and a migration
+ * that silently leaves corrupt rows behind hides a real data bug.
+ *
+ * So before that migration runs we execute its diagnostic SELECT and, if any
+ * inconsistent PRD revisions exist, abort the whole migration batch with a
+ * clear message pointing at `depot project diagnose`. The check is skipped
+ * once the triggers already exist (migration already applied) and is a no-op
+ * on a database whose schema predates the `prd_revisions` table.
+ */
+function assertCrossEntityConsistency(db: Database): void {
+  const client = (db as unknown as { $client?: { prepare?: DatabaseSync["prepare"] } }).$client;
+  // No usable SQLite handle (e.g. a stubbed `migrateFn` in tests) — nothing to
+  // check; the migrator itself will surface any real schema problem.
+  if (!client || typeof client.prepare !== "function") {
+    return;
+  }
+
+  const triggerExists = client
+    .prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'prd_revisions_workspace_consistency_insert'",
+    )
+    .get();
+  if (triggerExists) {
+    return;
+  }
+
+  const tableExists = client
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prd_revisions'")
+    .get();
+  if (!tableExists) {
+    return;
+  }
+
+  const corrupt = client
+    .prepare(
+      `SELECT p.id AS id, p.title AS title, p.project_id AS project_id,
+              p.workspace_id AS workspace_id, w.project_id AS workspace_project_id
+       FROM prd_revisions p
+       JOIN workspaces w ON w.id = p.workspace_id
+       WHERE p.workspace_id IS NOT NULL
+         AND p.project_id != w.project_id`,
+    )
+    .all() as CrossEntityCorruptRow[];
+
+  if (corrupt.length === 0) {
+    return;
+  }
+
+  const details = corrupt
+    .map(
+      (row) =>
+        `  - PRD ${row.id} ('${row.title}') project=${row.project_id} but workspace ${row.workspace_id} is in project=${row.workspace_project_id}`,
+    )
+    .join("\n");
+  throw new Error(
+    `Migration aborted: ${corrupt.length} PRD revision(s) violate the project/workspace ` +
+      `consistency invariant enforced by the 'cross_entity_triggers' migration.\n${details}\n` +
+      `Run \`depot project diagnose\` to inspect these rows, fix them, then re-run the migration.`,
+  );
+}
+
 export function applyMigrations(
   db: Database,
   options: {
@@ -100,6 +178,7 @@ export function applyMigrations(
   const migrationsFolder = resolveMigrationsFolder(options.baseDir);
   const migrateFn = options.migrateFn ?? migrate;
   retrySqliteBusy(() => {
+    assertCrossEntityConsistency(db);
     migrateFn(db, { migrationsFolder });
   }, options);
 }

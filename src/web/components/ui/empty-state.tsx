@@ -10,11 +10,15 @@ export interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
 function EmptyState({ message, action, className, ...props }: EmptyStateProps) {
   return (
     <div
-      className={cn("flex flex-col items-center justify-center gap-3 py-12 text-center", className)}
+      data-slot="empty-state"
+      className={cn(
+        "flex flex-col items-center justify-center gap-3 px-6 py-12 text-center",
+        className,
+      )}
       {...props}
     >
       <p className="text-sm text-muted-foreground">{message}</p>
-      {action && <div>{action}</div>}
+      {action && <div className="flex items-center gap-2">{action}</div>}
     </div>
   );
 }

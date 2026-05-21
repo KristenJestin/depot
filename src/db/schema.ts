@@ -1,5 +1,12 @@
 import { defineRelations } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import {
   VALID_EFFORTS,
   VALID_PRD_STATUSES,
@@ -20,6 +27,7 @@ import {
   VALID_DIRECTIVE_SCOPES,
   VALID_DIRECTIVE_KINDS,
   VALID_DIRECTIVE_RUN_STATUSES,
+  VALID_MERGE_CAPTURE_SOURCES,
 } from "#/shared/validator";
 import { generateId } from "#/shared/utils";
 
@@ -59,6 +67,39 @@ export const workspaces = sqliteTable(
       .$onUpdateFn(() => new Date()),
   },
   (table) => [index("workspaces_project_id_idx").on(table.projectId)],
+);
+
+// ── Project repos ─────────────────────────────────────────────────────────────
+//
+// Optional registry of the git repos that make up a project. A project with
+// no `project_repo` rows falls back to a single implicit repo resolved from
+// the workspace path (see `resolveProjectRepos`). Multi-repo projects register
+// one row per repo so capture-merge, the guard, and the diff API can target
+// each repo independently.
+
+export const projectRepos = sqliteTable(
+  "project_repo",
+  {
+    id: text().primaryKey(),
+    projectId: text()
+      .notNull()
+      .references(() => projects.id),
+    name: text().notNull(), // unique per project — e.g. `front`, `api`, `common`
+    path: text().notNull(), // absolute or relative to the workspace
+    isPrimary: integer({ mode: "boolean" }).notNull().default(false),
+    baseBranch: text().notNull().default("main"), // each repo carries its own base branch
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    index("project_repo_project_id_idx").on(table.projectId),
+    uniqueIndex("project_repo_project_name_idx").on(table.projectId, table.name),
+  ],
 );
 
 // ── PRDs (logical containers) ─────────────────────────────────────────────────
@@ -326,6 +367,45 @@ export const prdPhaseSnapshots = sqliteTable(
   ],
 );
 
+// ── PRD merge anchors ─────────────────────────────────────────────────────────
+//
+// One row per `{repo, mergeSha}` pair anchored to a PRD revision after a
+// squash merge. Replaces the single `prd_revision.mergedAtSha` column for
+// multi-repo projects: a PRD that lands across N repos gets N rows here.
+//
+// `repoId` is null for a mono-repo project (the implicit repo has no
+// `project_repo` row). `repoName`/`repoPath` are always denormalised so the
+// anchor survives a later `project_repo` deletion.
+
+export const prdMerges = sqliteTable(
+  "prd_merge",
+  {
+    id: text().primaryKey(),
+    prdRevisionId: text()
+      .notNull()
+      .references(() => prdRevisions.id),
+    repoId: text().references(() => projectRepos.id), // null for the implicit mono-repo
+    repoName: text().notNull(), // denormalised — `(default)` for mono-repo
+    repoPath: text().notNull(), // denormalised git root
+    mergeSha: text().notNull(),
+    mergedAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    capturedFrom: text({ enum: VALID_MERGE_CAPTURE_SOURCES }).notNull(),
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    index("prd_merge_prd_revision_id_idx").on(table.prdRevisionId),
+    uniqueIndex("prd_merge_prd_revision_repo_name_idx").on(table.prdRevisionId, table.repoName),
+  ],
+);
+
 // ── Doc artifacts ─────────────────────────────────────────────────────────────
 
 export const docArtifacts = sqliteTable(
@@ -473,6 +553,10 @@ export const projectDirectives = sqliteTable(
     title: text().notNull(),
     instruction: text().notNull(),
     kind: text({ enum: VALID_DIRECTIVE_KINDS }).notNull(),
+    // Which repo a `kind: command` directive runs in. `auto` (default) targets
+    // the modified repos, `all` every registered repo, `workspace` the
+    // workspace root, or a specific `project_repo.name`.
+    repoTarget: text().notNull().default("auto"),
     blocking: integer({ mode: "boolean" }).notNull().default(true),
     position: integer().notNull().default(0),
     enabled: integer({ mode: "boolean" }).notNull().default(true),
@@ -530,6 +614,7 @@ export const activityLog = sqliteTable(
 // ── Row types ─────────────────────────────────────────────────────────────────
 
 export type ProjectRow = typeof projects.$inferSelect;
+export type ProjectRepoRow = typeof projectRepos.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type PrdRow = typeof prds.$inferSelect;
 export type PrdRevisionRow = typeof prdRevisions.$inferSelect;
@@ -540,6 +625,7 @@ export type UserStoryRow = typeof userStories.$inferSelect;
 export type TaskUserStoryRow = typeof taskUserStories.$inferSelect;
 export type OutOfScopeItemRow = typeof outOfScopeItems.$inferSelect;
 export type PrdPhaseSnapshotRow = typeof prdPhaseSnapshots.$inferSelect;
+export type PrdMergeRow = typeof prdMerges.$inferSelect;
 export type DocArtifactRow = typeof docArtifacts.$inferSelect;
 export type DocProfileRow = typeof docProfiles.$inferSelect;
 export type DocSyncRunRow = typeof docSyncRuns.$inferSelect;
@@ -552,6 +638,7 @@ export type ProjectDirectiveRow = typeof projectDirectives.$inferSelect;
 export const relations = defineRelations(
   {
     projects,
+    projectRepos,
     workspaces,
     prds,
     prdRevisions,
@@ -562,6 +649,7 @@ export const relations = defineRelations(
     taskUserStories,
     outOfScopeItems,
     prdPhaseSnapshots,
+    prdMerges,
     docArtifacts,
     docProfiles,
     docSyncRuns,
@@ -575,6 +663,10 @@ export const relations = defineRelations(
         from: r.projects.id,
         to: r.workspaces.projectId,
       }),
+      repos: r.many.projectRepos({
+        from: r.projects.id,
+        to: r.projectRepos.projectId,
+      }),
       prds: r.many.prds({
         from: r.projects.id,
         to: r.prds.projectId,
@@ -582,6 +674,12 @@ export const relations = defineRelations(
       activityLogs: r.many.activityLog({
         from: r.projects.id,
         to: r.activityLog.projectId,
+      }),
+    },
+    projectRepos: {
+      project: r.one.projects({
+        from: r.projectRepos.projectId,
+        to: r.projects.id,
       }),
     },
     workspaces: {
@@ -628,6 +726,21 @@ export const relations = defineRelations(
       activityLogs: r.many.activityLog({
         from: r.prdRevisions.id,
         to: r.activityLog.prdRevisionId,
+      }),
+      merges: r.many.prdMerges({
+        from: r.prdRevisions.id,
+        to: r.prdMerges.prdRevisionId,
+      }),
+    },
+    prdMerges: {
+      prdRevision: r.one.prdRevisions({
+        from: r.prdMerges.prdRevisionId,
+        to: r.prdRevisions.id,
+      }),
+      repo: r.one.projectRepos({
+        from: r.prdMerges.repoId,
+        to: r.projectRepos.id,
+        optional: true,
       }),
     },
     reviews: {

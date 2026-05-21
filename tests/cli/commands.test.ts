@@ -1574,6 +1574,478 @@ describe("CLI commands", () => {
     });
   });
 
+  // ── prd capture-merge ──────────────────────────────────────────────────────
+
+  describe("prd capture-merge", () => {
+    const captureMergeTempDirs: string[] = [];
+
+    async function makeGitRepoForMerge(): Promise<{ root: string; sha: string }> {
+      const { execFileSync } = await import("node:child_process");
+      const root = join(tmpdir(), `depot-cm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      await fs.mkdir(root, { recursive: true });
+      const real = await fs.realpath(root);
+      captureMergeTempDirs.push(real);
+      execFileSync("git", ["init", "-q"], { cwd: real });
+      execFileSync("git", ["config", "user.email", "t@t.t"], { cwd: real });
+      execFileSync("git", ["config", "user.name", "t"], { cwd: real });
+      await fs.writeFile(join(real, "f.txt"), "hello");
+      execFileSync("git", ["add", "."], { cwd: real });
+      execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: real });
+      const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: real }).toString().trim();
+      return { root: real, sha };
+    }
+
+    afterEach(async () => {
+      for (const dir of captureMergeTempDirs.splice(0)) {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("captures HEAD for a mono-repo project with no flags (zero config)", async () => {
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const captureMerge = await getSubCommand(prdCommand, "capture-merge");
+      const { listMerges } = await import("#/modules/prds/domain");
+
+      const repo = await makeGitRepoForMerge();
+      const ws = await addWorkspace(db, { projectId, path: repo.root });
+      resolveCurrentWorkspace.mockResolvedValue({ db, ws });
+
+      const prd = await createPrd(db, { projectId, title: "Mono merge PRD" });
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await captureMerge.run({ args: { prdId: prd.id } });
+      stdout.mockRestore();
+
+      const merges = await Effect.runPromise(Effect.provideService(listMerges(prd.id), Db, db));
+      expect(merges).toHaveLength(1);
+      expect(merges[0]?.repoName).toBe("(default)");
+      expect(merges[0]?.mergeSha).toBe(repo.sha);
+      expect(merges[0]?.repoId).toBeNull();
+    });
+
+    it("anchors multiple repos in one call with --repo name=sha", async () => {
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const captureMerge = await getSubCommand(prdCommand, "capture-merge");
+      const { addRepo } = await import("#/modules/projects/repos");
+      const { listMerges } = await import("#/modules/prds/domain");
+
+      const front = await makeGitRepoForMerge();
+      const api = await makeGitRepoForMerge();
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: front.root }), Db, db),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: api.root }), Db, db),
+      );
+
+      const prd = await createPrd(db, { projectId, title: "Multi merge PRD" });
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await captureMerge.run({
+        args: { prdId: prd.id, repo: [`front=${front.sha}`, `api=${api.sha}`] },
+      });
+      stdout.mockRestore();
+
+      const merges = await Effect.runPromise(Effect.provideService(listMerges(prd.id), Db, db));
+      expect(merges.map((m) => m.repoName).sort()).toEqual(["api", "front"]);
+    });
+
+    it("refuses an unregistered repo name in a multi-repo project", async () => {
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const captureMerge = await getSubCommand(prdCommand, "capture-merge");
+      const { addRepo } = await import("#/modules/projects/repos");
+
+      const front = await makeGitRepoForMerge();
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: front.root }), Db, db),
+      );
+      const prd = await createPrd(db, { projectId, title: "Refuse repo PRD" });
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+      const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await expect(
+        captureMerge.run({ args: { prdId: prd.id, repo: [`unknown=${front.sha}`] } }),
+      ).rejects.toThrow("process.exit:1");
+
+      stderr.mockRestore();
+      exit.mockRestore();
+    });
+
+    it("refuses a SHA that does not exist in the repo", async () => {
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const captureMerge = await getSubCommand(prdCommand, "capture-merge");
+      const { addRepo } = await import("#/modules/projects/repos");
+
+      const front = await makeGitRepoForMerge();
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: front.root }), Db, db),
+      );
+      const prd = await createPrd(db, { projectId, title: "Refuse SHA PRD" });
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+      const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await expect(
+        captureMerge.run({
+          args: {
+            prdId: prd.id,
+            repo: ["front=0000000000000000000000000000000000000000"],
+          },
+        }),
+      ).rejects.toThrow("process.exit:1");
+
+      stderr.mockRestore();
+      exit.mockRestore();
+    });
+  });
+
+  // ── context ship per-repo state ───────────────────────────────────────────
+
+  describe("context ship", () => {
+    const shipTempDirs: string[] = [];
+
+    async function makeShipRepo(): Promise<string> {
+      const { execFileSync } = await import("node:child_process");
+      const root = join(tmpdir(), `depot-cs-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      await fs.mkdir(root, { recursive: true });
+      const real = await fs.realpath(root);
+      shipTempDirs.push(real);
+      execFileSync("git", ["init", "-q", "-b", "main"], { cwd: real });
+      execFileSync("git", ["config", "user.email", "t@t.t"], { cwd: real });
+      execFileSync("git", ["config", "user.name", "t"], { cwd: real });
+      await fs.writeFile(join(real, "f.txt"), "hello");
+      execFileSync("git", ["add", "."], { cwd: real });
+      execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: real });
+      return real;
+    }
+
+    afterEach(async () => {
+      for (const dir of shipTempDirs.splice(0)) {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("injects single implicit repo state for a mono-repo PRD", async () => {
+      const { contextCommand } = await import("#/cli/commands/context");
+      const repo = await makeShipRepo();
+      const ws = await addWorkspace(db, { projectId, path: repo });
+      resolveCurrentWorkspace.mockResolvedValue({ db, ws });
+
+      const prd = await createPrd(db, { projectId, title: "Ship mono PRD" });
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await contextCommand.run?.({
+        rawArgs: [],
+        args: { mode: "ship", prdTarget: prd.id } as any,
+        cmd: contextCommand,
+      });
+      const out = String(stdout.mock.calls[0]?.[0]);
+      stdout.mockRestore();
+
+      expect(out).toContain("=== DEPOT CONTEXT — SHIP ===");
+      expect(out).toContain(`Shipping: Ship mono PRD (${prd.id}) [draft]`);
+      expect(out).toContain("Doc sync: not yet run for this PRD");
+      expect(out).toContain("Repos   : single implicit repo");
+      expect(out).toContain("(default)");
+      expect(out).toContain("base branch : main");
+      expect(out).toContain("status      : clean");
+    });
+
+    it("reports when the doc sync already ran for the shipped PRD", async () => {
+      const { contextCommand } = await import("#/cli/commands/context");
+      const { createProfile, recordSyncRun } = await import("#/modules/docs/sync");
+      const repo = await makeShipRepo();
+      const ws = await addWorkspace(db, { projectId, path: repo });
+      resolveCurrentWorkspace.mockResolvedValue({ db, ws });
+
+      const prd = await createPrd(db, { projectId, title: "Doc-synced ship PRD" });
+      const provide = <A, E>(effect: Effect.Effect<A, E, Db>): Promise<A> =>
+        Effect.runPromise(Effect.provideService(effect, Db, db));
+      const profile = await provide(
+        createProfile({ projectId, name: "ship-doc", targetRoot: "docs" }),
+      );
+      await provide(recordSyncRun({ profileId: profile.id, triggeredByPrdId: prd.id }));
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await contextCommand.run?.({
+        rawArgs: [],
+        args: { mode: "ship", prdTarget: prd.id } as any,
+        cmd: contextCommand,
+      });
+      const out = String(stdout.mock.calls[0]?.[0]);
+      stdout.mockRestore();
+
+      expect(out).toContain("Doc sync: already ran for this PRD");
+    });
+
+    it("injects per-repo state for a multi-repo PRD", async () => {
+      const { contextCommand } = await import("#/cli/commands/context");
+      const { addRepo } = await import("#/modules/projects/repos");
+      const front = await makeShipRepo();
+      const api = await makeShipRepo();
+      const ws = await addWorkspace(db, { projectId, path: front });
+      resolveCurrentWorkspace.mockResolvedValue({ db, ws });
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: front }), Db, db),
+      );
+      await Effect.runPromise(
+        Effect.provideService(
+          addRepo({ projectId, name: "api", path: api, baseBranch: "develop" }),
+          Db,
+          db,
+        ),
+      );
+
+      const prd = await createPrd(db, { projectId, title: "Ship multi PRD" });
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await contextCommand.run?.({
+        rawArgs: [],
+        args: { mode: "ship", prdTarget: prd.id } as any,
+        cmd: contextCommand,
+      });
+      const out = String(stdout.mock.calls[0]?.[0]);
+      stdout.mockRestore();
+
+      expect(out).toContain("Repos   : multi-repo project");
+      expect(out).toContain("- front");
+      expect(out).toContain("- api");
+      expect(out).toContain("base branch : develop");
+    });
+
+    it("degrades gracefully when the PRD is not found", async () => {
+      const { contextCommand } = await import("#/cli/commands/context");
+      const repo = await makeShipRepo();
+      const ws = await addWorkspace(db, { projectId, path: repo });
+      resolveCurrentWorkspace.mockResolvedValue({ db, ws });
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await contextCommand.run?.({
+        rawArgs: [],
+        args: { mode: "ship", prdTarget: "does-not-exist" } as any,
+        cmd: contextCommand,
+      });
+      const out = String(stdout.mock.calls[0]?.[0]);
+      stdout.mockRestore();
+
+      expect(out).toContain("=== DEPOT CONTEXT — SHIP ===");
+      expect(out).toContain("not found");
+      expect(out).toContain("Ship Agent");
+    });
+  });
+
+  // ── context doc precomputed state ─────────────────────────────────────────
+
+  describe("context doc", () => {
+    function provide<A, E>(effect: Effect.Effect<A, E, Db>): Promise<A> {
+      return Effect.runPromise(Effect.provideService(effect, Db, db));
+    }
+
+    async function runContextDoc(): Promise<string> {
+      const { contextCommand } = await import("#/cli/commands/context");
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await contextCommand.run?.({
+          rawArgs: [],
+          args: { mode: "doc", prdTarget: "" } as any,
+          cmd: contextCommand,
+        });
+        return String(stdout.mock.calls[0]?.[0]);
+      } finally {
+        stdout.mockRestore();
+      }
+    }
+
+    it("reports when no doc profiles are configured", async () => {
+      const out = await runContextDoc();
+      expect(out).toContain("=== DEPOT CONTEXT — DOC ===");
+      expect(out).toContain("no doc profiles configured");
+    });
+
+    it("injects active doc profiles and the last sync run", async () => {
+      const { createProfile, recordSyncRun } = await import("#/modules/docs/sync");
+      const profile = await provide(
+        createProfile({
+          projectId,
+          name: "handbook",
+          targetRoot: "docs/handbook",
+          language: "fr",
+          style: "narrative",
+        }),
+      );
+      await provide(
+        recordSyncRun({
+          profileId: profile.id,
+          summary: "synced handbook",
+        }),
+      );
+
+      const out = await runContextDoc();
+      expect(out).toContain("1 doc profile(s)");
+      expect(out).toContain("- handbook");
+      expect(out).toContain("target root : docs/handbook");
+      expect(out).toContain("language    : fr");
+      expect(out).toContain("last sync   :");
+    });
+
+    it("reports a profile that has never been synced", async () => {
+      const { createProfile } = await import("#/modules/docs/sync");
+      await provide(createProfile({ projectId, name: "reference", targetRoot: "docs/reference" }));
+      const out = await runContextDoc();
+      expect(out).toContain("- reference");
+      expect(out).toContain("(never synced)");
+    });
+  });
+
+  // ── prd validate (extended checks) ────────────────────────────────────────
+
+  describe("prd validate", () => {
+    async function runValidate(prdId: string): Promise<{
+      checks: Array<{ level: string; message: string }>;
+      summary: { errors: number; warnings: number; ready: boolean };
+    }> {
+      setJsonMode(true);
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const validateCommand = await getSubCommand(prdCommand, "validate");
+      const output = await captureStdout(async () => {
+        await validateCommand.run({ args: { prdId } });
+      });
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      return parsed.payload;
+    }
+
+    function provide<A, E>(effect: Effect.Effect<A, E, Db>): Promise<A> {
+      return Effect.runPromise(Effect.provideService(effect, Db, db));
+    }
+
+    it("reports errors when problem, solution, and user stories are missing", async () => {
+      const prd = await createPrd(db, { projectId, title: "Bare PRD" });
+      const payload = await runValidate(prd.id);
+      const messages = payload.checks.map((c) => c.message);
+      const errored = (m: string) =>
+        payload.checks.find((c) => c.message === m && c.level === "error");
+
+      expect(errored("problem statement missing")).toBeTruthy();
+      expect(errored("solution missing")).toBeTruthy();
+      expect(messages.some((m) => /user story\(ies\) defined/.test(m))).toBe(true);
+      expect(
+        payload.checks.find(
+          (c) => /user story\(ies\) defined/.test(c.message) && c.level === "error",
+        ),
+      ).toBeTruthy();
+      expect(payload.summary.errors).toBeGreaterThanOrEqual(3);
+    });
+
+    it("warns when implementation and testing decisions are not recorded", async () => {
+      const prd = await createPrd(db, { projectId, title: "No-decisions PRD" });
+      const payload = await runValidate(prd.id);
+      const warned = (m: string) =>
+        payload.checks.find((c) => c.message === m && c.level === "warn");
+      expect(warned("implementation decisions not recorded")).toBeTruthy();
+      expect(warned("testing decisions not recorded")).toBeTruthy();
+    });
+
+    it("clears section errors once problem, solution, and a story are set", async () => {
+      const { updatePrdSections } = await import("#/modules/prds/domain");
+      const { createUserStory } = await import("#/modules/prds/stories");
+      const prd = await createPrd(db, { projectId, title: "Filled PRD" });
+      await provide(
+        updatePrdSections(prd.id, {
+          problem: "Agents cannot tell which PRD a diff belongs to.",
+          solution: "Anchor each merge with a prd_merge row.",
+          implementationDecisions: "Use a join table.",
+          testingDecisions: "Unit tests on the resolver.",
+        }),
+      );
+      await provide(
+        createUserStory({
+          prdRevisionId: prd.id,
+          asRole: "reviewer",
+          want: "to see the right diff",
+          so: "I can approve faster",
+        }),
+      );
+      const payload = await runValidate(prd.id);
+      const ok = (m: string) => payload.checks.find((c) => c.message === m && c.level === "ok");
+      expect(ok("problem statement set")).toBeTruthy();
+      expect(ok("solution set")).toBeTruthy();
+      expect(ok("implementation decisions set")).toBeTruthy();
+      expect(ok("testing decisions set")).toBeTruthy();
+    });
+
+    it("warns when a user story is not linked to any task", async () => {
+      const { createUserStory, linkStoryToTask } = await import("#/modules/prds/stories");
+      const prd = await createPrd(db, { projectId, title: "Story coverage PRD" });
+      const linked = await provide(
+        createUserStory({
+          prdRevisionId: prd.id,
+          asRole: "user",
+          want: "covered story",
+          so: "it ships",
+        }),
+      );
+      await provide(
+        createUserStory({
+          prdRevisionId: prd.id,
+          asRole: "user",
+          want: "uncovered story",
+          so: "it is flagged",
+        }),
+      );
+      const task = await createTask(db, {
+        prdRevisionId: prd.id,
+        title: "Implement covered story",
+        description: "desc",
+        doneCriteria: "the covered story is implemented and tested thoroughly",
+        effort: "s",
+      });
+      await provide(linkStoryToTask(linked.id, task.id));
+
+      const payload = await runValidate(prd.id);
+      const coverage = payload.checks.find((c) => /not linked to any task/.test(c.message));
+      expect(coverage).toBeTruthy();
+      expect(coverage!.level).toBe("warn");
+    });
+
+    it("passes story coverage when every story is linked to a task", async () => {
+      const { createUserStory, linkStoryToTask } = await import("#/modules/prds/stories");
+      const prd = await createPrd(db, { projectId, title: "Full coverage PRD" });
+      const story = await provide(
+        createUserStory({
+          prdRevisionId: prd.id,
+          asRole: "user",
+          want: "a covered story",
+          so: "it ships",
+        }),
+      );
+      const task = await createTask(db, {
+        prdRevisionId: prd.id,
+        title: "Implement story",
+        description: "desc",
+        doneCriteria: "the story is implemented with full coverage of edge cases",
+        effort: "s",
+      });
+      await provide(linkStoryToTask(story.id, task.id));
+
+      const payload = await runValidate(prd.id);
+      expect(
+        payload.checks.find(
+          (c) => c.message === "all user stories are linked to at least one task",
+        ),
+      ).toBeTruthy();
+    });
+  });
+
   // ── prd load ──────────────────────────────────────────────────────────────
 
   describe("prd load", () => {

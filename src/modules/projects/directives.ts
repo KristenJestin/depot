@@ -8,6 +8,8 @@ import { dbQuery } from "#/shared/db";
 import { generateId } from "#/shared/utils";
 import { ValidationError } from "#/shared/errors";
 import type { DirectiveKind, DirectiveScope, DirectiveRunStatus } from "#/shared/validator";
+import { resolveProjectRepos, type ResolvedRepo } from "#/modules/projects/repos";
+import { hasUncommittedChanges } from "#/lib/git";
 
 const execFileAsync = promisify(execFile);
 
@@ -50,6 +52,7 @@ export const createDirective = (input: {
   kind: DirectiveKind;
   blocking?: boolean;
   position?: number;
+  repoTarget?: string;
 }) =>
   Effect.gen(function* () {
     try {
@@ -76,6 +79,7 @@ export const createDirective = (input: {
           title: input.title,
           instruction: input.instruction,
           kind: input.kind,
+          repoTarget: input.repoTarget ?? "auto",
           blocking: input.blocking ?? true,
           position,
           enabled: true,
@@ -94,6 +98,7 @@ export const updateDirective = (
     blocking?: boolean;
     position?: number;
     enabled?: boolean;
+    repoTarget?: string;
   },
 ) =>
   Effect.gen(function* () {
@@ -121,6 +126,7 @@ export const updateDirective = (
           title: patch.title ?? existing.title,
           instruction: patch.instruction ?? existing.instruction,
           kind: patch.kind ?? existing.kind,
+          repoTarget: patch.repoTarget ?? existing.repoTarget,
           blocking: patch.blocking ?? existing.blocking,
           position: patch.position ?? existing.position,
           enabled: patch.enabled ?? existing.enabled,
@@ -173,6 +179,102 @@ export const reorderDirectives = (projectId: string, scope: DirectiveScope, orde
     return { projectId, scope, count: orderedIds.length };
   });
 
+const execInCwd = (instruction: string, cwd: string, timeoutMs: number) =>
+  Effect.tryPromise({
+    try: async () => {
+      const command = resolveShellCommand(instruction);
+      const r = await execFileAsync(command.file, command.args, {
+        cwd,
+        timeout: timeoutMs,
+        maxBuffer: 4 * MAX_OUTPUT_BYTES,
+      });
+      return { ok: true as const, stdout: r.stdout, stderr: r.stderr, code: 0 };
+    },
+    catch: (e) => {
+      const err = e as { code?: number; stdout?: string; stderr?: string; message?: string };
+      return {
+        ok: false as const,
+        stdout: err.stdout ?? "",
+        stderr: err.stderr ?? err.message ?? String(e),
+        code: typeof err.code === "number" ? err.code : 1,
+      };
+    },
+  }).pipe(
+    Effect.catchAll((failed) =>
+      Effect.succeed({
+        ok: false as const,
+        stdout: failed.stdout,
+        stderr: failed.stderr,
+        code: failed.code,
+      }),
+    ),
+  );
+
+export type RepoRunResult = {
+  repoName: string;
+  repoPath: string;
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+};
+
+/**
+ * Resolve the repos a `kind: command` directive should run in, honouring its
+ * `repoTarget`. A mono-repo project always resolves to the single implicit
+ * repo so `auto`/`all`/`workspace` collapse to current behaviour.
+ */
+const resolveDirectiveRepos = (
+  repoTarget: string,
+  projectId: string,
+  wsPath: string,
+): Effect.Effect<ResolvedRepo[], never, Db> =>
+  Effect.gen(function* () {
+    const repos = yield* resolveProjectRepos(projectId, wsPath).pipe(
+      Effect.catchAll(() => Effect.succeed([] as ResolvedRepo[])),
+    );
+    const allRepos =
+      repos.length > 0
+        ? repos
+        : [
+            {
+              id: null,
+              name: "(default)",
+              path: wsPath,
+              isPrimary: true,
+              baseBranch: "main",
+              implicit: true,
+            } satisfies ResolvedRepo,
+          ];
+
+    if (repoTarget === "workspace") {
+      return [
+        {
+          id: null,
+          name: "workspace",
+          path: wsPath,
+          isPrimary: true,
+          baseBranch: "main",
+          implicit: true,
+        } satisfies ResolvedRepo,
+      ];
+    }
+    if (repoTarget === "all") {
+      return allRepos;
+    }
+    if (repoTarget === "auto") {
+      if (allRepos.length === 1) return allRepos;
+      const modified: ResolvedRepo[] = [];
+      for (const repo of allRepos) {
+        const dirty = yield* hasUncommittedChanges(repo.path);
+        if (dirty) modified.push(repo);
+      }
+      return modified;
+    }
+    const named = allRepos.find((r) => r.name === repoTarget);
+    return named ? [named] : [];
+  });
+
 export const runDirective = (
   id: string,
   options: { wsPath: string; timeoutMs?: number } = { wsPath: process.cwd() },
@@ -190,59 +292,71 @@ export const runDirective = (
         }),
       );
     }
+    const timeoutMs = options.timeoutMs ?? 60_000;
     const startedAt = Date.now();
-    const execResult = yield* Effect.tryPromise({
-      try: async () => {
-        const command = resolveShellCommand(directive.instruction);
-        const r = await execFileAsync(command.file, command.args, {
-          cwd: options.wsPath,
-          timeout: options.timeoutMs ?? 60_000,
-          maxBuffer: 4 * MAX_OUTPUT_BYTES,
-        });
-        return { ok: true as const, stdout: r.stdout, stderr: r.stderr, code: 0 };
-      },
-      catch: (e) => {
-        const err = e as { code?: number; stdout?: string; stderr?: string; message?: string };
-        return {
-          ok: false as const,
-          stdout: err.stdout ?? "",
-          stderr: err.stderr ?? err.message ?? String(e),
-          code: typeof err.code === "number" ? err.code : 1,
-        };
-      },
-    }).pipe(
-      Effect.catchAll((failed) =>
-        Effect.succeed({
-          ok: false as const,
-          stdout: failed.stdout,
-          stderr: failed.stderr,
-          code: failed.code,
-        }),
-      ),
+
+    const targets = yield* resolveDirectiveRepos(
+      directive.repoTarget,
+      directive.projectId,
+      options.wsPath,
     );
 
-    const status: DirectiveRunStatus = execResult.ok ? "ok" : "fail";
-    const stdout = execResult.stdout;
-    const stderr = execResult.stderr;
-    const exitCode = execResult.code;
+    const repoResults: RepoRunResult[] = [];
+    let aggregateOk = true;
+    let noOp = false;
+
+    if (targets.length === 0) {
+      // `auto` with no modified repo detected — a no-op, not a failure.
+      noOp = true;
+    }
+
+    for (const repo of targets) {
+      const execResult = yield* execInCwd(directive.instruction, repo.path, timeoutMs);
+      repoResults.push({
+        repoName: repo.name,
+        repoPath: repo.path,
+        ok: execResult.ok,
+        stdout: execResult.stdout,
+        stderr: execResult.stderr,
+        exitCode: execResult.code,
+      });
+      if (!execResult.ok) aggregateOk = false;
+    }
+
+    const status: DirectiveRunStatus = aggregateOk ? "ok" : "fail";
+    const stdout = repoResults
+      .map((r) => (targets.length > 1 ? `[${r.repoName}]\n${r.stdout}` : r.stdout))
+      .join("\n");
+    const stderr = repoResults
+      .map((r) => (targets.length > 1 ? `[${r.repoName}]\n${r.stderr}` : r.stderr))
+      .join("\n");
+    const firstFailure = repoResults.find((r) => !r.ok);
+    const exitCode = firstFailure ? firstFailure.exitCode : 0;
     const durationMs = Date.now() - startedAt;
+
     yield* dbQuery(() =>
       db
         .update(projectDirectives)
         .set({
           lastRunAt: new Date(),
           lastRunStatus: status,
-          lastRunOutput: truncate(`STDOUT:\n${stdout}\nSTDERR:\n${stderr}`),
+          lastRunOutput: truncate(
+            noOp
+              ? "STDOUT:\n(no modified repo detected — no-op)\nSTDERR:\n"
+              : `STDOUT:\n${stdout}\nSTDERR:\n${stderr}`,
+          ),
         })
         .where(eq(projectDirectives.id, id)),
     );
     return {
-      ok: status === "ok",
+      ok: aggregateOk,
       stdout,
       stderr,
       exitCode,
       durationMs,
       directive,
+      noOp,
+      repoResults,
     };
   });
 
@@ -263,10 +377,15 @@ export const runScopeBlocking = (
       durationMs: number;
       stdout: string;
       stderr: string;
+      repoTarget: string;
+      noOp: boolean;
+      repoResults: RepoRunResult[];
     }> = [];
     let ok = true;
     let failingDirectiveId: string | undefined;
     for (const directive of blocking) {
+      // Rule directives are advisory text — only command directives execute.
+      if (directive.kind !== "command") continue;
       const result = yield* runDirective(directive.id, { wsPath: options.wsPath });
       results.push({
         directiveId: directive.id,
@@ -275,6 +394,9 @@ export const runScopeBlocking = (
         durationMs: result.durationMs,
         stdout: result.stdout,
         stderr: result.stderr,
+        repoTarget: directive.repoTarget,
+        noOp: result.noOp,
+        repoResults: result.repoResults,
       });
       if (!result.ok) {
         ok = false;

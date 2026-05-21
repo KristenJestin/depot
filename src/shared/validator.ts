@@ -131,8 +131,24 @@ export type DirectiveScope = (typeof VALID_DIRECTIVE_SCOPES)[number];
 export const VALID_DIRECTIVE_KINDS = ["command", "rule"] as const;
 export type DirectiveKind = (typeof VALID_DIRECTIVE_KINDS)[number];
 
+// Built-in repo targets for `kind: command` directives. Any other value is
+// interpreted as a `project_repo.name` and validated dynamically against the
+// project's registered repos.
+export const VALID_DIRECTIVE_REPO_TARGETS = ["auto", "all", "workspace"] as const;
+export type DirectiveRepoTarget = (typeof VALID_DIRECTIVE_REPO_TARGETS)[number];
+
+export const isBuiltinRepoTarget = (value: string): value is DirectiveRepoTarget =>
+  (VALID_DIRECTIVE_REPO_TARGETS as readonly string[]).includes(value);
+
 export const VALID_DIRECTIVE_RUN_STATUSES = ["ok", "fail"] as const;
 export type DirectiveRunStatus = (typeof VALID_DIRECTIVE_RUN_STATUSES)[number];
+
+// ── Merge anchors ────────────────────────────────────────────────────────────
+
+// How a `prd_merge` row's SHA was obtained: `cwd` when resolved from the
+// current directory's HEAD, `explicit` when passed as a `--sha`/`name=sha`.
+export const VALID_MERGE_CAPTURE_SOURCES = ["cwd", "explicit"] as const;
+export type MergeCaptureSource = (typeof VALID_MERGE_CAPTURE_SOURCES)[number];
 
 // ── Reviews ──────────────────────────────────────────────────────────────────
 

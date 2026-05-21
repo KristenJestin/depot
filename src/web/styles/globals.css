@@ -1,13 +1,20 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@fontsource-variable/inter";
-@import "@fontsource-variable/space-grotesk";
 @plugin "@tailwindcss/typography";
 
 @source "../**/*.{ts,tsx}";
 
 :root {
   color-scheme: light;
+
+  /* coss-ui radius scale — single base radius drives the derived steps. */
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 
   --background: oklch(0.985 0.002 286);
   --foreground: oklch(0.205 0.012 286);
@@ -96,11 +103,8 @@
   --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-ring: var(--primary);
 
-  --gradient-primary-start: oklch(0.7 0.24 288);
   --gradient-primary-end: oklch(0.58 0.27 288);
   --gradient-logo-end: oklch(0.75 0.22 280);
-  --glow-primary-lg: 0 0 20px -4px oklch(0.65 0.27 288 / 0.4);
-  --glow-primary-sm: 0 0 16px -2px oklch(0.65 0.27 288 / 0.35);
 }
 
 .dark {
@@ -168,8 +172,13 @@
 
 @theme inline {
   --font-sans: "Inter Variable", sans-serif;
-  --font-display: "Space Grotesk Variable", sans-serif;
   --font-mono: ui-monospace, monospace;
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
 
   --animate-slide-in-right: slideInRight 0.28s cubic-bezier(0.32, 0.72, 0, 1);
 
@@ -289,21 +298,9 @@
   #root {
     @apply isolate min-h-screen;
   }
-
-  .font-display {
-    font-family: var(--font-display);
-  }
 }
 
 @layer utilities {
-  .bg-app-gradient {
-    background-image: linear-gradient(
-      180deg,
-      color-mix(in oklch, var(--background) 84%, var(--primary-soft)) 0%,
-      var(--background) 26%
-    );
-  }
-
   .bg-panel-muted {
     background-color: color-mix(in oklch, var(--card) 30%, var(--muted));
   }
@@ -318,22 +315,6 @@
 
   .shadow-card-hover {
     box-shadow: var(--card-shadow-hover);
-  }
-
-  .btn-primary {
-    background-image: linear-gradient(
-      to bottom,
-      var(--gradient-primary-start),
-      var(--gradient-primary-end)
-    );
-  }
-
-  .glow-primary {
-    box-shadow: var(--glow-primary-lg);
-  }
-
-  .glow-primary-sm {
-    box-shadow: var(--glow-primary-sm);
   }
 
   .depot-logo-gradient {
