@@ -138,44 +138,18 @@ depot prd pre-review-check <prd-id>
 If anything blocking fails, fix it and re-run. Only call `prd request-review` after
 `pre-review-check` returns ok.
 
-### 3c. Phase wrap-up brief (multi-phase PRDs)
+### 3c. Suggested commit message
 
-Before each `depot prd request-review`, produce two artifacts and persist them so the web
-review page can surface them:
+Persist the best whole-PRD commit message every time you finish a dev pass — Angular-style
+(`<type>(<scope>): <description>` on line 1, short body in subsequent lines). Infer `type`
+from the dominant task `kind` (`feat` for slice, `fix` for bugfix, `refactor` for support,
+etc.) and `scope` from the common path prefix of touched files (e.g. `web`, `cli`, `prd`).
 
-1. **Review brief** — short markdown structured in two blocks:
-   - `Things to actually check now` — diff zones that deserve human attention this phase
-   - `Things you might notice but is deferred` — artefacts of the current diff that look
-     incomplete on purpose because they're handled in a later phase (lookup the PRD's
-     future phases / out-of-scope items and reference them by number)
+```
+depot prd commit-message <prd-id> --message "<message>"
+```
 
-   Persist with:
-
-   ```
-   depot prd phase-brief <prd-id> --phase N --content "<markdown>"
-   ```
-
-2. **Suggested commit message** — Angular-style (`<type>(<scope>): <description>` on line
-   1, short body in subsequent lines). Infer `type` from the dominant task `kind` of the
-   phase (`feat` for slice, `fix` for bugfix, `refactor` for support, etc.) and `scope`
-   from the common path prefix of touched files (e.g. `web`, `cli`, `prd`).
-
-   Persist with:
-
-   ```
-   depot prd phase-commit-message <prd-id> --phase N --message "<message>"
-   ```
-
-   Also persist the best whole-PRD commit message every time you finish a dev pass, even
-   when the PRD is phased. This gives the final no-intermediate-commits path a stable
-   suggestion:
-
-   ```
-   depot prd commit-message <prd-id> --message "<message>"
-   ```
-
-These calls are idempotent — re-running replaces the previous value. `request-review` warns
-if either is empty.
+The call is idempotent — re-running replaces the previous value.
 
 ### 4. Human Validation Loop
 

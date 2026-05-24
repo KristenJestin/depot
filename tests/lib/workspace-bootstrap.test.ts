@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
 import { createProject, addWorkspace, listProjects } from "#/lib/workflow";
@@ -87,6 +90,8 @@ describe("detectGitContext", () => {
 });
 
 describe("workspace bootstrap", () => {
+  const tempDirs: string[] = [];
+
   beforeEach(() => {
     mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
       (cb as unknown as ExecFileCallback)(new Error("not a git repo"), "", "");
@@ -94,14 +99,23 @@ describe("workspace bootstrap", () => {
     });
   });
 
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves an existing workspace without creating a new project", async () => {
     const project = await createProject(db, { name: "existing-project" });
+    // Real dir on disk — resolveWorkspace masks orphan workspaces.
+    const wsDir = await fs.mkdtemp(path.join(tmpdir(), "depot-bootstrap-"));
+    tempDirs.push(wsDir);
     const workspace = await addWorkspace(db, {
       projectId: project.id,
-      path: "/workspace/existing-project",
+      path: wsDir,
     });
 
-    const resolved = await resolveOrCreateWorkspaceForPath(db, "/workspace/existing-project/src");
+    const resolved = await resolveOrCreateWorkspaceForPath(db, path.join(wsDir, "src"));
 
     expect(resolved.created).toBe(false);
     expect(resolved.project.id).toBe(project.id);
@@ -132,5 +146,32 @@ describe("workspace bootstrap", () => {
     expect(resolved.project.id).not.toBe(existingProject.id);
     expect(resolved.workspace.projectId).toBe(resolved.project.id);
     expect(projects.filter((project) => project.name === "shared-name")).toHaveLength(2);
+  });
+
+  it("refuses to auto-create a workspace at the user's home directory", async () => {
+    const home = "/home/test-user";
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      await expect(resolveOrCreateWorkspaceForPath(db, home)).rejects.toThrow(/depot init/);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+    }
+  });
+
+  it("refuses to auto-create a workspace at the filesystem root", async () => {
+    await expect(resolveOrCreateWorkspaceForPath(db, "/")).rejects.toThrow(/depot init/);
+  });
+
+  it("still auto-creates a workspace in a non-git temp directory", async () => {
+    const nonGitDir = await fs.mkdtemp(path.join(tmpdir(), "depot-non-git-"));
+    tempDirs.push(nonGitDir);
+
+    const resolved = await resolveOrCreateWorkspaceForPath(db, nonGitDir);
+
+    expect(resolved.created).toBe(true);
+    expect(resolved.workspace.path).toBe(nonGitDir);
+    expect(resolved.workspace.projectId).toBe(resolved.project.id);
   });
 });

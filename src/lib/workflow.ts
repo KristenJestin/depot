@@ -231,6 +231,7 @@ export function logActivity(
     taskId?: string;
     eventType: EventType;
     payload: Record<string, unknown>;
+    repoName?: string | null;
   },
 ) {
   return runWithDb(db, DomainActivity.logActivity(input));
@@ -238,7 +239,7 @@ export function logActivity(
 
 export function listActivity(
   db: Database,
-  filter: { projectId: string; workspaceId?: string; limit?: number },
+  filter: { projectId: string; workspaceId?: string; repoName?: string; limit?: number },
 ) {
   return runWithDb(db, DomainActivity.listActivity(filter));
 }

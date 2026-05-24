@@ -8,6 +8,25 @@ import { resolveDocState, renderDocState } from "#/modules/context/doc-state";
 import { listProfiles, listSyncRuns } from "#/modules/docs/sync";
 
 /**
+ * Resolve the current `project_repo` for the cwd and render the line printed in
+ * the `depot context` header. Best-effort — when the workspace can't be
+ * resolved we print nothing rather than aborting; when the workspace exists but
+ * no repo matches we tell the agent explicitly. The label keeps a stable shape
+ * so an agent can detect both states.
+ */
+async function renderCurrentRepoLine(): Promise<string | null> {
+  try {
+    const { currentRepo } = await resolveCurrentWorkspace({ autoCreate: false });
+    if (currentRepo) {
+      return `Repo    : ${currentRepo.name}`;
+    }
+    return "Repo    : (no current repo)";
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Whether a doc sync has already run for a given PRD, across all of the
  * project's doc profiles. Best-effort — resolution failures report `false`.
  */
@@ -43,9 +62,7 @@ async function renderShipState(prdTarget: string): Promise<string> {
     if (!prd) {
       return `Repos   : (PRD '${prdTarget}' not found — per-repo state unavailable)`;
     }
-    const states = await runEffect(
-      resolveRepoShipState(prd.projectId, ws.path, prd.worktreePath ?? null),
-    );
+    const states = await runEffect(resolveRepoShipState(prd.projectId, ws.path, null));
     const docSynced = await docSyncRanForPrd(prd.projectId, prd.id);
     const lines = [
       `Shipping: ${prd.title} (${prd.id}) [${prd.status}]`,
@@ -120,6 +137,11 @@ export const contextCommand = command({
     const axisLabel = args.axis ? ` (${args.axis.toUpperCase()})` : "";
     lines.push(`=== DEPOT CONTEXT — ${modeLabel}${axisLabel} ===`);
 
+    const currentRepoLine = await renderCurrentRepoLine();
+    if (currentRepoLine) {
+      lines.push(currentRepoLine);
+    }
+
     if (args.prdTarget) {
       lines.push(`PRD     : ${args.prdTarget}`);
     }
@@ -140,7 +162,14 @@ export const contextCommand = command({
       lines.push(await renderDocContextState());
     }
 
-    if (args.prdTarget || args.review || args.axis || mode === "ship" || mode === "doc") {
+    if (
+      currentRepoLine ||
+      args.prdTarget ||
+      args.review ||
+      args.axis ||
+      mode === "ship" ||
+      mode === "doc"
+    ) {
       lines.push("");
     }
 

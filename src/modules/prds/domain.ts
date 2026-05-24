@@ -1,15 +1,9 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { prds, prdRevisions, prdPhaseSnapshots, prdMerges, tasks } from "#/db/schema";
-import type { PrdMergeRow } from "#/db/schema";
+import { prds, prdRevisions, prdRepos, tasks } from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
-import {
-  VALID_PRD_TRANSITIONS,
-  type PrdStatus,
-  type Effort,
-  type MergeCaptureSource,
-} from "#/shared/validator";
+import { VALID_PRD_TRANSITIONS, type PrdStatus, type Effort } from "#/shared/validator";
 import { Db } from "#/services/database";
 import {
   PrdNotFoundError,
@@ -18,34 +12,10 @@ import {
   InvalidTransitionError,
   DatabaseError,
   ValidationError,
-  ShaNotFoundError,
 } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { logActivity } from "#/modules/activity/domain";
 import { assertWorkspaceInProject } from "#/lib/cross-entity";
-import { captureSha } from "#/lib/git";
-import { assertShaExists } from "#/lib/repo-guard";
-import { resolveProjectRepos } from "#/modules/projects/repos";
-
-/**
- * Capture a single HEAD SHA for a PRD lifecycle transition.
- *
- * For a mono-repo project (no `project_repo` rows) this resolves the implicit
- * repo and captures its HEAD — unchanged behaviour, zero config. For a
- * multi-repo project a single blind HEAD capture would record a SHA from
- * whichever repo `workspacePath` happens to sit in, so we skip and defer the
- * per-repo capture to `capture-merge`.
- */
-const captureLifecycleSha = (projectId: string, workspacePath: string) =>
-  Effect.gen(function* () {
-    const repos = yield* resolveProjectRepos(projectId, workspacePath).pipe(
-      Effect.catchAll(() => Effect.succeed([])),
-    );
-    if (repos.length === 1 && repos[0]!.implicit) {
-      return yield* captureSha(repos[0]!.path);
-    }
-    return null;
-  });
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -218,7 +188,7 @@ export const activatePrd = (id: string, workspaceId: string) =>
     // Refuse to attach a PRD to a workspace from a different project — this
     // is the silent-corruption path that previously slipped through and got
     // detected only when callers later tried to write activity_log rows.
-    const workspace = yield* assertWorkspaceInProject(workspaceId, rev.projectId);
+    yield* assertWorkspaceInProject(workspaceId, rev.projectId);
 
     const activePrd = yield* dbQuery(() =>
       db.query.prdRevisions.findFirst({ where: { workspaceId, status: "in_progress" } }),
@@ -231,19 +201,6 @@ export const activatePrd = (id: string, workspaceId: string) =>
 
     yield* checkPrdTransition(rev.status, "in_progress");
 
-    const sha = yield* captureLifecycleSha(rev.projectId, workspace.path);
-    if (!sha) {
-      yield* logActivity({
-        projectId: rev.projectId,
-        workspaceId,
-        prdRevisionId: id,
-        eventType: "note",
-        payload: {
-          message: "multi-repo project — per-repo SHA capture deferred to capture-merge",
-        },
-      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    }
-
     const rows = yield* dbQuery(() =>
       db
         .update(prdRevisions)
@@ -251,7 +208,6 @@ export const activatePrd = (id: string, workspaceId: string) =>
           status: "in_progress",
           workspaceId,
           activatedAt: new Date(),
-          ...(sha ? { activatedAtSha: sha } : {}),
         })
         .where(eq(prdRevisions.id, id))
         .returning(),
@@ -262,7 +218,7 @@ export const activatePrd = (id: string, workspaceId: string) =>
       workspaceId,
       prdRevisionId: id,
       eventType: "prd_activated",
-      payload: { prdRevisionId: id, title: rev.title, ...(sha ? { sha } : {}) },
+      payload: { prdRevisionId: id, title: rev.title },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
 
     return rows[0]!;
@@ -297,42 +253,15 @@ export const donePrd = (id: string) =>
     if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
     yield* checkPrdTransition(rev.status, "done");
 
-    // Capture the done SHA — best-effort; never blocks the transition.
-    // Multi-repo projects skip the blind capture (deferred to capture-merge).
-    let sha: string | null = null;
-    if (rev.workspaceId) {
-      const ws = yield* dbQuery(() =>
-        db.query.workspaces.findFirst({ where: { id: rev.workspaceId! } }),
-      );
-      if (ws) {
-        sha = yield* captureLifecycleSha(rev.projectId, ws.path);
-        if (!sha) {
-          yield* logActivity({
-            projectId: rev.projectId,
-            workspaceId: rev.workspaceId,
-            prdRevisionId: id,
-            eventType: "note",
-            payload: {
-              message: "multi-repo project — per-repo SHA capture deferred to capture-merge",
-            },
-          }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-        }
-      }
-    }
-
     const rows = yield* dbQuery(() =>
-      db
-        .update(prdRevisions)
-        .set({ status: "done", ...(sha ? { doneAtSha: sha } : {}) })
-        .where(eq(prdRevisions.id, id))
-        .returning(),
+      db.update(prdRevisions).set({ status: "done" }).where(eq(prdRevisions.id, id)).returning(),
     );
     yield* logActivity({
       projectId: rev.projectId,
       workspaceId: rev.workspaceId ?? undefined,
       prdRevisionId: id,
       eventType: "prd_done",
-      payload: { prdRevisionId: id, title: rev.title, ...(sha ? { sha } : {}) },
+      payload: { prdRevisionId: id, title: rev.title },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
@@ -472,6 +401,22 @@ export const forkPrd = (id: string) =>
     yield* dbQuery(() =>
       db.update(prds).set({ currentRevisionId: newRevId }).where(eq(prds.id, rev.prdId)),
     );
+
+    // Copy the parent's prd_repo scope onto the new revision so the fork
+    // starts from the same repo perimeter; it remains free to widen or narrow
+    // it independently of the parent revision.
+    const sourceRepos = yield* dbQuery(() =>
+      db.query.prdRepos.findMany({ where: { prdRevisionId: rev.id } }),
+    );
+    for (const link of sourceRepos) {
+      yield* dbQuery(() =>
+        db.insert(prdRepos).values({
+          id: generateId(),
+          prdRevisionId: newRevId,
+          repoId: link.repoId,
+        }),
+      );
+    }
 
     // Clone PRD tasks into the new revision
     const sourceTasks = yield* dbQuery(() =>
@@ -882,19 +827,6 @@ export const phaseAdvance = (id: string) =>
       }),
     );
 
-    // Capture SHA for the phase snapshot (best-effort).
-    let sha: string | null = null;
-    if (rev.workspaceId) {
-      const ws = yield* dbQuery(() =>
-        db.query.workspaces.findFirst({ where: { id: rev.workspaceId! } }),
-      );
-      if (ws) sha = yield* captureSha(ws.path);
-    }
-
-    // Upsert the phase snapshot. Re-running phaseAdvance on the same phase
-    // is rare but harmless — we update the SHA in place.
-    yield* upsertPhaseSnapshot(id, currentPhase, { advancedAtSha: sha });
-
     if (nextPhaseTasks.length > 0) {
       // User approved this phase's work — flip back to in_progress AND bump
       // currentPhase so the orchestrator can spawn the next coder pass.
@@ -914,17 +846,12 @@ export const phaseAdvance = (id: string) =>
           prdRevisionId: id,
           fromPhase: currentPhase,
           toPhase: currentPhase + 1,
-          ...(sha ? { sha } : {}),
         },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       return { prd: rows[0]!, advanced: true as const };
     } else {
       const rows = yield* dbQuery(() =>
-        db
-          .update(prdRevisions)
-          .set({ status: "done", ...(sha ? { doneAtSha: sha } : {}) })
-          .where(eq(prdRevisions.id, id))
-          .returning(),
+        db.update(prdRevisions).set({ status: "done" }).where(eq(prdRevisions.id, id)).returning(),
       );
       yield* logActivity({
         projectId: rev.projectId,
@@ -935,7 +862,6 @@ export const phaseAdvance = (id: string) =>
           prdRevisionId: id,
           fromPhase: currentPhase,
           toPhase: undefined,
-          ...(sha ? { sha } : {}),
         },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       yield* logActivity({
@@ -943,179 +869,10 @@ export const phaseAdvance = (id: string) =>
         workspaceId: rev.workspaceId ?? undefined,
         prdRevisionId: id,
         eventType: "prd_done",
-        payload: { prdRevisionId: id, title: rev.title, ...(sha ? { sha } : {}) },
+        payload: { prdRevisionId: id, title: rev.title },
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       return { prd: rows[0]!, advanced: false as const };
     }
-  });
-
-// ── Phase snapshots ───────────────────────────────────────────────────────────
-
-export const upsertPhaseSnapshot = (
-  prdRevisionId: string,
-  phaseNumber: number,
-  patch: {
-    advancedAtSha?: string | null;
-    reviewBrief?: string | null;
-    suggestedCommitMessage?: string | null;
-  },
-) =>
-  Effect.gen(function* () {
-    const db = yield* Db;
-    const existing = yield* dbQuery(() =>
-      db.query.prdPhaseSnapshots.findFirst({ where: { prdRevisionId, phaseNumber } }),
-    );
-    if (existing) {
-      const rows = yield* dbQuery(() =>
-        db
-          .update(prdPhaseSnapshots)
-          .set({
-            advancedAtSha:
-              patch.advancedAtSha !== undefined ? patch.advancedAtSha : existing.advancedAtSha,
-            reviewBrief: patch.reviewBrief !== undefined ? patch.reviewBrief : existing.reviewBrief,
-            suggestedCommitMessage:
-              patch.suggestedCommitMessage !== undefined
-                ? patch.suggestedCommitMessage
-                : existing.suggestedCommitMessage,
-          })
-          .where(eq(prdPhaseSnapshots.id, existing.id))
-          .returning(),
-      );
-      return rows[0]!;
-    }
-    const rows = yield* dbQuery(() =>
-      db
-        .insert(prdPhaseSnapshots)
-        .values({
-          id: generateId(),
-          prdRevisionId,
-          phaseNumber,
-          advancedAtSha: patch.advancedAtSha ?? null,
-          advancedAt: new Date(),
-          reviewBrief: patch.reviewBrief ?? null,
-          suggestedCommitMessage: patch.suggestedCommitMessage ?? null,
-        })
-        .returning(),
-    );
-    return rows[0]!;
-  });
-
-export const getPhaseSnapshot = (prdRevisionId: string, phaseNumber: number) =>
-  Effect.gen(function* () {
-    const db = yield* Db;
-    const row = yield* dbQuery(() =>
-      db.query.prdPhaseSnapshots.findFirst({ where: { prdRevisionId, phaseNumber } }),
-    );
-    return row ?? null;
-  });
-
-export const listPhaseSnapshots = (prdRevisionId: string) =>
-  Effect.gen(function* () {
-    const db = yield* Db;
-    return yield* dbQuery(() =>
-      db.query.prdPhaseSnapshots.findMany({
-        where: { prdRevisionId },
-        orderBy: { phaseNumber: "asc" },
-      }),
-    );
-  });
-
-/**
- * Anchor a post-squash merge commit for one repo of a PRD.
- *
- * Replaces the single-SHA `captureMergeSha`: a multi-repo PRD anchors N
- * `prd_merge` rows, one per repo. The row is an upsert on
- * `(prdRevisionId, repoName)` so re-capturing a repo replaces its SHA.
- *
- * `repo` is a resolved repo (real `project_repo` or the implicit mono-repo).
- * The SHA is validated against the repo on disk via `assertShaExists` before
- * the row is written — anchoring a commit that does not exist is refused.
- *
- * The legacy `prd_revision.mergedAtSha` column is kept in sync with the most
- * recent capture so the diff API's legacy fallback still resolves.
- */
-export const captureMerge = (input: {
-  prdRevisionId: string;
-  repo: { id: string | null; name: string; path: string };
-  sha: string;
-  capturedFrom: MergeCaptureSource;
-}): Effect.Effect<PrdMergeRow, PrdNotFoundError | ShaNotFoundError | DatabaseError, Db> =>
-  Effect.gen(function* () {
-    const db = yield* Db;
-    const rev = yield* getPrd(input.prdRevisionId);
-    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id: input.prdRevisionId }));
-
-    yield* assertShaExists(input.repo.path, input.sha);
-
-    const existing = yield* dbQuery(() =>
-      db.query.prdMerges.findFirst({
-        where: { prdRevisionId: input.prdRevisionId, repoName: input.repo.name },
-      }),
-    );
-
-    let row: PrdMergeRow;
-    if (existing) {
-      const rows = yield* dbQuery(() =>
-        db
-          .update(prdMerges)
-          .set({
-            repoId: input.repo.id,
-            repoPath: input.repo.path,
-            mergeSha: input.sha,
-            mergedAt: new Date(),
-            capturedFrom: input.capturedFrom,
-          })
-          .where(eq(prdMerges.id, existing.id))
-          .returning(),
-      );
-      row = rows[0]!;
-    } else {
-      const rows = yield* dbQuery(() =>
-        db
-          .insert(prdMerges)
-          .values({
-            id: generateId(),
-            prdRevisionId: input.prdRevisionId,
-            repoId: input.repo.id,
-            repoName: input.repo.name,
-            repoPath: input.repo.path,
-            mergeSha: input.sha,
-            mergedAt: new Date(),
-            capturedFrom: input.capturedFrom,
-          })
-          .returning(),
-      );
-      row = rows[0]!;
-    }
-
-    yield* dbQuery(() =>
-      db
-        .update(prdRevisions)
-        .set({ mergedAtSha: input.sha })
-        .where(eq(prdRevisions.id, input.prdRevisionId)),
-    );
-
-    yield* logActivity({
-      projectId: rev.projectId,
-      workspaceId: rev.workspaceId ?? undefined,
-      prdRevisionId: input.prdRevisionId,
-      eventType: "note",
-      payload: { message: `Captured merge SHA ${input.sha} for repo '${input.repo.name}'` },
-      source: "ai",
-    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    return row;
-  });
-
-/** List the merge anchors of a PRD revision, ordered by repo name. */
-export const listMerges = (prdRevisionId: string) =>
-  Effect.gen(function* () {
-    const db = yield* Db;
-    return yield* dbQuery(() =>
-      db.query.prdMerges.findMany({
-        where: { prdRevisionId },
-        orderBy: { repoName: "asc" },
-      }),
-    );
   });
 
 export const updateSuggestedCommitMessage = (id: string, message: string | null) =>

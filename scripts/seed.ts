@@ -252,11 +252,7 @@ await db.insert(schema.prdRevisions).values([
     status: "in_progress",
     auditCycles: 1,
     currentPhase: 2,
-    activatedAtSha: previous,
-    doneAtSha: null,
-    mergedAtSha: null,
     suggestedCommitMessage: "feat(web): polish review diff and project controls",
-    worktreePath: path.join(repoRoot, ".depot-dev", "worktrees", "review-diff-polish"),
     createdAt: ago(8),
     updatedAt: now,
     readyAt: ago(7),
@@ -300,8 +296,6 @@ await db.insert(schema.prdRevisions).values([
     status: "review",
     auditCycles: 2,
     currentPhase: null,
-    activatedAtSha: base,
-    doneAtSha: head,
     suggestedCommitMessage: "feat(docs): add reviewable doc sync handoff",
     createdAt: ago(6),
     updatedAt: ago(1, 2),
@@ -319,9 +313,6 @@ await db.insert(schema.prdRevisions).values([
     scope: "Includes terminal notes and task done summaries.",
     status: "done",
     auditCycles: 1,
-    activatedAtSha: previous,
-    doneAtSha: base,
-    mergedAtSha: base,
     createdAt: ago(24),
     updatedAt: ago(16),
     readyAt: ago(23),
@@ -343,9 +334,6 @@ await db.insert(schema.prdRevisions).values([
     testingDecisions: "Seed both revision rows so the revision switcher has something to show.",
     status: "done",
     auditCycles: 2,
-    activatedAtSha: base,
-    doneAtSha: head,
-    mergedAtSha: head,
     suggestedCommitMessage: "feat(web): show activity event sources",
     createdAt: ago(15),
     updatedAt: ago(5),
@@ -684,33 +672,6 @@ await db.insert(schema.outOfScopeItems).values([
   },
 ]);
 
-await db.insert(schema.prdPhaseSnapshots).values([
-  {
-    id: id(),
-    prdRevisionId: prdShowcaseRev,
-    phaseNumber: 1,
-    advancedAtSha: base,
-    advancedAt: ago(5, 18),
-    reviewBrief:
-      "Phase 1 implemented the diff panel animation. Review panel toggles and file tree resizing first.",
-    suggestedCommitMessage: "feat(web): animate review diff side panels",
-    createdAt: ago(5, 18),
-    updatedAt: ago(5, 18),
-  },
-  {
-    id: id(),
-    prdRevisionId: prdShowcaseRev,
-    phaseNumber: 2,
-    advancedAtSha: head,
-    advancedAt: ago(0, 6),
-    reviewBrief:
-      "Phase 2 focuses on form controls, multi-line annotations, and the suggested commit handoff.",
-    suggestedCommitMessage: "feat(web): add review annotations and commit suggestions",
-    createdAt: ago(0, 6),
-    updatedAt: ago(0, 6),
-  },
-]);
-
 const docsProfile = id();
 
 await db.insert(schema.docArtifacts).values([
@@ -839,13 +800,6 @@ await db.insert(schema.projectConfig).values([
     key: "defaultDocProfile",
     value: "product-docs",
     updatedAt: ago(1),
-    updatedBySource: "ai",
-  },
-  {
-    projectId: projectDepot,
-    key: "branchNamingConvention",
-    value: "feat/{prdId}",
-    updatedAt: ago(2),
     updatedBySource: "ai",
   },
   {

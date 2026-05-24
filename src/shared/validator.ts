@@ -143,13 +143,6 @@ export const isBuiltinRepoTarget = (value: string): value is DirectiveRepoTarget
 export const VALID_DIRECTIVE_RUN_STATUSES = ["ok", "fail"] as const;
 export type DirectiveRunStatus = (typeof VALID_DIRECTIVE_RUN_STATUSES)[number];
 
-// ── Merge anchors ────────────────────────────────────────────────────────────
-
-// How a `prd_merge` row's SHA was obtained: `cwd` when resolved from the
-// current directory's HEAD, `explicit` when passed as a `--sha`/`name=sha`.
-export const VALID_MERGE_CAPTURE_SOURCES = ["cwd", "explicit"] as const;
-export type MergeCaptureSource = (typeof VALID_MERGE_CAPTURE_SOURCES)[number];
-
 // ── Reviews ──────────────────────────────────────────────────────────────────
 
 export const VALID_REVIEW_TYPES = ["human", "agent"] as const;

@@ -27,7 +27,6 @@ import {
   VALID_DIRECTIVE_SCOPES,
   VALID_DIRECTIVE_KINDS,
   VALID_DIRECTIVE_RUN_STATUSES,
-  VALID_MERGE_CAPTURE_SOURCES,
 } from "#/shared/validator";
 import { generateId } from "#/shared/utils";
 
@@ -74,7 +73,7 @@ export const workspaces = sqliteTable(
 // Optional registry of the git repos that make up a project. A project with
 // no `project_repo` rows falls back to a single implicit repo resolved from
 // the workspace path (see `resolveProjectRepos`). Multi-repo projects register
-// one row per repo so capture-merge, the guard, and the diff API can target
+// one row per repo so directive runs, guards, and repo-aware context can target
 // each repo independently.
 
 export const projectRepos = sqliteTable(
@@ -99,6 +98,35 @@ export const projectRepos = sqliteTable(
   (table) => [
     index("project_repo_project_id_idx").on(table.projectId),
     uniqueIndex("project_repo_project_name_idx").on(table.projectId, table.name),
+  ],
+);
+
+// ── PRD repos (M:N) ───────────────────────────────────────────────────────────
+//
+// Declares which `project_repo` rows are in the scope of a PRD revision.
+// Cardinality 0 is valid: a project with no `project_repo` rows (mono-repo) or
+// a PRD whose repo scope has not yet been declared. The link is posted on
+// `prd_revisions` rather than the logical PRD so a fork can widen or narrow
+// the scope cleanly. `task.repoId` is then validated against this set.
+
+export const prdRepos = sqliteTable(
+  "prd_repo",
+  {
+    id: text().primaryKey(),
+    prdRevisionId: text()
+      .notNull()
+      .references(() => prdRevisions.id),
+    repoId: text()
+      .notNull()
+      .references(() => projectRepos.id),
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("prd_repo_prd_revision_id_idx").on(table.prdRevisionId),
+    index("prd_repo_repo_id_idx").on(table.repoId),
+    uniqueIndex("prd_repo_prd_revision_repo_idx").on(table.prdRevisionId, table.repoId),
   ],
 );
 
@@ -167,14 +195,7 @@ export const prdRevisions = sqliteTable(
     auditCycles: integer().notNull().default(0),
     currentPhase: integer(), // null = single-phase; >= 1 = current phase number
     supersededAt: integer({ mode: "timestamp_ms" }), // set when a fork creates a newer revision
-    activatedAtSha: text(), // git SHA captured at activation
-    doneAtSha: text(), // git SHA captured at done transition
-    // Post-merge SHA on the base branch. Set by `depot prd capture-merge`
-    // after a squash merge so the diff range survives the squash that
-    // garbage-collects activatedAtSha / doneAtSha.
-    mergedAtSha: text(),
     suggestedCommitMessage: text(),
-    worktreePath: text(), // worktree path created by the dev orchestrator (if any)
     createdAt: integer({ mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -242,6 +263,11 @@ export const tasks = sqliteTable(
     phaseNumber: integer(), // which phase this task belongs to; null = single-phase PRD
     status: text({ enum: VALID_TASK_STATUSES }).notNull().default("pending"),
     reviewId: text().references(() => reviews.id), // set when task belongs to a review
+    // Repo the task is attached to. Must be in the parent PRD's `prd_repo`
+    // when set. Always nullable — `null` means the task is not bound to any
+    // `project_repo` (mono-repo, or a project-wide change like a CLAUDE.md at
+    // the shell root). Validation lives in the domain layer.
+    repoId: text().references(() => projectRepos.id),
     severity: text({ enum: VALID_SEVERITY_LEVELS }), // relevant when reviewId is set
     axis: text({ enum: VALID_REVIEW_AXES }), // relevant when reviewId is set
     triageState: text({ enum: VALID_TRIAGE_STATES }).notNull().default("ready-for-agent"),
@@ -335,74 +361,6 @@ export const outOfScopeItems = sqliteTable(
   (table) => [
     index("out_of_scope_items_project_id_idx").on(table.projectId),
     index("out_of_scope_items_prd_revision_id_idx").on(table.prdRevisionId),
-  ],
-);
-
-// ── PRD phase snapshots ───────────────────────────────────────────────────────
-
-export const prdPhaseSnapshots = sqliteTable(
-  "prd_phase_snapshots",
-  {
-    id: text().primaryKey(),
-    prdRevisionId: text()
-      .notNull()
-      .references(() => prdRevisions.id),
-    phaseNumber: integer().notNull(),
-    advancedAtSha: text(),
-    advancedAt: integer({ mode: "timestamp_ms" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    reviewBrief: text(),
-    suggestedCommitMessage: text(),
-    createdAt: integer({ mode: "timestamp_ms" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: integer({ mode: "timestamp_ms" })
-      .notNull()
-      .$defaultFn(() => new Date())
-      .$onUpdateFn(() => new Date()),
-  },
-  (table) => [
-    index("prd_phase_snapshots_prd_phase_idx").on(table.prdRevisionId, table.phaseNumber),
-  ],
-);
-
-// ── PRD merge anchors ─────────────────────────────────────────────────────────
-//
-// One row per `{repo, mergeSha}` pair anchored to a PRD revision after a
-// squash merge. Replaces the single `prd_revision.mergedAtSha` column for
-// multi-repo projects: a PRD that lands across N repos gets N rows here.
-//
-// `repoId` is null for a mono-repo project (the implicit repo has no
-// `project_repo` row). `repoName`/`repoPath` are always denormalised so the
-// anchor survives a later `project_repo` deletion.
-
-export const prdMerges = sqliteTable(
-  "prd_merge",
-  {
-    id: text().primaryKey(),
-    prdRevisionId: text()
-      .notNull()
-      .references(() => prdRevisions.id),
-    repoId: text().references(() => projectRepos.id), // null for the implicit mono-repo
-    repoName: text().notNull(), // denormalised — `(default)` for mono-repo
-    repoPath: text().notNull(), // denormalised git root
-    mergeSha: text().notNull(),
-    mergedAt: integer({ mode: "timestamp_ms" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    capturedFrom: text({ enum: VALID_MERGE_CAPTURE_SOURCES }).notNull(),
-    createdAt: integer({ mode: "timestamp_ms" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: integer({ mode: "timestamp_ms" })
-      .notNull()
-      .$defaultFn(() => new Date())
-      .$onUpdateFn(() => new Date()),
-  },
-  (table) => [
-    index("prd_merge_prd_revision_id_idx").on(table.prdRevisionId),
-    uniqueIndex("prd_merge_prd_revision_repo_name_idx").on(table.prdRevisionId, table.repoName),
   ],
 );
 
@@ -581,6 +539,48 @@ export const projectDirectives = sqliteTable(
   ],
 );
 
+// ── ADRs (architectural decision records) ─────────────────────────────────────
+//
+// First-order entity for architectural decisions tied to a project. Optionally
+// linked to a logical PRD (`prdId`) — a decision can survive forks of the
+// spec, so the link points to the logical PRD rather than `prd_revisions`.
+//
+// `number` is contiguous per project (1, 2, 3, …) and rendered as `ADR-0001`
+// for humans. Allocation is atomic inside the domain layer (transaction +
+// `SELECT MAX(number)+1`). The `id` stays a ULID for stable cross-table FKs.
+//
+// `supersededByAdrId` points to the newer ADR that replaced this one. When
+// non-null, `status` is always `superseded`; the lifecycle transition is done
+// atomically via `supersedeAdr`.
+
+export const adrs = sqliteTable(
+  "adrs",
+  {
+    id: text().primaryKey(),
+    projectId: text()
+      .notNull()
+      .references(() => projects.id),
+    prdId: text().references(() => prds.id), // optional logical PRD that motivated the decision
+    number: integer().notNull(), // contiguous per project (1, 2, 3, …); displayed as ADR-0001
+    title: text().notNull(),
+    status: text({ enum: VALID_ADR_STATUSES }).notNull().default("proposed"),
+    body: text().notNull(), // markdown
+    supersededByAdrId: text(),
+    createdAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer({ mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    index("adrs_project_id_idx").on(table.projectId),
+    index("adrs_prd_id_idx").on(table.prdId),
+    uniqueIndex("adrs_project_number_idx").on(table.projectId, table.number),
+  ],
+);
+
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
 export const activityLog = sqliteTable(
@@ -596,6 +596,12 @@ export const activityLog = sqliteTable(
     // Revision-scoped: points to the prd_revision this event is about.
     prdRevisionId: text().references(() => prdRevisions.id),
     taskId: text().references(() => tasks.id),
+    // Denormalised `project_repo.name` when the event is scoped to a specific
+    // repo. Nullable: `null` means non-attributable (mono-repo project, or
+    // legacy row predating multi-repo). Stored as a name rather than an FK so
+    // attribution survives a later `removeRepo`. When `taskId` is set,
+    // `logActivity` auto-resolves this from `task.repoId`.
+    repoName: text(),
     eventType: text().notNull(),
     payload: text().notNull().default("{}"), // JSON
     source: text({ enum: VALID_ACTIVITY_SOURCES }).notNull().default("ai"),
@@ -608,6 +614,7 @@ export const activityLog = sqliteTable(
     index("activity_log_workspace_id_idx").on(table.workspaceId),
     index("activity_log_prd_revision_id_idx").on(table.prdRevisionId),
     index("activity_log_task_id_idx").on(table.taskId),
+    index("activity_log_repo_name_idx").on(table.projectId, table.repoName),
   ],
 );
 
@@ -618,20 +625,20 @@ export type ProjectRepoRow = typeof projectRepos.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type PrdRow = typeof prds.$inferSelect;
 export type PrdRevisionRow = typeof prdRevisions.$inferSelect;
+export type PrdRepoRow = typeof prdRepos.$inferSelect;
 export type ReviewRow = typeof reviews.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 export type ActivityRow = typeof activityLog.$inferSelect;
 export type UserStoryRow = typeof userStories.$inferSelect;
 export type TaskUserStoryRow = typeof taskUserStories.$inferSelect;
 export type OutOfScopeItemRow = typeof outOfScopeItems.$inferSelect;
-export type PrdPhaseSnapshotRow = typeof prdPhaseSnapshots.$inferSelect;
-export type PrdMergeRow = typeof prdMerges.$inferSelect;
 export type DocArtifactRow = typeof docArtifacts.$inferSelect;
 export type DocProfileRow = typeof docProfiles.$inferSelect;
 export type DocSyncRunRow = typeof docSyncRuns.$inferSelect;
 export type ProjectConfigRow = typeof projectConfig.$inferSelect;
 export type PendingActionRow = typeof pendingActions.$inferSelect;
 export type ProjectDirectiveRow = typeof projectDirectives.$inferSelect;
+export type AdrRow = typeof adrs.$inferSelect;
 
 // ── Relations ─────────────────────────────────────────────────────────────────
 
@@ -642,20 +649,20 @@ export const relations = defineRelations(
     workspaces,
     prds,
     prdRevisions,
+    prdRepos,
     reviews,
     tasks,
     activityLog,
     userStories,
     taskUserStories,
     outOfScopeItems,
-    prdPhaseSnapshots,
-    prdMerges,
     docArtifacts,
     docProfiles,
     docSyncRuns,
     projectConfig,
     pendingActions,
     projectDirectives,
+    adrs,
   },
   (r) => ({
     projects: {
@@ -674,6 +681,10 @@ export const relations = defineRelations(
       activityLogs: r.many.activityLog({
         from: r.projects.id,
         to: r.activityLog.projectId,
+      }),
+      adrs: r.many.adrs({
+        from: r.projects.id,
+        to: r.adrs.projectId,
       }),
     },
     projectRepos: {
@@ -701,6 +712,21 @@ export const relations = defineRelations(
         from: r.prds.id,
         to: r.prdRevisions.prdId,
       }),
+      adrs: r.many.adrs({
+        from: r.prds.id,
+        to: r.adrs.prdId,
+      }),
+    },
+    adrs: {
+      project: r.one.projects({
+        from: r.adrs.projectId,
+        to: r.projects.id,
+      }),
+      prd: r.one.prds({
+        from: r.adrs.prdId,
+        to: r.prds.id,
+        optional: true,
+      }),
     },
     prdRevisions: {
       prd: r.one.prds({
@@ -727,20 +753,19 @@ export const relations = defineRelations(
         from: r.prdRevisions.id,
         to: r.activityLog.prdRevisionId,
       }),
-      merges: r.many.prdMerges({
+      repos: r.many.prdRepos({
         from: r.prdRevisions.id,
-        to: r.prdMerges.prdRevisionId,
+        to: r.prdRepos.prdRevisionId,
       }),
     },
-    prdMerges: {
+    prdRepos: {
       prdRevision: r.one.prdRevisions({
-        from: r.prdMerges.prdRevisionId,
+        from: r.prdRepos.prdRevisionId,
         to: r.prdRevisions.id,
       }),
       repo: r.one.projectRepos({
-        from: r.prdMerges.repoId,
+        from: r.prdRepos.repoId,
         to: r.projectRepos.id,
-        optional: true,
       }),
     },
     reviews: {
@@ -761,6 +786,11 @@ export const relations = defineRelations(
       review: r.one.reviews({
         from: r.tasks.reviewId,
         to: r.reviews.id,
+      }),
+      repo: r.one.projectRepos({
+        from: r.tasks.repoId,
+        to: r.projectRepos.id,
+        optional: true,
       }),
       activityLogs: r.many.activityLog({
         from: r.tasks.id,

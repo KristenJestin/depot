@@ -1,10 +1,12 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListTreeIcon, PanelRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { LiveActivityPanel } from "#/web/components/live-activity-panel";
 import { PrdHeaderCard } from "#/web/components/prd-header-card";
 import { PrdNoticeBanner } from "#/web/components/prd-notice-banner";
+import { PrdReposWidget, type PrdRepoSummary } from "#/web/components/prd-repos-widget";
 import {
   PrdActivityWidget,
   PrdInfoWidget,
@@ -118,15 +120,6 @@ function PrdDetailRoute() {
               <PanelRightIcon className="size-3.5" />
               <span className="ml-1.5">Activity</span>
             </Button>
-            {data.prd.workspaceId ? (
-              <Link
-                to="/prds/$id/review-diff"
-                params={{ id }}
-                className="rounded-md border border-card-border bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground transition-colors hover:bg-accent"
-              >
-                Review the diff
-              </Link>
-            ) : null}
           </>
         }
       >
@@ -162,6 +155,7 @@ function PrdDetailRoute() {
         right={
           <div className="space-y-4 p-4" onClickCapture={handlePaneClick}>
             <PrdInfoWidget prd={data.prd} workspace={data.workspace} summary={summary} />
+            <PrdReposSection prdId={id} />
             <PrdReviewsWidget reviews={data.reviews} />
             <PrdActivityWidget activity={data.activity} />
             <PrdRevisionsWidget revisions={revisions} />
@@ -222,5 +216,76 @@ function PrdDetailRoute() {
         }}
       />
     </PageShell>
+  );
+}
+
+type PrdReposResponse = {
+  items: PrdRepoSummary[];
+  projectRepos: PrdRepoSummary[];
+  implicit: boolean;
+};
+
+function PrdReposSection({ prdId }: { prdId: string }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const key = ["prds", prdId, "repos"] as const;
+
+  const reposQ = useQuery({
+    queryKey: key,
+    queryFn: async (): Promise<PrdReposResponse> => {
+      const res = await fetch(`/api/prds/${prdId}/repos`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as PrdReposResponse;
+    },
+  });
+
+  const addM = useMutation({
+    mutationFn: async (repoName: string) => {
+      setError(null);
+      const res = await fetch(`/api/prds/${prdId}/repos`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repoName }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+    },
+    onError: (e) => setError((e as Error).message),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+
+  const removeM = useMutation({
+    mutationFn: async (repoName: string) => {
+      setError(null);
+      const res = await fetch(`/api/prds/${prdId}/repos/${encodeURIComponent(repoName)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+    },
+    onError: (e) => setError((e as Error).message),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+
+  if (!reposQ.data) return null;
+
+  return (
+    <PrdReposWidget
+      items={reposQ.data.items}
+      projectRepos={reposQ.data.projectRepos}
+      implicit={reposQ.data.implicit}
+      onAdd={(name) => addM.mutate(name)}
+      onRemove={(name) => removeM.mutate(name)}
+      error={error}
+      pending={addM.isPending || removeM.isPending}
+    />
   );
 }

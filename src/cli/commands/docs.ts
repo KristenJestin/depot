@@ -3,6 +3,7 @@ import { command } from "#/cli/command";
 import { runEffect } from "#/cli/runtime";
 import * as DomainDocs from "#/modules/docs/domain";
 import * as DomainDocSync from "#/modules/docs/sync";
+import * as DomainRepos from "#/modules/projects/repos";
 import * as DomainDirectives from "#/modules/projects/directives";
 import { logActivity } from "#/modules/activity/domain";
 import { VALID_DOC_KINDS } from "#/shared/validator";
@@ -338,6 +339,11 @@ const syncCommand = command({
     since: { schema: Schema.String, description: "Git ref or expression like '15 days ago'" },
     until: { schema: Schema.String },
     prd: { schema: Schema.String.pipe(Schema.minLength(1)), description: "PRD revision ID" },
+    repo: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description:
+        "Restrict the sync to a single registered project_repo (multi-repo projects only)",
+    },
     dryRun: {
       schema: Schema.Boolean,
       type: "boolean",
@@ -345,35 +351,92 @@ const syncCommand = command({
       description: "Only resolve the range, do not write a sync run (default true)",
     },
   },
-  run: async ({ args, ws, output }) => {
-    const resolved = await runEffect(
-      DomainDocSync.resolveDiffRange({
-        profileName: args.name,
-        projectId: ws.projectId,
-        prdRevisionId: args.prd,
-        sinceExpr: args.since,
-        untilExpr: args.until,
-      }),
-    );
+  run: async ({ args, ws, currentRepo, output }) => {
+    const projectRepos = await runEffect(DomainRepos.resolveProjectRepos(ws.projectId, ws.path));
+    const isMono = projectRepos.length === 1 && projectRepos[0]!.implicit;
 
-    if (!args.dryRun) {
-      await runEffect(
-        DomainDocSync.recordSyncRun({
-          profileId: resolved.profileId,
-          triggeredByPrdId: args.prd,
-          sinceRef: args.since ?? resolved.sources[0]?.since ?? undefined,
-          untilRef: args.until ?? undefined,
-        }),
-      );
+    // PRD 0008/02: when --repo is omitted but the cwd resolves to a known
+    // project_repo, default to that repo. Explicit --repo always wins; mono-repo
+    // is unaffected because currentRepo is null when no project_repo is
+    // registered.
+    const effectiveRepoName = args.repo ?? (!isMono && currentRepo ? currentRepo.name : undefined);
+
+    let targetRepos: DomainRepos.ResolvedRepo[] = projectRepos;
+    if (effectiveRepoName !== undefined) {
+      const match = projectRepos.find((r) => !r.implicit && r.name === effectiveRepoName);
+      if (!match) {
+        const knownList = projectRepos
+          .filter((r) => !r.implicit)
+          .map((r) => r.name)
+          .join(", ");
+        return output.error(
+          "repo_not_registered",
+          `Repo '${effectiveRepoName}' is not registered for this project. ` +
+            `Known repos: ${knownList || "(none — this is a mono-repo project)"}.`,
+        );
+      }
+      targetRepos = [match];
     }
 
+    const perRepo: Array<{
+      repo: { id: string | null; name: string; path: string; implicit: boolean };
+      profileId: string;
+      sources: DomainDocSync.ResolvedSourceRange[];
+    }> = [];
+
+    for (const repo of targetRepos) {
+      const resolved = await runEffect(
+        DomainDocSync.resolveDiffRange({
+          profileName: args.name,
+          projectId: ws.projectId,
+          sinceExpr: args.since,
+          untilExpr: args.until,
+        }),
+      );
+
+      if (!args.dryRun) {
+        await runEffect(
+          DomainDocSync.recordSyncRun({
+            profileId: resolved.profileId,
+            triggeredByPrdId: args.prd,
+            sinceRef: args.since ?? resolved.sources[0]?.since ?? undefined,
+            untilRef: args.until ?? undefined,
+          }),
+        );
+      }
+
+      perRepo.push({
+        repo: { id: repo.id, name: repo.name, path: repo.path, implicit: repo.implicit },
+        profileId: resolved.profileId,
+        sources: resolved.sources,
+      });
+    }
+
+    // Mono-repo without --repo keeps the legacy flat shape (no `repos` wrapper)
+    // so existing consumers of `depot doc sync` remain unaffected.
+    const useFlatShape = isMono && args.repo === undefined;
+
     if (output.isJson()) {
-      output.success({ ...resolved, dryRun: args.dryRun });
+      if (useFlatShape) {
+        const only = perRepo[0]!;
+        output.success({ profileId: only.profileId, sources: only.sources, dryRun: args.dryRun });
+        return;
+      }
+      output.success({ repos: perRepo, dryRun: args.dryRun });
       return;
     }
     output.print(`Profile: ${args.name}${args.dryRun ? "  (dry run)" : ""}`);
-    for (const s of resolved.sources) {
-      output.print(`  ${s.name} @ ${s.path}  since=${s.since}  until=${s.until}  [${s.mode}]`);
+    if (useFlatShape) {
+      for (const s of perRepo[0]!.sources) {
+        output.print(`  ${s.name} @ ${s.path}  since=${s.since}  until=${s.until}  [${s.mode}]`);
+      }
+      return;
+    }
+    for (const entry of perRepo) {
+      output.print(`Repo: ${entry.repo.name}  @ ${entry.repo.path}`);
+      for (const s of entry.sources) {
+        output.print(`  ${s.name} @ ${s.path}  since=${s.since}  until=${s.until}  [${s.mode}]`);
+      }
     }
   },
 });
@@ -426,12 +489,39 @@ const preSyncCheckCommand = command({
       positional: true,
       description: "Doc profile name (used to resolve the workspace context)",
     },
+    repo: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description:
+        "Tag the activity log entry with this registered project_repo (multi-repo projects)",
+    },
   },
-  run: async ({ args, ws, output }) => {
+  run: async ({ args, ws, currentRepo, output }) => {
     const profile = await runEffect(DomainDocSync.getProfile(ws.projectId, args.profile));
     if (!profile) return output.error("not_found", `Doc profile '${args.profile}' not found`);
+
+    if (args.repo !== undefined) {
+      const repos = await runEffect(DomainRepos.listRepos(ws.projectId));
+      const match = repos.find((r) => r.name === args.repo);
+      if (!match) {
+        const knownList = repos.map((r) => r.name).join(", ");
+        return output.error(
+          "repo_not_registered",
+          `Repo '${args.repo}' is not registered for this project. ` +
+            `Known repos: ${knownList || "(none — this is a mono-repo project)"}.`,
+        );
+      }
+    }
+
+    // PRD 0008/02: default --repo tag to the resolved currentRepo. Explicit
+    // --repo wins; mono-repo is unaffected because currentRepo is null when no
+    // project_repo is registered.
+    const effectiveRepoName = args.repo ?? currentRepo?.name;
+
     const result = await runEffect(
-      DomainDirectives.runScopeBlocking(ws.projectId, "pre-doc-sync", { wsPath: ws.path }),
+      DomainDirectives.runScopeBlocking(ws.projectId, "pre-doc-sync", {
+        wsPath: ws.path,
+        source: "human",
+      }),
     );
     await runEffect(
       logActivity({
@@ -439,6 +529,7 @@ const preSyncCheckCommand = command({
         workspaceId: ws.id,
         eventType: "pre_doc_sync_check",
         payload: { ok: result.ok, failingDirectiveId: result.failingDirectiveId },
+        repoName: effectiveRepoName,
       }),
     );
     if (output.isJson()) {
@@ -450,6 +541,8 @@ const preSyncCheckCommand = command({
       for (const r of result.results) {
         const icon = r.ok ? "✓" : "✗";
         output.print(`  ${icon} ${r.title} [repo: ${r.repoTarget}] — ${r.durationMs}ms`);
+        const trace = DomainDirectives.formatSelectionTrace(r.selection);
+        if (trace) output.print(`    ${trace}`);
         if (r.noOp) {
           output.print(`    (no modified repo detected — skipped)`);
         }

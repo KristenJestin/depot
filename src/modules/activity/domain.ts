@@ -13,6 +13,24 @@ import { activityPayloadSchemas } from "#/shared/schemas";
 import type { ActivitySource, EventType } from "#/shared/validator";
 import { assertWorkspaceInProject, assertPrdInProject } from "#/lib/cross-entity";
 
+// ── Repo attribution helper ───────────────────────────────────────────────────
+
+/**
+ * Look up the `project_repo.name` for a given repoId. Returns `null` if the
+ * repoId is `null` or the repo no longer exists (a `removeRepo` after the
+ * task was filed). Using a lookup rather than an FK on `activity_log` keeps
+ * historical attribution stable across repo deletions.
+ */
+const resolveRepoNameById = (repoId: string | null) =>
+  Effect.gen(function* () {
+    if (!repoId) return null;
+    const db = yield* Db;
+    const row = yield* dbQuery(() =>
+      db.query.projectRepos.findFirst({ where: { id: repoId }, columns: { name: true } }),
+    );
+    return row?.name ?? null;
+  });
+
 // ── Functions ─────────────────────────────────────────────────────────────────
 
 export const logActivity = (input: {
@@ -23,6 +41,14 @@ export const logActivity = (input: {
   eventType: EventType;
   payload: Record<string, unknown>;
   source?: ActivitySource;
+  /**
+   * Optional explicit repo attribution (`project_repo.name`). When omitted and
+   * `taskId` is provided, the value is auto-resolved from `task.repoId` (PRD
+   * 0005). Stays `null` in mono-repo projects and for events that are not
+   * scoped to a single repo. Stored as a denormalised name so attribution
+   * survives a later `removeRepo`.
+   */
+  repoName?: string | null;
 }) =>
   Effect.gen(function* () {
     const db = yield* Db;
@@ -66,10 +92,12 @@ export const logActivity = (input: {
       }
     }
 
-    // Validate task (if provided)
+    // Validate task (if provided) — also captured for repoName auto-resolution.
+    let taskRow: { repoId: string | null } | null = null;
     if (input.taskId) {
       const task = yield* dbQuery(() => db.query.tasks.findFirst({ where: { id: input.taskId } }));
       if (!task) return yield* Effect.fail(new TaskNotFoundError({ id: input.taskId }));
+      taskRow = { repoId: task.repoId };
 
       const taskRev =
         prdRev && prdRev.id === task.prdRevisionId
@@ -108,6 +136,18 @@ export const logActivity = (input: {
       }
     }
 
+    // Resolve the repoName to persist: an explicit value wins, otherwise fall
+    // back to the task's repoId (PRD 0005) when a task is referenced. Mono-repo
+    // and non-repo-scoped events stay `null` — the schema's intent.
+    let repoName: string | null;
+    if (input.repoName !== undefined) {
+      repoName = input.repoName;
+    } else if (taskRow) {
+      repoName = yield* resolveRepoNameById(taskRow.repoId);
+    } else {
+      repoName = null;
+    }
+
     const rows = yield* dbQuery(() =>
       db
         .insert(activityLog)
@@ -116,6 +156,7 @@ export const logActivity = (input: {
           workspaceId: input.workspaceId ?? null,
           prdRevisionId: input.prdRevisionId ?? null,
           taskId: input.taskId ?? null,
+          repoName,
           eventType: input.eventType,
           payload: JSON.stringify(input.payload),
           source: input.source ?? "ai",
@@ -125,12 +166,22 @@ export const logActivity = (input: {
     return rows[0]!;
   });
 
-export const listActivity = (filter: { projectId: string; workspaceId?: string; limit?: number }) =>
+export const listActivity = (filter: {
+  projectId: string;
+  workspaceId?: string;
+  /**
+   * Restrict to a single `project_repo.name`. Skips historical rows whose
+   * `repoName` is `null` (mono-repo / pre-migration). Pass `undefined` to keep
+   * all rows.
+   */
+  repoName?: string;
+  limit?: number;
+}) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const where = filter.workspaceId
-      ? { projectId: filter.projectId, workspaceId: filter.workspaceId }
-      : { projectId: filter.projectId };
+    const where: Record<string, unknown> = { projectId: filter.projectId };
+    if (filter.workspaceId) where.workspaceId = filter.workspaceId;
+    if (filter.repoName !== undefined) where.repoName = filter.repoName;
 
     const rows = yield* dbQuery(() =>
       db.query.activityLog.findMany({

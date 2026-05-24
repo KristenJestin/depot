@@ -3,6 +3,7 @@ import { Db, getDb, getRuntime } from "#/services/database";
 import { log } from "#/shared/logger";
 import { normalizeWorkspacePath } from "#/shared/utils";
 import { resolveWorkspace } from "#/modules/workspaces/domain";
+import { resolveCurrentRepo } from "#/modules/projects/repos";
 import { resolveOrCreateWorkspaceForPath } from "#/modules/workspaces/bootstrap";
 import { outputError } from "#/cli/output";
 
@@ -34,16 +35,29 @@ export async function resolveCurrentWorkspace(
   );
 
   if (!ws && options.autoCreate) {
-    ws = (await resolveOrCreateWorkspaceForPath(db, rawCwd)).workspace;
+    try {
+      ws = (await resolveOrCreateWorkspaceForPath(db, rawCwd)).workspace;
+    } catch (e: unknown) {
+      outputError(
+        "auto_create_refused",
+        e instanceof Error ? e.message : "Failed to auto-create workspace.",
+      );
+    }
   }
 
   if (!ws) {
     outputError(
       "no_workspace",
-      "No workspace found for current directory. Run `depot init` first.",
+      "No workspace found for current directory. Run `depot init` to create a new project here, or `depot workspace add --project <id|name>` to attach this folder to an existing project.",
     );
   }
 
   log.debug("Resolved workspace", ws.id, "->", ws.path);
-  return { db, ws };
+
+  const currentRepo = await runEffect(resolveCurrentRepo(ws, rawCwd)).catch(() => null);
+  if (currentRepo) {
+    log.debug("Resolved current repo", currentRepo.id, "->", currentRepo.name);
+  }
+
+  return { db, ws, currentRepo };
 }

@@ -1,6 +1,9 @@
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vite-plus/test";
 import { eq } from "drizzle-orm";
 import { Layer, ManagedRuntime } from "effect";
+import fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Database } from "#/db/client";
 import { projects, prds, prdRevisions, reviews, tasks, workspaces } from "#/db/schema";
 import { createTestDb } from "../helpers/db";
@@ -262,6 +265,63 @@ describe("web api", () => {
       const { events } = await res.json();
       expect(Array.isArray(events)).toBe(true);
     });
+
+    it("filtre par ?repo=<name> et expose repoName par événement", async () => {
+      // Seed direct rows to keep the test independent of any auto-logged
+      // event from other fixtures. The schema's nullable `repoName` keeps
+      // the third row (no repo) representing the historical / mono-repo case.
+      const { activityLog } = await import("#/db/schema");
+      await db.insert(activityLog).values([
+        {
+          id: "evt-api-1",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "api-only" }),
+          repoName: "api-repo",
+        },
+        {
+          id: "evt-front-1",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "front-only" }),
+          repoName: "front-repo",
+        },
+        {
+          id: "evt-legacy",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "legacy" }),
+          repoName: null,
+        },
+      ]);
+      try {
+        const filtered = await app.request("/api/activity?repo=api-repo");
+        expect(filtered.status).toBe(200);
+        const filteredBody = await filtered.json();
+        const filteredIds = filteredBody.events.map((e: { id: string }) => e.id);
+        expect(filteredIds).toContain("evt-api-1");
+        expect(filteredIds).not.toContain("evt-front-1");
+        expect(filteredIds).not.toContain("evt-legacy");
+
+        const all = await app.request("/api/activity");
+        const allBody = await all.json();
+        const allIds = allBody.events.map((e: { id: string }) => e.id);
+        expect(allIds).toContain("evt-api-1");
+        expect(allIds).toContain("evt-front-1");
+        expect(allIds).toContain("evt-legacy");
+        // The repoName field is exposed per event.
+        const apiEvent = allBody.events.find((e: { id: string }) => e.id === "evt-api-1");
+        expect(apiEvent.repoName).toBe("api-repo");
+        const legacyEvent = allBody.events.find((e: { id: string }) => e.id === "evt-legacy");
+        expect(legacyEvent.repoName).toBeNull();
+      } finally {
+        const { eq: drizzleEq, inArray: drizzleInArray } = await import("drizzle-orm");
+        await db
+          .delete(activityLog)
+          .where(drizzleInArray(activityLog.id, ["evt-api-1", "evt-front-1", "evt-legacy"]));
+        void drizzleEq;
+      }
+    });
   });
 
   describe("GET /api/sessions/current", () => {
@@ -289,6 +349,92 @@ describe("web api", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(Array.isArray(body.workspaces)).toBe(true);
+    });
+
+    it("masque les workspaces orphelins par défaut", async () => {
+      const liveDir = await fs.mkdtemp(join(tmpdir(), "depot-web-ws-default-"));
+      try {
+        await db.insert(workspaces).values([
+          {
+            id: "ws-live-default",
+            projectId,
+            path: liveDir,
+            label: "live default",
+          },
+          {
+            id: "ws-orphan-default",
+            projectId,
+            path: "/definitely/does/not/exist/orphan-default",
+            label: "orphan default",
+          },
+        ]);
+
+        const res = await app.request("/api/workspaces");
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        const ids = body.workspaces.map((w: { id: string }) => w.id);
+        expect(ids).toContain("ws-live-default");
+        expect(ids).not.toContain("ws-orphan-default");
+      } finally {
+        await db.delete(workspaces).where(eq(workspaces.id, "ws-live-default"));
+        await db.delete(workspaces).where(eq(workspaces.id, "ws-orphan-default"));
+        await fs.rm(liveDir, { recursive: true, force: true });
+      }
+    });
+
+    it("retourne tous les workspaces avec isOrphan quand ?include_orphans=1", async () => {
+      const liveDir = await fs.mkdtemp(join(tmpdir(), "depot-web-ws-opt-in-"));
+      try {
+        await db.insert(workspaces).values([
+          {
+            id: "ws-live-optin",
+            projectId,
+            path: liveDir,
+            label: "live optin",
+          },
+          {
+            id: "ws-orphan-optin",
+            projectId,
+            path: "/definitely/does/not/exist/orphan-optin",
+            label: "orphan optin",
+          },
+        ]);
+
+        const res = await app.request("/api/workspaces?include_orphans=1");
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        const live = body.workspaces.find((w: { id: string }) => w.id === "ws-live-optin");
+        const orphan = body.workspaces.find((w: { id: string }) => w.id === "ws-orphan-optin");
+        expect(live).toBeDefined();
+        expect(orphan).toBeDefined();
+        expect(live.isOrphan).toBe(false);
+        expect(orphan.isOrphan).toBe(true);
+      } finally {
+        await db.delete(workspaces).where(eq(workspaces.id, "ws-live-optin"));
+        await db.delete(workspaces).where(eq(workspaces.id, "ws-orphan-optin"));
+        await fs.rm(liveDir, { recursive: true, force: true });
+      }
+    });
+
+    it("expose isOrphan: false sur les workspaces non-orphelins même sans opt-in", async () => {
+      const liveDir = await fs.mkdtemp(join(tmpdir(), "depot-web-ws-flag-"));
+      try {
+        await db.insert(workspaces).values({
+          id: "ws-live-flag",
+          projectId,
+          path: liveDir,
+          label: "live flag",
+        });
+
+        const res = await app.request("/api/workspaces");
+        const body = await res.json();
+        const live = body.workspaces.find((w: { id: string }) => w.id === "ws-live-flag");
+        expect(live).toBeDefined();
+        expect(live.isOrphan).toBe(false);
+      } finally {
+        await db.delete(workspaces).where(eq(workspaces.id, "ws-live-flag"));
+        await fs.rm(liveDir, { recursive: true, force: true });
+      }
     });
   });
 

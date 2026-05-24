@@ -3,12 +3,14 @@ import { getCookie, setCookie } from "hono/cookie";
 
 import { getDb } from "#/services/database";
 import { normalizeWorkspacePath } from "#/shared/utils";
+import { workspaceExistsOnDisk } from "#/modules/workspaces/domain";
 import type { Database } from "#/db/client";
 import type { Variables } from "./types";
 import { prdsRoutes } from "./prds";
 import { pendingActionsRoutes } from "./pending-actions";
 import { projectsRoutes } from "./projects";
 import { docsRoutes } from "./docs";
+import { adrsRoutes } from "./adrs";
 
 // Cookie used to remember the user's selected workspace across browser
 // sessions and server restarts. Storing it server-readable lets every
@@ -90,6 +92,7 @@ const app = new Hono<{ Variables: Variables }>()
   })
   .get("/workspaces", async (c) => {
     const db = c.var.db;
+    const includeOrphans = c.req.query("include_orphans") === "1";
     const wsRows = await db.query.workspaces.findMany({ orderBy: { createdAt: "asc" } });
     const projectIds = [...new Set(wsRows.map((w) => w.projectId))];
     const projectRows =
@@ -97,21 +100,38 @@ const app = new Hono<{ Variables: Variables }>()
         ? await db.query.projects.findMany({ columns: { id: true, name: true } })
         : [];
     const projectMap = new Map(projectRows.map((p) => [p.id, p.name]));
-    const workspaces = wsRows.map((ws) => ({
+    // Mirror the CLI semantics (see `depot workspace list`): orphan
+    // workspaces (folder deleted on disk) are hidden by default. Callers
+    // can opt in via `?include_orphans=1` to inspect/clean them up; the
+    // payload then exposes an `isOrphan` boolean per row so the UI can
+    // mark them. Even without opt-in we emit `isOrphan: false` so the
+    // field is part of the stable shape and consumers can defensively
+    // filter (the WorkspaceSwitcher does).
+    const annotated = wsRows.map((ws) => ({
       id: ws.id,
       path: ws.path,
       label: ws.label,
       projectId: ws.projectId,
       projectName: projectMap.get(ws.projectId) ?? ws.projectId,
+      isOrphan: !workspaceExistsOnDisk(ws),
     }));
+    const workspaces = includeOrphans ? annotated : annotated.filter((ws) => !ws.isOrphan);
     return c.json({ workspaces }, 200);
   })
   .get("/activity", async (c) => {
     const db = c.var.db;
     const wsId = c.var.currentWorkspaceId;
+    const repoName = c.req.query("repo") ?? null;
+
+    // Compose the where clause manually so workspace and repo can be combined.
+    // The repo filter is exact on the denormalised `repoName`; passing `?repo=`
+    // skips historical rows whose attribution is `null` (mono-repo / legacy).
+    const where: Record<string, unknown> = {};
+    if (wsId) where.workspaceId = wsId;
+    if (repoName) where.repoName = repoName;
 
     const rows = await db.query.activityLog.findMany({
-      where: wsId ? { workspaceId: wsId } : undefined,
+      where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { createdAt: "desc" },
       limit: 100,
     });
@@ -133,6 +153,7 @@ const app = new Hono<{ Variables: Variables }>()
       prdRevisionId: r.prdRevisionId,
       prdTitle: r.prdRevisionId ? (prdTitleMap.get(r.prdRevisionId) ?? null) : null,
       taskId: r.taskId,
+      repoName: r.repoName,
       payload: r.payload,
       createdAt: r.createdAt,
     }));
@@ -143,7 +164,8 @@ const app = new Hono<{ Variables: Variables }>()
   .route("/", prdsRoutes)
   .route("/", pendingActionsRoutes)
   .route("/", projectsRoutes)
-  .route("/", docsRoutes);
+  .route("/", docsRoutes)
+  .route("/", adrsRoutes);
 
 export type AppType = typeof app;
 export default app;

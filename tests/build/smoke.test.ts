@@ -5,7 +5,7 @@
  * that the regular `bun run test` workflow is unaffected. Run them after a full
  * build with `bun run test:smoke`, which rebuilds everything first.
  */
-import { describe, test, expect } from "vitest";
+import { describe, test, expect } from "vite-plus/test";
 import { existsSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";

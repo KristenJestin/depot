@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { LiveActivityPanel } from "#/web/components/live-activity-panel";
 import type { PrdDetailResponse } from "#/web/lib/api-types";

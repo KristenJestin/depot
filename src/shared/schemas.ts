@@ -329,6 +329,30 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     directiveId: Schema.String,
     status: Schema.String,
     durationMs: Schema.optional(Schema.Number),
+    /** Original `repoTarget` value declared on the directive. */
+    repoTarget: Schema.optional(Schema.String),
+    /**
+     * Repo selection traceability (PRD 0007 T1). Records which repos the run
+     * actually targeted and why — so `repoTarget=auto` is never silent in
+     * multi-repo projects.
+     */
+    selection: Schema.optional(
+      Schema.Struct({
+        reason: Schema.Literal(
+          "single-repo",
+          "auto-dirty",
+          "auto-no-dirty",
+          "all",
+          "workspace",
+          "named",
+          "named-missing",
+        ),
+        repos: Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String })),
+        consideredRepos: Schema.optional(
+          Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String })),
+        ),
+      }),
+    ),
   }),
   pre_review_check: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),

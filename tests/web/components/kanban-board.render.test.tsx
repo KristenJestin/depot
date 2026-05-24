@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { KanbanBoard } from "#/web/components/kanban-board";
 import type { BoardColumn } from "#/web/lib/prd-view-model";

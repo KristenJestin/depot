@@ -1,5 +1,10 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+
 import { Badge } from "#/web/components/ui/badge";
 import { TaskDetail } from "#/web/components/task-detail";
+import type { PrdRepoSummary } from "#/web/components/prd-repos-widget";
+import { TaskRepoSelector } from "#/web/components/task-repo-selector";
 import { StatusBadge } from "#/web/components/ui/status-badge";
 import {
   SideDrawer,
@@ -13,6 +18,12 @@ type DetailTask =
   | PrdDetailResponse["tasks"][number]
   | PrdDetailResponse["reviews"][number]["findings"][number];
 type DetailReview = PrdDetailResponse["reviews"][number];
+
+type PrdReposResponse = {
+  items: PrdRepoSummary[];
+  projectRepos: PrdRepoSummary[];
+  implicit: boolean;
+};
 
 export function TaskDrawer({
   task,
@@ -101,6 +112,8 @@ export function TaskDrawer({
           </div>
         </section>
 
+        <TaskRepoEditor task={task} />
+
         {dependencies.length > 0 ? (
           <section className="space-y-3 rounded-xl border border-card-border bg-card p-5 shadow-card">
             <h3 className="text-sm font-semibold text-foreground">Dependencies</h3>
@@ -136,6 +149,65 @@ function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-xs font-medium text-secondary-foreground">{value}</span>
     </div>
+  );
+}
+
+function TaskRepoEditor({ task }: { task: DetailTask }) {
+  const queryClient = useQueryClient();
+  const prdRevisionId = task.prdRevisionId;
+  const [error, setError] = useState<string | null>(null);
+  const key = ["prds", prdRevisionId, "repos"] as const;
+
+  const reposQ = useQuery({
+    queryKey: key,
+    queryFn: async (): Promise<PrdReposResponse> => {
+      const res = await fetch(`/api/prds/${prdRevisionId}/repos`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as PrdReposResponse;
+    },
+  });
+
+  const updateM = useMutation({
+    mutationFn: async (repoId: string | null) => {
+      setError(null);
+      const res = await fetch(`/api/prds/${prdRevisionId}/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repoId }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+    },
+    onError: (e) => setError((e as Error).message),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["prds", prdRevisionId] });
+    },
+  });
+
+  // Reset the surfaced error when the user opens a different task.
+  useEffect(() => {
+    setError(null);
+  }, [task.id]);
+
+  if (!reposQ.data) return null;
+
+  // Mono-repo (no project_repo registered): the repo selector is not
+  // applicable — the task always carries `repoId = null` by construction.
+  if (reposQ.data.implicit) return null;
+
+  return (
+    <section className="space-y-3 rounded-xl border border-card-border bg-card p-5 shadow-card">
+      <h3 className="text-sm font-semibold text-foreground">Repo</h3>
+      <TaskRepoSelector
+        currentRepoId={task.repoId ?? null}
+        prdRepos={reposQ.data.items}
+        onChange={(repoId) => updateM.mutate(repoId)}
+        error={error}
+        disabled={updateM.isPending}
+      />
+    </section>
   );
 }
 

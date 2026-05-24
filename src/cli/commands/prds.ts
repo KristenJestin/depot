@@ -1,10 +1,8 @@
 import { Schema, Effect } from "effect";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { command } from "#/cli/command";
 import { resolveTextInput } from "#/cli/file-input";
 import { runEffect } from "#/cli/runtime";
-import { captureSha, resolveGitRoot } from "#/lib/git";
 import * as DomainPrds from "#/modules/prds/domain";
 import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainReviews from "#/modules/reviews/domain";
@@ -12,6 +10,7 @@ import * as DomainStories from "#/modules/prds/stories";
 import * as DomainOutOfScope from "#/modules/prds/out-of-scope";
 import * as DomainDirectives from "#/modules/projects/directives";
 import * as DomainRepos from "#/modules/projects/repos";
+import * as DomainPrdRepos from "#/modules/prds/repos";
 import { logActivity } from "#/modules/activity/domain";
 import { effortSchema } from "#/shared/schemas";
 import { formatDate, formatDateWithRelative } from "#/shared/utils";
@@ -92,9 +91,8 @@ const showCommand = command({
   run: async ({ args, output }) => {
     const prd = await runEffect(DomainPrds.getPrd(args.prdId));
     if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
-    const merges = await runEffect(DomainPrds.listMerges(args.prdId));
     if (output.isJson()) {
-      output.success({ item: prd, merges });
+      output.success({ item: prd });
     } else {
       output.fields([
         ["ID", prd.id],
@@ -108,21 +106,10 @@ const showCommand = command({
         ["Solution", prd.solution],
         ["Impl Decisions", prd.implementationDecisions],
         ["Testing Decisions", prd.testingDecisions],
-        ["Activated SHA", prd.activatedAtSha],
-        ["Done SHA", prd.doneAtSha],
-        ["Merged SHA", prd.mergedAtSha],
-        ["Worktree", prd.worktreePath],
         ["Created", formatDate(prd.createdAt)],
         ["Ready", formatDate(prd.readyAt)],
         ["Activated", prd.activatedAt ? formatDateWithRelative(prd.activatedAt) : "—"],
       ]);
-      if (merges.length > 0) {
-        output.print("");
-        output.print("Merge anchors:");
-        for (const m of merges) {
-          output.print(`  ${m.repoName}  ${m.mergeSha}  ${formatDate(m.mergedAt)}`);
-        }
-      }
     }
   },
 });
@@ -362,7 +349,7 @@ const activateCommand = command({
       if (e._tag === "CrossEntityError") {
         return output.error(
           "cross_entity",
-          `Cannot activate PRD '${args.prdId}' from this workspace. ${e.message}. Use \`depot workspace list\` to find a workspace in the PRD's project, or run \`cd\` there before activating.`,
+          `Cannot activate PRD '${args.prdId}' from this workspace. ${e.message}. Use \`depot workspace list\` to find a workspace in the PRD's project (or \`cd\` there before activating), or run \`depot workspace add --project <id|name>\` from the desired folder to register it as a workspace of the PRD's project.`,
         );
       }
       throw e;
@@ -1575,6 +1562,128 @@ const storyCommand = command({
   },
 });
 
+// ── PRD repos ─────────────────────────────────────────────────────────────────
+
+const repoAddCommand = command({
+  meta: { name: "add", description: "Add a project repo to the PRD's repo scope" },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+    repoName: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Registered project_repo name",
+    },
+  },
+  run: async ({ args, output }) => {
+    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+    if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    const repo = await runEffect(DomainRepos.getRepo(prd.projectId, args.repoName));
+    if (!repo) {
+      return output.error(
+        "not_found",
+        `Repo '${args.repoName}' is not registered for project ${prd.projectId}.`,
+      );
+    }
+    const link = await runEffect(DomainPrdRepos.addPrdRepo(prd.id, repo.id));
+    if (output.isJson()) {
+      output.success({ item: link, repo: { id: repo.id, name: repo.name } });
+    } else {
+      output.print(`Added repo '${repo.name}' to PRD ${prd.id}`);
+    }
+  },
+});
+
+const repoRemoveCommand = command({
+  meta: { name: "remove", description: "Remove a project repo from the PRD's repo scope" },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+    repoName: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Registered project_repo name",
+    },
+  },
+  run: async ({ args, output }) => {
+    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+    if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    const repo = await runEffect(DomainRepos.getRepo(prd.projectId, args.repoName));
+    if (!repo) {
+      return output.error(
+        "not_found",
+        `Repo '${args.repoName}' is not registered for project ${prd.projectId}.`,
+      );
+    }
+    await runEffect(DomainPrdRepos.removePrdRepo(prd.id, repo.id));
+    if (output.isJson()) {
+      output.success({ prdId: prd.id, repo: { id: repo.id, name: repo.name } });
+    } else {
+      output.print(`Removed repo '${repo.name}' from PRD ${prd.id}`);
+    }
+  },
+});
+
+const repoListCommand = command({
+  meta: { name: "list", description: "List repos in the PRD's repo scope" },
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+    if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    const links = await runEffect(DomainPrdRepos.listPrdRepos(prd.id));
+    const repos = await runEffect(DomainRepos.listRepos(prd.projectId));
+    const repoById = new Map(repos.map((r) => [r.id, r]));
+    const items = links.map((link) => {
+      const repo = repoById.get(link.repoId);
+      return {
+        id: link.id,
+        prdRevisionId: link.prdRevisionId,
+        repoId: link.repoId,
+        repoName: repo?.name ?? null,
+        repoPath: repo?.path ?? null,
+        createdAt: link.createdAt,
+      };
+    });
+    if (output.isJson()) {
+      output.success({ items });
+      return;
+    }
+    if (items.length === 0) {
+      output.print("No repos declared for this PRD.");
+      return;
+    }
+    for (const item of items) {
+      output.print(`${item.repoName ?? "(unknown)"}  ${item.repoId}`);
+    }
+  },
+});
+
+const reposCommand = command({
+  meta: { name: "repos", description: "Manage the PRD's repo scope" },
+  subCommands: {
+    add: repoAddCommand,
+    remove: repoRemoveCommand,
+    list: repoListCommand,
+  },
+});
+
 // ── Out-of-scope items ────────────────────────────────────────────────────────
 
 const oosAddCommand = command({
@@ -1651,312 +1760,6 @@ const outOfScopeCommand = command({
   subCommands: { add: oosAddCommand, list: oosListCommand, remove: oosRemoveCommand },
 });
 
-// ── Phase snapshot artifacts ──────────────────────────────────────────────────
-
-const phaseBriefCommand = command({
-  meta: { name: "phase-brief", description: "Persist the review brief for a phase" },
-  args: {
-    prdId: {
-      schema: Schema.String.pipe(Schema.minLength(1)),
-      required: true,
-      positional: true,
-      description: "PRD revision ID",
-    },
-    phase: {
-      schema: Schema.Int.pipe(Schema.positive()),
-      coerce: "integer",
-      required: true,
-      description: "Phase number",
-    },
-    content: { schema: Schema.String.pipe(Schema.minLength(1)), required: true },
-  },
-  run: async ({ args, output }) => {
-    const snap = await runEffect(
-      DomainPrds.upsertPhaseSnapshot(args.prdId, args.phase, { reviewBrief: args.content }),
-    );
-    if (output.isJson()) output.success({ item: snap });
-    else output.print(`Saved review brief for PRD ${args.prdId} phase ${args.phase} (${snap.id}).`);
-  },
-});
-
-// ── capture-merge ─────────────────────────────────────────────────────────────
-
-type MergeRequest = {
-  repoName?: string;
-  sha?: string;
-  fromCwd: boolean;
-};
-
-/**
- * Parse the `--repo` flag(s) into merge requests.
- *
- * Accepted shapes:
- * - no `--repo`, no `--sha`: bare capture (mono-repo HEAD or cwd-resolved)
- * - `--repo <name> --sha <sha>`: a single explicit repo+sha
- * - `--repo name1=sha1 --repo name2=sha2 ...`: multiple explicit repo+sha
- */
-export function parseMergeRequests(
-  repoArg: readonly string[] | string | undefined,
-  shaArg: string | undefined,
-): { ok: true; requests: MergeRequest[] } | { ok: false; message: string } {
-  const repos = repoArg === undefined ? [] : Array.isArray(repoArg) ? [...repoArg] : [repoArg];
-
-  if (repos.length === 0) {
-    if (shaArg !== undefined) {
-      return { ok: false, message: "--sha requires --repo <name> in a multi-repo project." };
-    }
-    return { ok: true, requests: [{ fromCwd: true }] };
-  }
-
-  const paired = repos.map((r) => r.includes("="));
-  const allPaired = paired.every(Boolean);
-  const nonePaired = paired.every((p) => !p);
-
-  if (allPaired) {
-    if (shaArg !== undefined) {
-      return {
-        ok: false,
-        message: "Do not combine --sha with `--repo name=sha` pairs; pass the SHA inline.",
-      };
-    }
-    const requests: MergeRequest[] = [];
-    for (const entry of repos) {
-      const eq = entry.indexOf("=");
-      const name = entry.slice(0, eq).trim();
-      const sha = entry.slice(eq + 1).trim();
-      if (!name || !sha) {
-        return { ok: false, message: `Invalid --repo pair '${entry}'. Expected <name>=<sha>.` };
-      }
-      requests.push({ repoName: name, sha, fromCwd: false });
-    }
-    return { ok: true, requests };
-  }
-
-  if (nonePaired) {
-    if (repos.length > 1) {
-      return {
-        ok: false,
-        message:
-          "Multiple --repo flags require the `--repo name=sha` form. Pass each repo's SHA inline.",
-      };
-    }
-    if (shaArg === undefined) {
-      return {
-        ok: false,
-        message: `--repo ${repos[0]} requires --sha <sha> (or use --repo ${repos[0]}=<sha>).`,
-      };
-    }
-    return { ok: true, requests: [{ repoName: repos[0], sha: shaArg, fromCwd: false }] };
-  }
-
-  return {
-    ok: false,
-    message: "Do not mix `--repo name=sha` pairs with a bare `--repo name`.",
-  };
-}
-
-const captureMergeCommand = command({
-  meta: {
-    name: "capture-merge",
-    description:
-      "Anchor post-merge SHA(s) on the base branch — recovers the diff after a squash merge.",
-  },
-  workspace: true,
-  args: {
-    prdId: {
-      schema: Schema.String.pipe(Schema.minLength(1)),
-      required: true,
-      positional: true,
-      description: "PRD ID",
-    },
-    repo: {
-      schema: Schema.Union(Schema.String, Schema.Array(Schema.String)),
-      description: "Repo name, or `name=sha` pair (repeatable for multi-repo)",
-    },
-    sha: {
-      schema: Schema.String.pipe(Schema.minLength(1)),
-      description: "Merge commit SHA (used with a single --repo, defaults to HEAD when bare)",
-    },
-  },
-  run: async ({ args, ws, output }) => {
-    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
-    if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
-
-    const repos = await runEffect(DomainRepos.resolveProjectRepos(prd.projectId, ws.path));
-    const isMono = repos.length === 1 && repos[0]!.implicit;
-
-    const parsed = parseMergeRequests(args.repo, args.sha);
-    if (!parsed.ok) return output.error("validation_error", parsed.message);
-
-    const knownList = repos.map((r) => r.name).join(", ");
-    const resolved: Array<{
-      repo: { id: string | null; name: string; path: string };
-      sha: string;
-      capturedFrom: "cwd" | "explicit";
-    }> = [];
-
-    for (const req of parsed.requests) {
-      if (req.fromCwd) {
-        if (isMono) {
-          const implicit = repos[0]!;
-          const head = await runEffect(captureSha(implicit.path));
-          if (!head) {
-            return output.error(
-              "git_failed",
-              `Cannot resolve HEAD in '${implicit.path}'. Is it a git repo?`,
-            );
-          }
-          resolved.push({
-            repo: { id: implicit.id, name: implicit.name, path: implicit.path },
-            sha: head,
-            capturedFrom: "cwd",
-          });
-        } else {
-          const gitRoot = await runEffect(resolveGitRoot(process.cwd()));
-          const match = gitRoot
-            ? repos.find((r) => path.resolve(r.path) === path.resolve(gitRoot))
-            : undefined;
-          if (!match) {
-            return output.error(
-              "repo_not_registered",
-              `The current directory is not a registered repo of this multi-repo project. ` +
-                `Known repos: ${knownList || "(none)"}. ` +
-                `Register it with \`depot project repo add\` (or the project settings page), ` +
-                `or pass an explicit --repo <name> --sha <sha>.`,
-            );
-          }
-          const head = await runEffect(captureSha(match.path));
-          if (!head) {
-            return output.error("git_failed", `Cannot resolve HEAD in '${match.path}'.`);
-          }
-          resolved.push({
-            repo: { id: match.id, name: match.name, path: match.path },
-            sha: head,
-            capturedFrom: "cwd",
-          });
-        }
-        continue;
-      }
-
-      const match = repos.find((r) => r.name === req.repoName);
-      if (!match) {
-        return output.error(
-          "repo_not_registered",
-          `Repo '${req.repoName}' is not registered for this project. ` +
-            `Known repos: ${knownList || "(none)"}. ` +
-            `Register it with \`depot project repo add\` (or the project settings page).`,
-        );
-      }
-      resolved.push({
-        repo: { id: match.id, name: match.name, path: match.path },
-        sha: req.sha!,
-        capturedFrom: "explicit",
-      });
-    }
-
-    const anchored: Array<{ repoName: string; sha: string }> = [];
-    for (const r of resolved) {
-      const result = await runEffect(
-        DomainPrds.captureMerge({
-          prdRevisionId: args.prdId,
-          repo: r.repo,
-          sha: r.sha,
-          capturedFrom: r.capturedFrom,
-        }).pipe(
-          Effect.match({
-            onSuccess: (item) => ({ kind: "ok" as const, item }),
-            onFailure: (err) => ({ kind: "err" as const, err }),
-          }),
-        ),
-      );
-      if (result.kind === "err") {
-        const e = result.err;
-        if (e._tag === "ShaNotFoundError") {
-          return output.error("sha_not_found", e.message);
-        }
-        if (e._tag === "PrdNotFoundError") {
-          return output.error("not_found", `PRD not found: ${args.prdId}`);
-        }
-        throw e;
-      }
-      anchored.push({ repoName: result.item.repoName, sha: result.item.mergeSha });
-    }
-
-    if (output.isJson()) {
-      output.success({ items: anchored });
-    } else {
-      for (const a of anchored) {
-        output.print(`Captured merge SHA ${a.sha} for repo '${a.repoName}' on PRD ${args.prdId}`);
-      }
-    }
-  },
-});
-
-const mergesCommand = command({
-  meta: { name: "merges", description: "List the merge anchors of a PRD" },
-  workspace: true,
-  args: {
-    prdId: {
-      schema: Schema.String.pipe(Schema.minLength(1)),
-      required: true,
-      positional: true,
-      description: "PRD ID",
-    },
-  },
-  run: async ({ args, output }) => {
-    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
-    if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
-    const merges = await runEffect(DomainPrds.listMerges(args.prdId));
-    if (output.isJson()) {
-      output.success({ items: merges });
-      return;
-    }
-    if (merges.length === 0) {
-      output.print(
-        `No merge anchors for PRD ${args.prdId}. Run \`depot prd capture-merge ${args.prdId}\` after a squash merge.`,
-      );
-      return;
-    }
-    for (const m of merges) {
-      output.print(`${m.repoName}  ${m.mergeSha}  ${formatDate(m.mergedAt)}`);
-    }
-  },
-});
-
-const phaseCommitMessageCommand = command({
-  meta: {
-    name: "phase-commit-message",
-    description: "Persist the suggested commit message for a phase",
-  },
-  args: {
-    prdId: {
-      schema: Schema.String.pipe(Schema.minLength(1)),
-      required: true,
-      positional: true,
-      description: "PRD revision ID",
-    },
-    phase: {
-      schema: Schema.Int.pipe(Schema.positive()),
-      coerce: "integer",
-      required: true,
-      description: "Phase number",
-    },
-    message: { schema: Schema.String.pipe(Schema.minLength(1)), required: true },
-  },
-  run: async ({ args, output }) => {
-    const snap = await runEffect(
-      DomainPrds.upsertPhaseSnapshot(args.prdId, args.phase, {
-        suggestedCommitMessage: args.message,
-      }),
-    );
-    if (output.isJson()) output.success({ item: snap });
-    else
-      output.print(
-        `Saved suggested commit message for PRD ${args.prdId} phase ${args.phase} (${snap.id}).`,
-      );
-  },
-});
-
 const commitMessageCommand = command({
   meta: {
     name: "commit-message",
@@ -2002,8 +1805,14 @@ const buildCheckCommand = (
       const prd = await runEffect(DomainPrds.getPrd(args.prdId));
       if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
       const result = await runEffect(
-        DomainDirectives.runScopeBlocking(prd.projectId, scope, { wsPath: ws.path }),
+        DomainDirectives.runScopeBlockingForPrd(prd.id, scope, {
+          wsPath: ws.path,
+          source: "human",
+        }),
       );
+      // Surface the first failing directive across repos for the pre-check log
+      // event (kept single per command run, not per repo).
+      const failingDirectiveId = result.perRepo.find((r) => !r.ok)?.failingDirectiveId;
       await runEffect(
         logActivity({
           projectId: prd.projectId,
@@ -2013,37 +1822,59 @@ const buildCheckCommand = (
           payload: {
             prdRevisionId: prd.id,
             ok: result.ok,
-            failingDirectiveId: result.failingDirectiveId,
+            failingDirectiveId,
           },
         }),
       );
       if (output.isJson()) {
         output.success(result);
       } else {
-        output.print(`Running ${result.results.length} ${scope} directive(s) for PRD ${prd.id}:`);
-        for (const r of result.results) {
-          const icon = r.ok ? "✓" : "✗";
-          output.print(`  ${icon} ${r.title} [repo: ${r.repoTarget}] — ${r.durationMs}ms`);
-          if (r.noOp) {
-            output.print(`    (no modified repo detected — skipped)`);
+        const repoCount = result.perRepo.length;
+        const multi = repoCount > 1;
+        const directiveCount = result.perRepo[0]?.results.length ?? 0;
+        if (multi) {
+          output.print(
+            `Running ${directiveCount} ${scope} directive(s) for PRD ${prd.id} across ${repoCount} repo(s):`,
+          );
+        } else {
+          output.print(`Running ${directiveCount} ${scope} directive(s) for PRD ${prd.id}:`);
+        }
+        for (const repoOutcome of result.perRepo) {
+          if (multi) {
+            const repoIcon = repoOutcome.ok ? "✓" : "✗";
+            output.print(`  ${repoIcon} repo: ${repoOutcome.repoName}`);
           }
-          if (r.repoResults.length > 1) {
-            for (const rr of r.repoResults) {
-              const ricon = rr.ok ? "✓" : "✗";
-              output.print(`    ${ricon} ${rr.repoName}`);
-              if (!rr.ok && rr.stderr) {
-                for (const line of rr.stderr.split("\n").slice(0, 8)) {
-                  output.print(`      | ${line}`);
+          const indent = multi ? "  " : "";
+          for (const r of repoOutcome.results) {
+            const icon = r.ok ? "✓" : "✗";
+            output.print(
+              `${indent}  ${icon} ${r.title} [repo: ${r.repoTarget}] — ${r.durationMs}ms`,
+            );
+            const trace = DomainDirectives.formatSelectionTrace(r.selection);
+            if (trace) output.print(`${indent}    ${trace}`);
+            if (r.noOp) {
+              output.print(`${indent}    (no modified repo detected — skipped)`);
+            }
+            if (r.repoResults.length > 1) {
+              for (const rr of r.repoResults) {
+                const ricon = rr.ok ? "✓" : "✗";
+                output.print(`${indent}    ${ricon} ${rr.repoName}`);
+                if (!rr.ok && rr.stderr) {
+                  for (const line of rr.stderr.split("\n").slice(0, 8)) {
+                    output.print(`${indent}      | ${line}`);
+                  }
                 }
               }
-            }
-          } else if (!r.ok && r.stderr) {
-            for (const line of r.stderr.split("\n").slice(0, 10)) {
-              output.print(`    | ${line}`);
+            } else if (!r.ok && r.stderr) {
+              for (const line of r.stderr.split("\n").slice(0, 10)) {
+                output.print(`${indent}    | ${line}`);
+              }
             }
           }
+          if (!repoOutcome.ok) {
+            output.print(`${indent}  Stopped at first blocking failure in this repo.`);
+          }
         }
-        if (!result.ok) output.print("Stopped at first blocking failure.");
       }
       if (!result.ok) process.exitCode = 1;
     },
@@ -2084,13 +1915,10 @@ export const prdCommand = command({
     findings: findingsCommand,
     "phase-advance": phaseAdvanceCommand,
     "commit-message": commitMessageCommand,
-    "phase-brief": phaseBriefCommand,
-    "phase-commit-message": phaseCommitMessageCommand,
-    "capture-merge": captureMergeCommand,
-    merges: mergesCommand,
     "pre-review-check": preReviewCheckCommand,
     "pre-ship-check": preShipCheckCommand,
     story: storyCommand,
     "out-of-scope": outOfScopeCommand,
+    repos: reposCommand,
   },
 });

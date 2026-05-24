@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { Schema } from "effect";
 import { effortSchema, eventTypeSchema, parseJsonLike } from "#/shared/schemas";
 

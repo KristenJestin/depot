@@ -1,22 +1,29 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
 /**
- * Capture the current HEAD SHA in a given path.
- * Returns `null` when the directory is not a git repo (the most common
- * non-error case) or when `git` is unavailable. Never throws — callers
- * treat SHA capture as best-effort enrichment, not as a load-bearing
- * invariant.
+ * Resolve the **main** git repository root containing `cwd`. Unlike
+ * `resolveGitRoot`, this collapses linked worktrees onto their owning repo:
+ * for a worktree, the result is the path of the main repo, not the worktree's
+ * own checkout. Implemented via `git rev-parse --git-common-dir`, whose parent
+ * directory is always the main repo root regardless of whether we're inside
+ * the main checkout or a linked worktree.
+ *
+ * Returns `null` when the directory is not inside a git repo or when `git` is
+ * unavailable. Never throws.
  */
-export const captureSha = (cwd: string): Effect.Effect<string | null, never> =>
+export const resolveMainRepoRoot = (cwd: string): Effect.Effect<string | null, never> =>
   Effect.tryPromise({
     try: async () => {
-      const { stdout } = await execFileAsync("git", ["-C", cwd, "rev-parse", "HEAD"]);
-      const sha = stdout.trim();
-      return sha.length > 0 ? sha : null;
+      const { stdout } = await execFileAsync("git", ["-C", cwd, "rev-parse", "--git-common-dir"]);
+      const raw = stdout.trim();
+      if (raw.length === 0) return null;
+      const commonDir = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
+      return path.dirname(commonDir);
     },
     catch: () => null,
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));

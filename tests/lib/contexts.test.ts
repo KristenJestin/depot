@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { getContextTemplate, listContextModes } from "#/modules/context/index";
 
 describe("context template registry", () => {
@@ -55,7 +55,7 @@ describe("context template registry", () => {
     expect(content).toContain("git -C <repoPath> switch <repo.baseBranch>");
     expect(content).toContain("git -C <repoPath> pull --ff-only");
     expect(content).toContain("git -C <repoPath> worktree remove <worktreePath>");
-    expect(content).toContain("--repo <name1>=<sha1>");
+    expect(content).toContain("Depot no longer stores git SHAs or merge anchors");
     expect(content).toContain("do **not** mark the PRD done");
   });
 

@@ -42,11 +42,7 @@ const PRD_REVISION = {
   updatedAt: NOW,
   readyAt: NOW,
   activatedAt: NOW,
-  activatedAtSha: null,
-  doneAtSha: null,
-  mergedAtSha: null,
   suggestedCommitMessage: null,
-  worktreePath: null,
 };
 
 const PRD_TASK = {
@@ -131,70 +127,6 @@ test("PRD detail — visual baseline", async ({ page }) => {
   await page.goto(`/prds/${PRD_ID}`);
   await expect(page.getByText("Visual baseline PRD").first()).toBeVisible();
   await expect(page).toHaveScreenshot("prd-detail.png", { fullPage: true });
-});
-
-test("review diff — visual baseline", async ({ page }) => {
-  const diff = `diff --git a/src/foo.ts b/src/foo.ts
-index 0000000..1111111 100644
---- a/src/foo.ts
-+++ b/src/foo.ts
-@@ -1,3 +1,3 @@
- const a = 1;
--const b = 2;
-+const b = 3;
- const c = 4;
-`;
-  await mockShell(page);
-  await page.route(`/api/prds/${PRD_ID}`, (route) =>
-    route.fulfill({
-      json: {
-        prd: PRD_REVISION,
-        tasks: [PRD_TASK],
-        reviews: [],
-        revisions: [PRD_REVISION],
-        activity: [],
-        workspace: null,
-      },
-    }),
-  );
-  await page.route(new RegExp(`/api/prds/${PRD_ID}/diff`), (route) =>
-    route.fulfill({
-      json: {
-        mode: "working-tree",
-        since: null,
-        until: null,
-        diff,
-        files: [{ path: "src/foo.ts", additions: 1, deletions: 1 }],
-        repos: [
-          {
-            repoName: "(default)",
-            repoPath: "/repo",
-            sha: null,
-            diff,
-            files: [{ path: "src/foo.ts", additions: 1, deletions: 1 }],
-          },
-        ],
-      },
-    }),
-  );
-  await page.route(new RegExp(`/api/prds/${PRD_ID}/context-panel`), (route) =>
-    route.fulfill({
-      json: { reviewBrief: null, currentPhaseTasks: [], futurePhases: [], outOfScopeItems: [] },
-    }),
-  );
-  await page.route(new RegExp(`/api/prds/${PRD_ID}/commit-suggestion`), (route) =>
-    route.fulfill({
-      json: {
-        phase: null,
-        phaseSuggestedCommitMessage: null,
-        prdSuggestedCommitMessage: null,
-        suggestedCommitMessage: null,
-      },
-    }),
-  );
-  await page.goto(`/prds/${PRD_ID}/review-diff`);
-  await expect(page.locator('[data-file-path="src/foo.ts"]')).toBeVisible();
-  await expect(page).toHaveScreenshot("review-diff.png", { fullPage: true });
 });
 
 test("project settings — visual baseline", async ({ page }) => {

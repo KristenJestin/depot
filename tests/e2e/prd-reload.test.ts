@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import * as Projects from "#/modules/projects/domain";
 import * as Prds from "#/modules/prds/domain";
 import * as Tasks from "#/modules/tasks/domain";

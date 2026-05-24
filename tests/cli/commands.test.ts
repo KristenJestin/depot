@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { runCommand } from "citty";
 import fs from "node:fs/promises";
 import { tmpdir } from "os";
@@ -24,7 +24,8 @@ import {
 } from "#/lib/workflow";
 import { setJsonMode } from "#/shared/logger";
 
-const resolveCurrentWorkspace = vi.fn<() => Promise<{ db: Database; ws: unknown }>>();
+const resolveCurrentWorkspace =
+  vi.fn<() => Promise<{ db: Database; ws: unknown; currentRepo?: unknown }>>();
 const getDb = vi.fn<() => Promise<Database>>();
 
 // Holds the current test database; updated in beforeEach so each test gets a fresh db.
@@ -43,6 +44,7 @@ vi.mock("#/cli/runtime", async (importOriginal) => {
 
 type RunnableSubCommand = {
   run: (ctx: { args: Record<string, unknown> }) => Promise<void> | void;
+  subCommands?: unknown;
 };
 
 async function getSubCommand(command: { subCommands?: unknown }, name: string) {
@@ -1264,6 +1266,235 @@ describe("CLI commands", () => {
       }
     });
 
+    it("log list --repo restricts output to rows with that repoName (PRD 0006/02)", async () => {
+      const { logCommand } = await import("#/cli/commands/activity");
+      const listCmd = await getSubCommand(logCommand, "list");
+
+      const { activityLog } = await import("#/db/schema");
+      await db.insert(activityLog).values([
+        {
+          id: "cli-evt-api",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "api side" }),
+          repoName: "api-repo",
+        },
+        {
+          id: "cli-evt-front",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "front side" }),
+          repoName: "front-repo",
+        },
+        {
+          id: "cli-evt-legacy",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "legacy" }),
+          repoName: null,
+        },
+      ]);
+
+      setJsonMode(true);
+      const output = await captureStdout(async () => {
+        await listCmd.run({ args: { last: "50", workspace: false, repo: "api-repo" } });
+      });
+      setJsonMode(false);
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      const ids = parsed.payload.items.map((item: { id: string }) => item.id);
+      expect(ids).toContain("cli-evt-api");
+      expect(ids).not.toContain("cli-evt-front");
+      expect(ids).not.toContain("cli-evt-legacy");
+    });
+
+    it("log list defaults to currentRepo when --repo is omitted (PRD 0008/02)", async () => {
+      const { logCommand } = await import("#/cli/commands/activity");
+      const listCmd = await getSubCommand(logCommand, "list");
+
+      const { activityLog } = await import("#/db/schema");
+      await db.insert(activityLog).values([
+        {
+          id: "cli-evt-api-default",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "api side" }),
+          repoName: "api-repo",
+        },
+        {
+          id: "cli-evt-front-default",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "front side" }),
+          repoName: "front-repo",
+        },
+        {
+          id: "cli-evt-legacy-default",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "legacy" }),
+          repoName: null,
+        },
+      ]);
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: { id: "fake-repo-id", name: "front-repo", path: "/tmp/front" },
+      });
+
+      setJsonMode(true);
+      const output = await captureStdout(async () => {
+        await listCmd.run({ args: { last: "50", workspace: false } });
+      });
+      setJsonMode(false);
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      const ids = parsed.payload.items.map((item: { id: string }) => item.id);
+      expect(ids).toContain("cli-evt-front-default");
+      expect(ids).not.toContain("cli-evt-api-default");
+      expect(ids).not.toContain("cli-evt-legacy-default");
+    });
+
+    it("log list --repo overrides currentRepo (PRD 0008/02)", async () => {
+      const { logCommand } = await import("#/cli/commands/activity");
+      const listCmd = await getSubCommand(logCommand, "list");
+
+      const { activityLog } = await import("#/db/schema");
+      await db.insert(activityLog).values([
+        {
+          id: "cli-evt-api-override",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "api side" }),
+          repoName: "api-repo",
+        },
+        {
+          id: "cli-evt-front-override",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "front side" }),
+          repoName: "front-repo",
+        },
+      ]);
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: { id: "fake-repo-id", name: "front-repo", path: "/tmp/front" },
+      });
+
+      setJsonMode(true);
+      const output = await captureStdout(async () => {
+        await listCmd.run({ args: { last: "50", workspace: false, repo: "api-repo" } });
+      });
+      setJsonMode(false);
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      const ids = parsed.payload.items.map((item: { id: string }) => item.id);
+      expect(ids).toContain("cli-evt-api-override");
+      expect(ids).not.toContain("cli-evt-front-override");
+    });
+
+    it("log list shows all rows when --repo is omitted and currentRepo is null (PRD 0008/02)", async () => {
+      const { logCommand } = await import("#/cli/commands/activity");
+      const listCmd = await getSubCommand(logCommand, "list");
+
+      const { activityLog } = await import("#/db/schema");
+      await db.insert(activityLog).values([
+        {
+          id: "cli-evt-api-null",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "api side" }),
+          repoName: "api-repo",
+        },
+        {
+          id: "cli-evt-front-null",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "front side" }),
+          repoName: "front-repo",
+        },
+        {
+          id: "cli-evt-legacy-null",
+          projectId,
+          eventType: "note",
+          payload: JSON.stringify({ message: "legacy" }),
+          repoName: null,
+        },
+      ]);
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: null,
+      });
+
+      setJsonMode(true);
+      const output = await captureStdout(async () => {
+        await listCmd.run({ args: { last: "50", workspace: false } });
+      });
+      setJsonMode(false);
+
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.kind).toBe("success");
+      const ids = parsed.payload.items.map((item: { id: string }) => item.id);
+      expect(ids).toContain("cli-evt-api-null");
+      expect(ids).toContain("cli-evt-front-null");
+      expect(ids).toContain("cli-evt-legacy-null");
+    });
+
+    it("workspace list hides orphans by default in --json mode", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const listCommand = await getSubCommand(workspaceCommand, "list");
+
+      const liveDir = await fs.mkdtemp(join(tmpdir(), "depot-list-json-default-"));
+      try {
+        const live = await addWorkspace(db, { projectId, path: liveDir });
+
+        const output = await captureStdout(async () => {
+          await listCommand.run({ args: { includeOrphans: false } });
+        });
+
+        const parsed = JSON.parse(output.trim());
+        expect(parsed.kind).toBe("success");
+        expect(Array.isArray(parsed.payload.items)).toBe(true);
+        const ids = parsed.payload.items.map((item: { id: string }) => item.id);
+        expect(ids).toContain(live.id);
+        expect(ids).not.toContain(workspaceId);
+      } finally {
+        await fs.rm(liveDir, { recursive: true, force: true });
+      }
+    });
+
+    it("workspace list --include-orphans surfaces orphans with isOrphan flag in --json mode", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const listCommand = await getSubCommand(workspaceCommand, "list");
+
+      const liveDir = await fs.mkdtemp(join(tmpdir(), "depot-list-json-orphans-"));
+      try {
+        const live = await addWorkspace(db, { projectId, path: liveDir });
+
+        const output = await captureStdout(async () => {
+          await listCommand.run({ args: { includeOrphans: true } });
+        });
+
+        const parsed = JSON.parse(output.trim());
+        expect(parsed.kind).toBe("success");
+        const items = parsed.payload.items as { id: string; isOrphan: boolean }[];
+        const orphan = items.find((item) => item.id === workspaceId);
+        const liveItem = items.find((item) => item.id === live.id);
+        expect(orphan?.isOrphan).toBe(true);
+        expect(liveItem?.isOrphan).toBe(false);
+      } finally {
+        await fs.rm(liveDir, { recursive: true, force: true });
+      }
+    });
+
     it("stdout stays pure JSON with no extra text in JSON mode", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const listCommand = await getSubCommand(prdCommand, "list");
@@ -1397,17 +1628,57 @@ describe("CLI commands", () => {
   });
 
   describe("workspace commands", () => {
-    it("workspace list shows all workspaces", async () => {
+    it("workspace list hides orphan workspaces by default in human mode", async () => {
       const { workspaceCommand } = await import("#/cli/commands/workspaces");
       const listCommand = await getSubCommand(workspaceCommand, "list");
 
-      const lines: string[] = [];
-      const output = vi.spyOn(console, "log").mockImplementation((msg) => lines.push(msg));
-      await listCommand.run({ args: {} });
-      output.mockRestore();
+      // The default `workspaceId` seeded in beforeEach is registered at
+      // `/workspace/cli-project`, which doesn't exist on disk — it's an
+      // orphan. Seed an additional live workspace whose folder we create
+      // on disk so the listing has something to show.
+      const liveDir = await fs.mkdtemp(join(tmpdir(), "depot-list-live-"));
+      try {
+        const live = await addWorkspace(db, { projectId, path: liveDir });
 
-      expect(lines.length).toBeGreaterThan(0);
-      expect(lines[0]).toContain(workspaceId);
+        const lines: string[] = [];
+        const output = vi.spyOn(console, "log").mockImplementation((msg) => lines.push(msg));
+        await listCommand.run({ args: {} });
+        output.mockRestore();
+
+        const joined = lines.join("\n");
+        expect(joined).toContain(live.id);
+        expect(joined).not.toContain(workspaceId);
+        expect(joined).not.toContain("(orphan)");
+      } finally {
+        await fs.rm(liveDir, { recursive: true, force: true });
+      }
+    });
+
+    it("workspace list --include-orphans shows orphans with a visual marker in human mode", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const listCommand = await getSubCommand(workspaceCommand, "list");
+
+      const liveDir = await fs.mkdtemp(join(tmpdir(), "depot-list-includeorphans-"));
+      try {
+        const live = await addWorkspace(db, { projectId, path: liveDir });
+
+        const lines: string[] = [];
+        const output = vi.spyOn(console, "log").mockImplementation((msg) => lines.push(msg));
+        await listCommand.run({ args: { includeOrphans: true } });
+        output.mockRestore();
+
+        const joined = lines.join("\n");
+        expect(joined).toContain(live.id);
+        expect(joined).toContain(workspaceId);
+        // The default-seeded workspace points at a non-existent path, so it
+        // is the orphan; the live one must not carry the marker.
+        const orphanLine = lines.find((l) => l.includes(workspaceId));
+        const liveLine = lines.find((l) => l.includes(live.id));
+        expect(orphanLine).toMatch(/\(orphan\)/);
+        expect(liveLine).not.toMatch(/\(orphan\)/);
+      } finally {
+        await fs.rm(liveDir, { recursive: true, force: true });
+      }
     });
 
     it("workspace show displays workspace details", async () => {
@@ -1486,6 +1757,181 @@ describe("CLI commands", () => {
 
       const ws = await getWorkspace(db, workspaceId);
       expect(ws).toBeNull();
+    });
+
+    it("workspace remove still works when the workspace folder is gone (orphan)", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const removeCommand = await getSubCommand(workspaceCommand, "remove");
+
+      // Register a workspace at a path that does not exist on disk:
+      // that's an orphan by definition. Explicit `remove <id>` must
+      // bypass the orphan masking — the user knows what they want.
+      const orphan = await addWorkspace(db, {
+        projectId,
+        path: "/definitely/does/not/exist/orphan-ws",
+      });
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await removeCommand.run({ args: { workspaceId: orphan.id, force: false } });
+      output.mockRestore();
+
+      const found = await getWorkspace(db, orphan.id);
+      expect(found).toBeNull();
+    });
+
+    it("workspace add registers a new workspace for a project by id", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const addCmd = await getSubCommand(workspaceCommand, "add");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await addCmd.run({ args: { project: projectId, path: "/workspace/cli-project-worktree" } });
+      output.mockRestore();
+
+      const { listWorkspaces } = await import("#/lib/workflow");
+      const wsList = await listWorkspaces(db, { projectId });
+      const paths = wsList.map((w) => w.path);
+      expect(paths).toContain("/workspace/cli-project-worktree");
+    });
+
+    it("workspace add resolves a project by name", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const addCmd = await getSubCommand(workspaceCommand, "add");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await addCmd.run({
+        args: { project: "cli-project", path: "/workspace/cli-project-by-name" },
+      });
+      output.mockRestore();
+
+      const { listWorkspaces } = await import("#/lib/workflow");
+      const wsList = await listWorkspaces(db, { projectId });
+      const paths = wsList.map((w) => w.path);
+      expect(paths).toContain("/workspace/cli-project-by-name");
+    });
+
+    it("workspace add errors when the project is unknown", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const addCmd = await getSubCommand(workspaceCommand, "add");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const errMsg = await captureConsoleError(async () => {
+        await expect(
+          addCmd.run({ args: { project: "does-not-exist", path: "/workspace/whatever" } }),
+        ).rejects.toThrow("process.exit:1");
+      });
+      expect(errMsg).toContain("does-not-exist");
+
+      exit.mockRestore();
+    });
+
+    it("prd activate cross-entity error mentions `depot workspace add`", async () => {
+      const { createProject, createPrd, markPrdReady } = await import("#/lib/workflow");
+      // PRD belongs to a different project than the resolved workspace (which is `projectId`).
+      const otherProject = await createProject(db, { name: "other-project" });
+      const prd = await createPrd(db, {
+        projectId: otherProject.id,
+        title: "PRD in other project",
+      });
+      await markPrdReady(db, prd.id);
+
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const activateCmd = await getSubCommand(prdCommand, "activate");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const errMsg = await captureConsoleError(async () => {
+        await expect(activateCmd.run({ args: { prdId: prd.id } })).rejects.toThrow(
+          "process.exit:1",
+        );
+      });
+      expect(errMsg).toMatch(/depot workspace add/);
+
+      exit.mockRestore();
+    });
+
+    it("workspace link is an alias for workspace add", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await runCommand(workspaceCommand as any, {
+        rawArgs: ["link", "--project", projectId, "--path", "/workspace/cli-project-linked"],
+      });
+      stdout.mockRestore();
+
+      const { listWorkspaces } = await import("#/lib/workflow");
+      const wsList = await listWorkspaces(db, { projectId });
+      const paths = wsList.map((w) => w.path);
+      expect(paths).toContain("/workspace/cli-project-linked");
+    });
+
+    it("workspace add propagates the --label flag", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const addCmd = await getSubCommand(workspaceCommand, "add");
+
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      await addCmd.run({
+        args: {
+          project: projectId,
+          path: "/workspace/cli-project-labelled",
+          label: "feature-x",
+        },
+      });
+      output.mockRestore();
+
+      const { listWorkspaces } = await import("#/lib/workflow");
+      const wsList = await listWorkspaces(db, { projectId });
+      const created = wsList.find((w) => w.path === "/workspace/cli-project-labelled");
+      expect(created?.label).toBe("feature-x");
+    });
+
+    it("workspace add is idempotent on an already registered path", async () => {
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const addCmd = await getSubCommand(workspaceCommand, "add");
+
+      const lines: string[] = [];
+      const output = vi.spyOn(console, "log").mockImplementation((msg) => lines.push(String(msg)));
+      await addCmd.run({ args: { project: projectId, path: "/workspace/cli-project" } });
+      output.mockRestore();
+
+      const { listWorkspaces } = await import("#/lib/workflow");
+      const wsList = await listWorkspaces(db, { projectId });
+      expect(wsList.filter((w) => w.path === "/workspace/cli-project")).toHaveLength(1);
+      expect(lines.join("\n")).toMatch(/already registered/i);
+    });
+
+    it("workspace add errors when the project name is ambiguous", async () => {
+      const { createProject } = await import("#/lib/workflow");
+      const dupA = await createProject(db, { name: "duped-name" });
+      const dupB = await createProject(db, { name: "duped-name" });
+
+      const { workspaceCommand } = await import("#/cli/commands/workspaces");
+      const addCmd = await getSubCommand(workspaceCommand, "add");
+
+      const exit = vi.spyOn(process, "exit").mockImplementation(((
+        code?: string | number | null,
+      ) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as never);
+
+      const errMsg = await captureConsoleError(async () => {
+        await expect(
+          addCmd.run({ args: { project: "duped-name", path: "/workspace/whatever" } }),
+        ).rejects.toThrow("process.exit:1");
+      });
+      expect(errMsg).toContain("ambiguous");
+      expect(errMsg).toContain(dupA.id);
+      expect(errMsg).toContain(dupB.id);
+
+      exit.mockRestore();
     });
   });
 
@@ -1570,140 +2016,6 @@ describe("CLI commands", () => {
         "process.exit:1",
       );
 
-      exit.mockRestore();
-    });
-  });
-
-  // ── prd capture-merge ──────────────────────────────────────────────────────
-
-  describe("prd capture-merge", () => {
-    const captureMergeTempDirs: string[] = [];
-
-    async function makeGitRepoForMerge(): Promise<{ root: string; sha: string }> {
-      const { execFileSync } = await import("node:child_process");
-      const root = join(tmpdir(), `depot-cm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-      await fs.mkdir(root, { recursive: true });
-      const real = await fs.realpath(root);
-      captureMergeTempDirs.push(real);
-      execFileSync("git", ["init", "-q"], { cwd: real });
-      execFileSync("git", ["config", "user.email", "t@t.t"], { cwd: real });
-      execFileSync("git", ["config", "user.name", "t"], { cwd: real });
-      await fs.writeFile(join(real, "f.txt"), "hello");
-      execFileSync("git", ["add", "."], { cwd: real });
-      execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: real });
-      const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: real }).toString().trim();
-      return { root: real, sha };
-    }
-
-    afterEach(async () => {
-      for (const dir of captureMergeTempDirs.splice(0)) {
-        await fs.rm(dir, { recursive: true, force: true });
-      }
-    });
-
-    it("captures HEAD for a mono-repo project with no flags (zero config)", async () => {
-      const { prdCommand } = await import("#/cli/commands/prds");
-      const captureMerge = await getSubCommand(prdCommand, "capture-merge");
-      const { listMerges } = await import("#/modules/prds/domain");
-
-      const repo = await makeGitRepoForMerge();
-      const ws = await addWorkspace(db, { projectId, path: repo.root });
-      resolveCurrentWorkspace.mockResolvedValue({ db, ws });
-
-      const prd = await createPrd(db, { projectId, title: "Mono merge PRD" });
-
-      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
-      await captureMerge.run({ args: { prdId: prd.id } });
-      stdout.mockRestore();
-
-      const merges = await Effect.runPromise(Effect.provideService(listMerges(prd.id), Db, db));
-      expect(merges).toHaveLength(1);
-      expect(merges[0]?.repoName).toBe("(default)");
-      expect(merges[0]?.mergeSha).toBe(repo.sha);
-      expect(merges[0]?.repoId).toBeNull();
-    });
-
-    it("anchors multiple repos in one call with --repo name=sha", async () => {
-      const { prdCommand } = await import("#/cli/commands/prds");
-      const captureMerge = await getSubCommand(prdCommand, "capture-merge");
-      const { addRepo } = await import("#/modules/projects/repos");
-      const { listMerges } = await import("#/modules/prds/domain");
-
-      const front = await makeGitRepoForMerge();
-      const api = await makeGitRepoForMerge();
-      await Effect.runPromise(
-        Effect.provideService(addRepo({ projectId, name: "front", path: front.root }), Db, db),
-      );
-      await Effect.runPromise(
-        Effect.provideService(addRepo({ projectId, name: "api", path: api.root }), Db, db),
-      );
-
-      const prd = await createPrd(db, { projectId, title: "Multi merge PRD" });
-
-      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
-      await captureMerge.run({
-        args: { prdId: prd.id, repo: [`front=${front.sha}`, `api=${api.sha}`] },
-      });
-      stdout.mockRestore();
-
-      const merges = await Effect.runPromise(Effect.provideService(listMerges(prd.id), Db, db));
-      expect(merges.map((m) => m.repoName).sort()).toEqual(["api", "front"]);
-    });
-
-    it("refuses an unregistered repo name in a multi-repo project", async () => {
-      const { prdCommand } = await import("#/cli/commands/prds");
-      const captureMerge = await getSubCommand(prdCommand, "capture-merge");
-      const { addRepo } = await import("#/modules/projects/repos");
-
-      const front = await makeGitRepoForMerge();
-      await Effect.runPromise(
-        Effect.provideService(addRepo({ projectId, name: "front", path: front.root }), Db, db),
-      );
-      const prd = await createPrd(db, { projectId, title: "Refuse repo PRD" });
-
-      const exit = vi.spyOn(process, "exit").mockImplementation(((
-        code?: string | number | null,
-      ) => {
-        throw new Error(`process.exit:${code ?? 0}`);
-      }) as never);
-      const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
-
-      await expect(
-        captureMerge.run({ args: { prdId: prd.id, repo: [`unknown=${front.sha}`] } }),
-      ).rejects.toThrow("process.exit:1");
-
-      stderr.mockRestore();
-      exit.mockRestore();
-    });
-
-    it("refuses a SHA that does not exist in the repo", async () => {
-      const { prdCommand } = await import("#/cli/commands/prds");
-      const captureMerge = await getSubCommand(prdCommand, "capture-merge");
-      const { addRepo } = await import("#/modules/projects/repos");
-
-      const front = await makeGitRepoForMerge();
-      await Effect.runPromise(
-        Effect.provideService(addRepo({ projectId, name: "front", path: front.root }), Db, db),
-      );
-      const prd = await createPrd(db, { projectId, title: "Refuse SHA PRD" });
-
-      const exit = vi.spyOn(process, "exit").mockImplementation(((
-        code?: string | number | null,
-      ) => {
-        throw new Error(`process.exit:${code ?? 0}`);
-      }) as never);
-      const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
-
-      await expect(
-        captureMerge.run({
-          args: {
-            prdId: prd.id,
-            repo: ["front=0000000000000000000000000000000000000000"],
-          },
-        }),
-      ).rejects.toThrow("process.exit:1");
-
-      stderr.mockRestore();
       exit.mockRestore();
     });
   });
@@ -1962,7 +2274,7 @@ describe("CLI commands", () => {
       await provide(
         updatePrdSections(prd.id, {
           problem: "Agents cannot tell which PRD a diff belongs to.",
-          solution: "Anchor each merge with a prd_merge row.",
+          solution: "Anchor every PRD revision to the workspace where it was activated.",
           implementationDecisions: "Use a join table.",
           testingDecisions: "Unit tests on the resolver.",
         }),
@@ -2278,6 +2590,695 @@ describe("CLI commands", () => {
 
       const updated = await getReview(db, review.id);
       expect(updated!.userFeedback).toBe("Please simplify onboarding");
+    });
+  });
+
+  describe("doc sync --repo", () => {
+    it("scopes the sync to a single repo when --repo names a registered project_repo", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({
+            projectId,
+            name: "p",
+            targetRoot: "./docs",
+            sources: [{ name: "core", path: "./" }],
+          }),
+          Db,
+          db,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: "/tmp/front" }), Db, db),
+      );
+
+      const stdout = await captureStdout(async () => {
+        setJsonMode(true);
+        try {
+          await (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", repo: "api", dryRun: true } });
+        } finally {
+          setJsonMode(false);
+        }
+      });
+
+      const envelope = JSON.parse(stdout.trim()) as {
+        kind: string;
+        payload: { repos: Array<{ repo: { name: string } }> };
+      };
+      expect(envelope.kind).toBe("success");
+      expect(envelope.payload.repos).toHaveLength(1);
+      expect(envelope.payload.repos[0]!.repo.name).toBe("api");
+    });
+
+    it("iterates over every project_repo when no --repo is given in a multi-repo project", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({
+            projectId,
+            name: "p",
+            targetRoot: "./docs",
+            sources: [{ name: "core", path: "./" }],
+          }),
+          Db,
+          db,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: "/tmp/front" }), Db, db),
+      );
+
+      const stdout = await captureStdout(async () => {
+        setJsonMode(true);
+        try {
+          await (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", dryRun: true } });
+        } finally {
+          setJsonMode(false);
+        }
+      });
+
+      const envelope = JSON.parse(stdout.trim()) as {
+        kind: string;
+        payload: { repos: Array<{ repo: { name: string } }> };
+      };
+      expect(envelope.kind).toBe("success");
+      expect(envelope.payload.repos).toHaveLength(2);
+      const names = envelope.payload.repos.map((r) => r.repo.name).sort();
+      expect(names).toEqual(["api", "front"]);
+    });
+
+    it("preserves the mono-repo (no project_repo) output shape when --repo is omitted", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({
+            projectId,
+            name: "p",
+            targetRoot: "./docs",
+            sources: [{ name: "core", path: "./" }],
+          }),
+          Db,
+          db,
+        ),
+      );
+
+      const stdout = await captureStdout(async () => {
+        setJsonMode(true);
+        try {
+          await (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", dryRun: true } });
+        } finally {
+          setJsonMode(false);
+        }
+      });
+
+      const envelope = JSON.parse(stdout.trim()) as {
+        kind: string;
+        payload: { profileId: string; sources: Array<{ name: string }>; dryRun: boolean };
+      };
+      expect(envelope.kind).toBe("success");
+      expect(envelope.payload.sources).toHaveLength(1);
+      expect(envelope.payload.sources[0]!.name).toBe("core");
+      expect(envelope.payload).not.toHaveProperty("repos");
+    });
+
+    it("fails with a clear message listing known repos when --repo is unknown", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({ projectId, name: "p", targetRoot: "./docs" }),
+          Db,
+          db,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: "/tmp/front" }), Db, db),
+      );
+
+      const stderr = await captureConsoleError(async () => {
+        await expect(
+          (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", repo: "missing", dryRun: true } }),
+        ).rejects.toThrow(/process.exit unexpectedly called/);
+      });
+      expect(stderr).toMatch(/missing/);
+      expect(stderr).toMatch(/api/);
+      expect(stderr).toMatch(/front/);
+    });
+
+    it("rejects --repo on a mono-repo project (no registered project_repo)", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({ projectId, name: "p", targetRoot: "./docs" }),
+          Db,
+          db,
+        ),
+      );
+
+      const stderr = await captureConsoleError(async () => {
+        await expect(
+          (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", repo: "api", dryRun: true } }),
+        ).rejects.toThrow(/process.exit unexpectedly called/);
+      });
+      expect(stderr).toMatch(/api/);
+      expect(stderr).toMatch(/mono-repo/);
+    });
+
+    it("defaults to currentRepo when --repo is omitted and a current repo is resolved (PRD 0008/02)", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({
+            projectId,
+            name: "p",
+            targetRoot: "./docs",
+            sources: [{ name: "core", path: "./" }],
+          }),
+          Db,
+          db,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      const front = await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: "/tmp/front" }), Db, db),
+      );
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: front,
+      });
+
+      const stdout = await captureStdout(async () => {
+        setJsonMode(true);
+        try {
+          await (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", dryRun: true } });
+        } finally {
+          setJsonMode(false);
+        }
+      });
+
+      const envelope = JSON.parse(stdout.trim()) as {
+        kind: string;
+        payload: { repos: Array<{ repo: { name: string } }> };
+      };
+      expect(envelope.kind).toBe("success");
+      expect(envelope.payload.repos).toHaveLength(1);
+      expect(envelope.payload.repos[0]!.repo.name).toBe("front");
+    });
+
+    it("explicit --repo overrides currentRepo (PRD 0008/02)", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({
+            projectId,
+            name: "p",
+            targetRoot: "./docs",
+            sources: [{ name: "core", path: "./" }],
+          }),
+          Db,
+          db,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      const front = await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: "/tmp/front" }), Db, db),
+      );
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: front,
+      });
+
+      const stdout = await captureStdout(async () => {
+        setJsonMode(true);
+        try {
+          await (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", repo: "api", dryRun: true } });
+        } finally {
+          setJsonMode(false);
+        }
+      });
+
+      const envelope = JSON.parse(stdout.trim()) as {
+        kind: string;
+        payload: { repos: Array<{ repo: { name: string } }> };
+      };
+      expect(envelope.kind).toBe("success");
+      expect(envelope.payload.repos).toHaveLength(1);
+      expect(envelope.payload.repos[0]!.repo.name).toBe("api");
+    });
+
+    it("falls back to iterating all repos when --repo is omitted and currentRepo is null (PRD 0008/02)", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({
+            projectId,
+            name: "p",
+            targetRoot: "./docs",
+            sources: [{ name: "core", path: "./" }],
+          }),
+          Db,
+          db,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: "/tmp/front" }), Db, db),
+      );
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: null,
+      });
+
+      const stdout = await captureStdout(async () => {
+        setJsonMode(true);
+        try {
+          await (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", dryRun: true } });
+        } finally {
+          setJsonMode(false);
+        }
+      });
+
+      const envelope = JSON.parse(stdout.trim()) as {
+        kind: string;
+        payload: { repos: Array<{ repo: { name: string } }> };
+      };
+      expect(envelope.kind).toBe("success");
+      expect(envelope.payload.repos).toHaveLength(2);
+      const names = envelope.payload.repos.map((r) => r.repo.name).sort();
+      expect(names).toEqual(["api", "front"]);
+    });
+
+    it("mono-repo: currentRepo never short-circuits the default flat shape (PRD 0008/02)", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const syncCmd = await getSubCommand(docCommand, "sync");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({
+            projectId,
+            name: "p",
+            targetRoot: "./docs",
+            sources: [{ name: "core", path: "./" }],
+          }),
+          Db,
+          db,
+        ),
+      );
+
+      // Mono-repo means no project_repo is registered, so currentRepo must be null
+      // by construction (PRD 0008/01). Keep the mock explicit to make the
+      // expectation obvious.
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: null,
+      });
+
+      const stdout = await captureStdout(async () => {
+        setJsonMode(true);
+        try {
+          await (
+            syncCmd as unknown as {
+              run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+            }
+          ).run({ args: { name: "p", dryRun: true } });
+        } finally {
+          setJsonMode(false);
+        }
+      });
+
+      const envelope = JSON.parse(stdout.trim()) as {
+        kind: string;
+        payload: { profileId: string; sources: Array<{ name: string }>; dryRun: boolean };
+      };
+      expect(envelope.kind).toBe("success");
+      expect(envelope.payload.sources).toHaveLength(1);
+      expect(envelope.payload).not.toHaveProperty("repos");
+    });
+  });
+
+  describe("doc pre-sync-check --repo (PRD 0008/02)", () => {
+    it("tags the activity log entry with currentRepo when --repo is omitted", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const preSyncCmd = await getSubCommand(docCommand, "pre-sync-check");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({ projectId, name: "p", targetRoot: "./docs" }),
+          Db,
+          db,
+        ),
+      );
+      const front = await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: "/tmp/front" }), Db, db),
+      );
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: front,
+      });
+
+      const stdoutSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await preSyncCmd.run({ args: { profile: "p" } });
+      } finally {
+        stdoutSpy.mockRestore();
+      }
+
+      const { activityLog } = await import("#/db/schema");
+      const rows = (await db.select().from(activityLog)) as Array<{
+        eventType: string;
+        repoName: string | null;
+      }>;
+      const preCheckRow = rows.find((r) => r.eventType === "pre_doc_sync_check");
+      expect(preCheckRow).toBeDefined();
+      expect(preCheckRow!.repoName).toBe("front");
+    });
+
+    it("explicit --repo overrides currentRepo", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const preSyncCmd = await getSubCommand(docCommand, "pre-sync-check");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({ projectId, name: "p", targetRoot: "./docs" }),
+          Db,
+          db,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      const front = await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "front", path: "/tmp/front" }), Db, db),
+      );
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: front,
+      });
+
+      const stdoutSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await preSyncCmd.run({ args: { profile: "p", repo: "api" } });
+      } finally {
+        stdoutSpy.mockRestore();
+      }
+
+      const { activityLog } = await import("#/db/schema");
+      const rows = (await db.select().from(activityLog)) as Array<{
+        eventType: string;
+        repoName: string | null;
+      }>;
+      const preCheckRow = rows.find((r) => r.eventType === "pre_doc_sync_check");
+      expect(preCheckRow).toBeDefined();
+      expect(preCheckRow!.repoName).toBe("api");
+    });
+
+    it("leaves repoName null when --repo is omitted and currentRepo is null", async () => {
+      const { docCommand } = await import("#/cli/commands/docs");
+      const preSyncCmd = await getSubCommand(docCommand, "pre-sync-check");
+
+      const { createProfile } = await import("#/modules/docs/sync");
+      await Effect.runPromise(
+        Effect.provideService(
+          createProfile({ projectId, name: "p", targetRoot: "./docs" }),
+          Db,
+          db,
+        ),
+      );
+
+      resolveCurrentWorkspace.mockResolvedValue({
+        db,
+        ws: { id: workspaceId, projectId, path: "/workspace/cli-project" },
+        currentRepo: null,
+      });
+
+      const stdoutSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await preSyncCmd.run({ args: { profile: "p" } });
+      } finally {
+        stdoutSpy.mockRestore();
+      }
+
+      const { activityLog } = await import("#/db/schema");
+      const rows = (await db.select().from(activityLog)) as Array<{
+        eventType: string;
+        repoName: string | null;
+      }>;
+      const preCheckRow = rows.find((r) => r.eventType === "pre_doc_sync_check");
+      expect(preCheckRow).toBeDefined();
+      expect(preCheckRow!.repoName).toBeNull();
+    });
+  });
+
+  describe("prd repos and task --repo", () => {
+    it("prd repos add/list/remove round-trip via CLI", async () => {
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const reposCommand = await getSubCommand(prdCommand, "repos");
+      const addCmd = await getSubCommand(reposCommand, "add");
+      const listCmd = await getSubCommand(reposCommand, "list");
+      const removeCmd = await getSubCommand(reposCommand, "remove");
+
+      const prd = await createPrd(db, { projectId, title: "CLI scope" });
+      const { addRepo } = await import("#/modules/projects/repos");
+      const repo = await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await addCmd.run({ args: { prdId: prd.id, repoName: "api" } });
+      await listCmd.run({ args: { prdId: prd.id } });
+      await removeCmd.run({ args: { prdId: prd.id, repoName: "api" } });
+      stdout.mockRestore();
+
+      const { listPrdRepos } = await import("#/modules/prds/repos");
+      const remaining = await Effect.runPromise(
+        Effect.provideService(listPrdRepos(prd.id), Db, db),
+      );
+      expect(remaining).toHaveLength(0);
+      expect(repo.name).toBe("api");
+    });
+
+    it("task add --repo attaches to a repo in the PRD scope", async () => {
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const addCmd = await getSubCommand(taskCommand, "add");
+
+      const prd = await createPrd(db, { projectId, title: "Repo PRD" });
+      const { addRepo } = await import("#/modules/projects/repos");
+      const repo = await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      const { addPrdRepo } = await import("#/modules/prds/repos");
+      await Effect.runPromise(Effect.provideService(addPrdRepo(prd.id, repo.id), Db, db));
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await runCommand(addCmd as any, {
+        rawArgs: [
+          "--prd-id",
+          prd.id,
+          "--title",
+          "Wire api",
+          "--desc",
+          "Intent:\nWire",
+          "--criteria",
+          "ok",
+          "--effort",
+          "s",
+          "--repo",
+          "api",
+        ],
+      });
+      stdout.mockRestore();
+
+      const tasks = await listTasks(db, prd.id);
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.repoId).toBe(repo.id);
+    });
+
+    it("task add refuses two --repo flags", async () => {
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const addCmd = await getSubCommand(taskCommand, "add");
+
+      const prd = await createPrd(db, { projectId, title: "Repo PRD" });
+      const { addRepo } = await import("#/modules/projects/repos");
+      await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      const stderr = await captureConsoleError(async () => {
+        await expect(
+          runCommand(addCmd as any, {
+            rawArgs: [
+              "--prd-id",
+              prd.id,
+              "--title",
+              "Cross",
+              "--desc",
+              "Intent:\nx",
+              "--criteria",
+              "y",
+              "--effort",
+              "s",
+              "--repo",
+              "api",
+              "--repo",
+              "front",
+            ],
+          }),
+        ).rejects.toThrow(/process.exit unexpectedly called/);
+      });
+      stdout.mockRestore();
+      expect(stderr).toMatch(/at most one repo/);
+    });
+
+    it("task update --no-repo clears the attachment", async () => {
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const updateCmd = await getSubCommand(taskCommand, "update");
+
+      const prd = await createPrd(db, { projectId, title: "Repo PRD" });
+      const { addRepo } = await import("#/modules/projects/repos");
+      const repo = await Effect.runPromise(
+        Effect.provideService(addRepo({ projectId, name: "api", path: "/tmp/api" }), Db, db),
+      );
+      const { addPrdRepo } = await import("#/modules/prds/repos");
+      await Effect.runPromise(Effect.provideService(addPrdRepo(prd.id, repo.id), Db, db));
+      const { updateTask } = await import("#/modules/tasks/domain");
+      const task = await createTask(db, {
+        prdRevisionId: prd.id,
+        title: "T",
+        description: "d",
+        doneCriteria: "ok",
+        effort: "s",
+      });
+      await Effect.runPromise(
+        Effect.provideService(updateTask(task.id, { repoId: repo.id }), Db, db),
+      );
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await runCommand(updateCmd as any, { rawArgs: [task.id, "--no-repo"] });
+      stdout.mockRestore();
+
+      const tasks = await listTasks(db, prd.id);
+      expect(tasks[0]!.repoId).toBeNull();
+    });
+
+    it("mono-repo: task add without --repo leaves repoId null", async () => {
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const addCmd = await getSubCommand(taskCommand, "add");
+
+      const prd = await createPrd(db, { projectId, title: "Mono PRD" });
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await runCommand(addCmd as any, {
+        rawArgs: [
+          "--prd-id",
+          prd.id,
+          "--title",
+          "Mono task",
+          "--desc",
+          "Intent:\nx",
+          "--criteria",
+          "ok",
+          "--effort",
+          "s",
+        ],
+      });
+      stdout.mockRestore();
+
+      const tasks = await listTasks(db, prd.id);
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.repoId).toBeNull();
     });
   });
 });

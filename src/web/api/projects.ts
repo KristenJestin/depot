@@ -288,20 +288,11 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
     const workspace = await db.query.workspaces.findFirst({ where: { projectId: id } });
     const wsPath = workspace?.path ?? process.cwd();
     try {
+      // `runDirective` emits the `directive_run` activity log entry itself
+      // (with full repo selection traceability — PRD 0007 T1), so the web
+      // wrapper just forwards `source: "human"` and returns the result.
       const result = await getRuntime().runPromise(
-        DomainDirectives.runDirective(directiveId, { wsPath }),
-      );
-      await getRuntime().runPromise(
-        logActivity({
-          projectId: id,
-          eventType: "directive_run",
-          payload: {
-            directiveId,
-            status: result.ok ? "ok" : "fail",
-            durationMs: result.durationMs,
-          },
-          source: "human",
-        }),
+        DomainDirectives.runDirective(directiveId, { wsPath, source: "human" }),
       );
       return c.json(result, 200);
     } catch (e) {

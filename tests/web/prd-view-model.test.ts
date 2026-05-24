@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { buildBoardColumns, buildDetailSummary, buildStageCards } from "#/web/lib/prd-view-model";
 
@@ -27,16 +27,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [
         {
@@ -55,6 +46,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -82,6 +74,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -120,6 +113,7 @@ describe("prd view model", () => {
               reviewId: "review-1",
               severity: "major",
               axis: null,
+              repoId: null,
               triageState: "ready-for-agent",
               linkedFilePath: null,
               linkedStartLine: null,
@@ -156,16 +150,7 @@ describe("prd view model", () => {
           updatedAt: now,
           readyAt: now,
           activatedAt: now,
-
-          activatedAtSha: null,
-
-          doneAtSha: null,
-
-          mergedAtSha: null,
-
           suggestedCommitMessage: null,
-
-          worktreePath: null,
         },
       ],
       activity: [],
@@ -205,16 +190,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
         totalTasks: 3,
         doneTasks: 1,
         blockedTasks: 0,
@@ -260,16 +236,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
         totalTasks: 2,
         doneTasks: 2,
         blockedTasks: 0,
@@ -327,16 +294,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [],
       reviews: [
@@ -365,6 +323,7 @@ describe("prd view model", () => {
               reviewId: "review-agent-open",
               severity: "minor",
               axis: null,
+              repoId: null,
               triageState: "ready-for-agent",
               linkedFilePath: null,
               linkedStartLine: null,
@@ -410,16 +369,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [
         {
@@ -438,6 +388,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -476,6 +427,7 @@ describe("prd view model", () => {
               reviewId: "review-2",
               severity: "minor",
               axis: null,
+              repoId: null,
               triageState: "ready-for-agent",
               linkedFilePath: null,
               linkedStartLine: null,
@@ -512,16 +464,7 @@ describe("prd view model", () => {
           updatedAt: now,
           readyAt: now,
           activatedAt: now,
-
-          activatedAtSha: null,
-
-          doneAtSha: null,
-
-          mergedAtSha: null,
-
           suggestedCommitMessage: null,
-
-          worktreePath: null,
         },
       ],
       activity: [],
@@ -565,16 +508,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [
         {
@@ -593,6 +527,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -631,6 +566,7 @@ describe("prd view model", () => {
               reviewId: "review-3",
               severity: "minor",
               axis: null,
+              repoId: null,
               triageState: "ready-for-agent",
               linkedFilePath: null,
               linkedStartLine: null,
@@ -685,16 +621,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [
         {
@@ -713,6 +640,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -740,6 +668,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -799,16 +728,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: null,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [1, 2, 3].map((phase) => ({
         id: `phase-${phase}-task`,
@@ -826,6 +746,7 @@ describe("prd view model", () => {
         reviewId: null,
         severity: null,
         axis: null,
+        repoId: null,
         triageState: "ready-for-agent",
         linkedFilePath: null,
         linkedStartLine: null,
@@ -878,16 +799,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [1, 2, 3].map((phase) => ({
         id: `phase-${phase}-task`,
@@ -905,6 +817,7 @@ describe("prd view model", () => {
         reviewId: null,
         severity: null,
         axis: null,
+        repoId: null,
         triageState: "ready-for-agent",
         linkedFilePath: null,
         linkedStartLine: null,
@@ -983,16 +896,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [
         {
@@ -1011,6 +915,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -1038,6 +943,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -1076,6 +982,7 @@ describe("prd view model", () => {
               reviewId: "agent-review-findings",
               severity: "minor",
               axis: null,
+              repoId: null,
               triageState: "ready-for-agent",
               linkedFilePath: null,
               linkedStartLine: null,
@@ -1131,16 +1038,7 @@ describe("prd view model", () => {
         updatedAt: now,
         readyAt: now,
         activatedAt: now,
-
-        activatedAtSha: null,
-
-        doneAtSha: null,
-
-        mergedAtSha: null,
-
         suggestedCommitMessage: null,
-
-        worktreePath: null,
       },
       tasks: [
         {
@@ -1159,6 +1057,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -1186,6 +1085,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -1213,6 +1113,7 @@ describe("prd view model", () => {
           reviewId: null,
           severity: null,
           axis: null,
+          repoId: null,
           triageState: "ready-for-agent",
           linkedFilePath: null,
           linkedStartLine: null,
@@ -1251,6 +1152,7 @@ describe("prd view model", () => {
               reviewId: "global-audit",
               severity: "minor",
               axis: null,
+              repoId: null,
               triageState: "ready-for-agent",
               linkedFilePath: null,
               linkedStartLine: null,

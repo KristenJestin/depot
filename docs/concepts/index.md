@@ -21,20 +21,67 @@ Projects are created indirectly through `depot init` or managed directly with `d
 
 A workspace binds a project to a canonical absolute path on disk.
 
-This is how `depot` knows which project you mean when you run workspace-aware commands from a directory. Resolution uses longest-prefix matching on canonical paths, so a command launched from any nested subdirectory still resolves to the correct workspace.
+This is how `depot` knows which project you mean when you run workspace-aware commands from a directory. Resolution uses longest-prefix matching on canonical paths, so a command launched from any nested subdirectory still resolves to the correct workspace. If the path is inside a git worktree and nothing matches directly, `depot` falls back to the main worktree path before giving up.
 
 Important properties:
 
 - a workspace belongs to exactly one project
-- workspace paths are unique across the database
+- workspace paths are unique across the database (stored in the `workspaces` table)
 - a workspace may have an optional human label
 - path normalization uses forward slashes, and lowercases paths on Windows
+- workspaces are flat: `depot` does not mark one as "primary" or distinguish a worktree from its main checkout
 
-If the current directory does not resolve to a workspace, most workspace-aware commands exit and ask you to run `depot init` first.
+If the current directory does not resolve to a workspace, most workspace-aware commands exit and ask you to run `depot init` (to create a new project) or `depot workspace add` (to attach the folder to an existing project).
 
 `depot context` is the main exception: it uses auto-create mode and silently creates a project plus workspace for the current path before rendering context.
 
-The CLI exposes `depot workspace list`, `depot workspace show`, `depot workspace rename`, and `depot workspace remove`.
+The CLI exposes `depot workspace list`, `depot workspace show`, `depot workspace rename`, `depot workspace remove`, and `depot workspace add` (alias `link`) to attach an existing folder to an existing project.
+
+## Project Repos
+
+A project repo is an optional registry entry that names a git repo belonging to a project, so `depot` can target it for git-aware operations.
+
+Project repos live in the `project_repo` table. Each row stores:
+
+- the project it belongs to
+- a `name` unique within the project (for example `front`, `api`, `common`)
+- a `path` (absolute, or relative to the workspace)
+- a base branch
+
+When the registry is empty for a project, `depot` falls back to a single **implicit repo** rooted at the workspace path. There is no auto-discovery of sibling repositories: anything beyond the implicit case must be registered explicitly with `depot project repo add`.
+
+### Two ways to map a project to disk
+
+Both modes use the same model — only the contents of `project_repo` change.
+
+**Mono-repo (classic).** The project folder _is_ a git repo. One workspace points at it, the project has no `project_repo` rows, and the implicit repo covers all git operations.
+
+```
+~/code/my-app          ← workspace, also the git repo (implicit project_repo)
+  ├── .git
+  ├── src/
+  └── package.json
+```
+
+**Multi-repo (shell root).** The workspace folder is a "shell" that holds agent configuration (`CLAUDE.md`, `.claude/`, scripts) and may have its own `.git`. The actual code lives in sibling sub-folders, each its own git repo with its own remote, registered as `project_repo` rows with paths relative to the workspace.
+
+```
+~/code/platform        ← workspace (shell root; may carry its own .git for config)
+  ├── CLAUDE.md
+  ├── api/             ← project_repo "api"     (path "api")
+  ├── front/           ← project_repo "front"   (path "front")
+  └── common/          ← project_repo "common"  (path "common")
+```
+
+### Things `depot` does not do
+
+`depot` tracks where the code lives so it can route git-aware actions. It does not set up that code. In particular:
+
+- `depot` never creates or deletes a folder on disk. `depot init` and `depot workspace add` register an existing path; they do not materialise one.
+- `depot` does not create or remove git worktrees, copies of the project, branches, or development environments. That belongs to your shell tooling, IDE, or an external skill.
+- `depot` does not enforce a branch-naming convention or pick a branch for you.
+
+When a worktree or sibling clone is created externally, attach it with `depot workspace add --project <id|name>` so `depot` can resolve it.
 
 ## PRDs
 
@@ -65,7 +112,12 @@ Key behaviors:
 - `depot prd update` updates a draft PRD in place.
 - `depot prd ready` marks a draft PRD as ready.
 - `depot prd activate` moves a ready PRD to `in_progress` and attaches it to the current workspace.
-- only one PRD can be `in_progress` in a workspace at a time
+
+### One active PRD per workspace
+
+`depot prd activate` enforces a hard rule: a workspace can have **at most one PRD in status `in_progress` at any time**. Attempting to activate a second PRD against the same workspace fails with `WorkspaceAlreadyHasActivePrdError`, naming the PRD that already holds the slot.
+
+This is what makes the workspace the unit of agent focus: the activated PRD plus its workspace path are how `depot` knows what the current session is supposed to be working on. To work on a second PRD in parallel, attach a different folder (typically a git worktree) as a separate workspace with `depot workspace add`, and activate the second PRD from there.
 
 ### Revisioning
 

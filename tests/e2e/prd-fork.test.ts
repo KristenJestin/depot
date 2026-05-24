@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { eq } from "drizzle-orm";
 import { prdRevisions } from "#/db/schema";
 import * as Projects from "#/modules/projects/domain";

@@ -1,12 +1,8 @@
 import { Effect } from "effect";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import path from "node:path";
-import { RepoNotRegisteredError, ShaNotFoundError } from "#/shared/errors";
+import { RepoNotRegisteredError } from "#/shared/errors";
 import { Db } from "#/services/database";
 import { resolveProjectRepos, type ResolvedRepo } from "#/modules/projects/repos";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Assert that `repoRootPath` belongs to the project's repo set.
@@ -36,18 +32,4 @@ export const assertRepoRegistered = (
         knownRepos: repos.map((r) => r.name),
       }),
     );
-  });
-
-/**
- * Assert that `sha` resolves to a commit object in the git repo at `repoPath`.
- */
-export const assertShaExists = (
-  repoPath: string,
-  sha: string,
-): Effect.Effect<void, ShaNotFoundError> =>
-  Effect.tryPromise({
-    try: async () => {
-      await execFileAsync("git", ["-C", repoPath, "cat-file", "-e", `${sha}^{commit}`]);
-    },
-    catch: () => new ShaNotFoundError({ repoPath, sha }),
   });

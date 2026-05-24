@@ -99,12 +99,22 @@ const listCommand = command({
       alias: "w",
       description: "Filter by current workspace only (default shows whole project)",
     },
+    repo: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description:
+        "Restrict to a single registered project_repo (multi-repo projects). Skips historical rows whose attribution is null.",
+    },
   },
-  run: async ({ args, ws, output }) => {
+  run: async ({ args, ws, currentRepo, output }) => {
+    // PRD 0008/02: default --repo to the resolved currentRepo. Explicit --repo
+    // wins; mono-repo is unaffected because currentRepo is null when no
+    // project_repo is registered.
+    const effectiveRepoName = args.repo ?? currentRepo?.name;
     const entries = await runEffect(
       DomainActivity.listActivity({
         projectId: ws.projectId,
         workspaceId: args.workspace ? ws.id : undefined,
+        repoName: effectiveRepoName,
         limit: args.last,
       }),
     );
@@ -124,7 +134,8 @@ const listCommand = command({
     for (const e of entries) {
       const p = JSON.parse(e.payload) as Record<string, unknown>;
       const summary = summarizeActivityPayload(e.eventType, p);
-      output.print(`${formatDate(e.createdAt)}  ${e.eventType}  ${summary}`);
+      const repoTag = e.repoName ? `  [${e.repoName}]` : "";
+      output.print(`${formatDate(e.createdAt)}  ${e.eventType}${repoTag}  ${summary}`);
     }
   },
 });

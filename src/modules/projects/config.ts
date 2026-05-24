@@ -5,7 +5,7 @@ import { Db } from "#/services/database";
 import { dbQuery } from "#/shared/db";
 import type { ActivitySource } from "#/shared/validator";
 
-const KNOWN_KEYS = new Set(["baseBranch", "defaultDocProfile", "branchNamingConvention"]);
+const KNOWN_KEYS = new Set(["baseBranch", "defaultDocProfile"]);
 
 export const setConfig = (
   projectId: string,

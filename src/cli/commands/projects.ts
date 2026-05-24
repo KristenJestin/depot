@@ -595,12 +595,16 @@ const directiveRunCommand = command({
     },
   },
   run: async ({ args, ws, output }) => {
-    const result = await runEffect(DomainDirectives.runDirective(args.id, { wsPath: ws.path }));
+    const result = await runEffect(
+      DomainDirectives.runDirective(args.id, { wsPath: ws.path, source: "human" }),
+    );
     if (output.isJson()) output.success(result);
     else {
       output.print(
         `Directive ${args.id} ${result.ok ? "OK" : "FAILED"} in ${result.durationMs}ms (exit=${result.exitCode})`,
       );
+      const trace = DomainDirectives.formatSelectionTrace(result.selection);
+      if (trace) output.print(trace);
       if (result.stdout) output.print(`-- stdout --\n${result.stdout}`);
       if (result.stderr) output.print(`-- stderr --\n${result.stderr}`);
     }

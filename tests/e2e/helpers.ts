@@ -1,4 +1,4 @@
-import { beforeEach } from "vitest";
+import { beforeEach } from "vite-plus/test";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { openDatabaseWith, type Database } from "#/db/client";
 import { workspaces, type WorkspaceRow } from "#/db/schema";

@@ -49,15 +49,6 @@ export class RepoNotRegisteredError extends Data.TaggedError("RepoNotRegisteredE
   }
 }
 
-export class ShaNotFoundError extends Data.TaggedError("ShaNotFoundError")<{
-  repoPath: string;
-  sha: string;
-}> {
-  get message() {
-    return `Commit '${this.sha}' does not exist in repo '${this.repoPath}'.`;
-  }
-}
-
 // ── PRDs ──────────────────────────────────────────────────────────────────────
 
 export class PrdNotFoundError extends Data.TaggedError("PrdNotFoundError")<{
@@ -109,6 +100,16 @@ export class DependencyNotDoneError extends Data.TaggedError("DependencyNotDoneE
 }> {
   get message() {
     return `Cannot complete task: dependency '${this.depId}' is not done (status: '${this.depStatus}')`;
+  }
+}
+
+// ── ADRs ──────────────────────────────────────────────────────────────────────
+
+export class AdrNotFoundError extends Data.TaggedError("AdrNotFoundError")<{
+  id: string;
+}> {
+  get message() {
+    return `ADR not found: ${this.id}`;
   }
 }
 

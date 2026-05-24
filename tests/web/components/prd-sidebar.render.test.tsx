@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { PrdSidebar } from "#/web/components/prd-sidebar";
 import type { DetailSummary, RevisionEntry } from "#/web/lib/prd-view-model";
@@ -76,16 +76,7 @@ describe("PrdSidebar", () => {
           updatedAt: now,
           readyAt: now,
           activatedAt: now,
-
-          activatedAtSha: null,
-
-          doneAtSha: null,
-
-          mergedAtSha: null,
-
           suggestedCommitMessage: null,
-
-          worktreePath: null,
         }}
         workspace={{ id: "ws-1", path: "D:/Projects/depot", label: "depot" }}
         revisions={revisions}
@@ -94,6 +85,7 @@ describe("PrdSidebar", () => {
           {
             id: "activity-1",
             taskId: null,
+            repoName: null,
             eventType: "prd_activated",
             payload: {},
             source: "ai",

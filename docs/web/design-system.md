@@ -69,23 +69,18 @@ When adding a new primitive:
 Pages are assembled from a small set of layouts from
 [devl.dev](https://www.devl.dev):
 
-| Route family                                   | Layout                                 | Component(s)                                                       |
-| ---------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------ |
-| App shell (`__root.tsx`)                       | `app-shell`                            | `app-shell.tsx` + `app-sidebar.tsx` (`<AppShell>`, `<AppSidebar>`) |
-| PRD detail (`prds.$id.tsx`)                    | `three-pane`                           | `three-pane.tsx` (`<ThreePane>`)                                   |
-| Review diff (`prds.$id.review-diff.tsx`)       | `split-resizable` + `floating-toolbar` | `ui/resizable-panel.tsx` (`<ResizableSplit>`, `<FloatingToolbar>`) |
-| Project settings (`projects.$id.settings.tsx`) | `docs-tree`                            | `settings-tree.tsx` (`<SettingsTree>`)                             |
-| Other pages (lists, docs)                      | `app-shell` single column              | `page-shell.tsx` (`<PageShell>`/`<PageTopBar>`/`<PageContent>`)    |
+| Route family                                   | Layout                    | Component(s)                                                       |
+| ---------------------------------------------- | ------------------------- | ------------------------------------------------------------------ |
+| App shell (`__root.tsx`)                       | `app-shell`               | `app-shell.tsx` + `app-sidebar.tsx` (`<AppShell>`, `<AppSidebar>`) |
+| PRD detail (`prds.$id.tsx`)                    | `three-pane`              | `three-pane.tsx` (`<ThreePane>`)                                   |
+| Project settings (`projects.$id.settings.tsx`) | `docs-tree`               | `settings-tree.tsx` (`<SettingsTree>`)                             |
+| Other pages (lists, docs)                      | `app-shell` single column | `page-shell.tsx` (`<PageShell>`/`<PageTopBar>`/`<PageContent>`)    |
 
 - **`app-shell`** — left sidebar (`<AppSidebar>`: project switcher, contextual
   nav, "new project" link; collapse state persisted in `localStorage` via
   `lib/use-persisted-state.ts`) + main content. No top nav.
 - **`three-pane`** — left: tasks/phases; center: PRD content; right: activity +
   reviews (fine, collapsible).
-- **`split-resizable`** — draggable divider between context panel and diff;
-  split position persisted in `localStorage`. `floating-toolbar` keeps the
-  commit / push / submit-review actions pinned to the bottom regardless of
-  scroll.
 - **`docs-tree`** — tree sidebar (Configuration / Repos / Directives / Doc
   profiles) + main form pane.
 

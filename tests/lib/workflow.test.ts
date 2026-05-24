@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import fs from "node:fs/promises";
@@ -8,7 +8,7 @@ import { createTestDb } from "../helpers/db";
 import { resolveMigrationsFolder } from "../helpers/db";
 import type { Database } from "#/db/client";
 import { prdRevisions } from "#/db/schema";
-import { resolveWorktreeMainPath } from "#/modules/workspaces/domain";
+import { resolveWorktreeMainPath, workspaceExistsOnDisk } from "#/modules/workspaces/domain";
 import {
   createProject,
   listProjects,
@@ -113,6 +113,22 @@ describe("projects", () => {
 // ── Workspaces ──────────────────────────────────────────────────────────────
 
 describe("workspaces", () => {
+  // resolveWorkspace now masks workspaces whose path does not exist on disk,
+  // so resolution tests need real directories instead of fixed fake paths.
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function createTempWorkspaceDir(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), "depot-resolve-test-"));
+    tempDirs.push(dir);
+    return dir;
+  }
+
   it("adds a workspace to a project", async () => {
     const project = await createProject(db, { name: "my-app" });
     const ws = await addWorkspace(db, {
@@ -153,35 +169,33 @@ describe("workspaces", () => {
     }
 
     const project = await createProject(db, { name: "my-app" });
+    const wsDir = await createTempWorkspaceDir();
     await addWorkspace(db, {
       projectId: project.id,
-      path: "D:\\Users\\Example\\Depot",
+      path: wsDir,
     });
 
-    const resolved = await resolveWorkspace(db, "d:/users/example/depot/src/index.ts");
+    const lookupPath = path.join(wsDir.replace(/\\/g, "/").toLowerCase(), "src/index.ts");
+    const resolved = await resolveWorkspace(db, lookupPath);
     expect(resolved).not.toBeNull();
     expect(resolved!.projectId).toBe(project.id);
-    expect(resolved!.path).toBe("d:/users/example/depot");
+    expect(resolved!.path).toBe(wsDir);
   });
 
   it("resolves workspace from exact path", async () => {
     const project = await createProject(db, { name: "my-app" });
-    await addWorkspace(db, {
-      projectId: project.id,
-      path: "/home/user/my-app",
-    });
-    const resolved = await resolveWorkspace(db, "/home/user/my-app");
+    const wsDir = await createTempWorkspaceDir();
+    await addWorkspace(db, { projectId: project.id, path: wsDir });
+    const resolved = await resolveWorkspace(db, wsDir);
     expect(resolved).not.toBeNull();
     expect(resolved!.projectId).toBe(project.id);
   });
 
   it("resolves workspace from nested subdirectory (longest prefix)", async () => {
     const project = await createProject(db, { name: "my-app" });
-    await addWorkspace(db, {
-      projectId: project.id,
-      path: "/home/user/my-app",
-    });
-    const resolved = await resolveWorkspace(db, "/home/user/my-app/src/components");
+    const wsDir = await createTempWorkspaceDir();
+    await addWorkspace(db, { projectId: project.id, path: wsDir });
+    const resolved = await resolveWorkspace(db, path.join(wsDir, "src/components"));
     expect(resolved).not.toBeNull();
     expect(resolved!.projectId).toBe(project.id);
   });
@@ -189,12 +203,12 @@ describe("workspaces", () => {
   it("resolves the longest matching prefix when multiple workspaces match", async () => {
     const p1 = await createProject(db, { name: "parent" });
     const p2 = await createProject(db, { name: "nested" });
-    await addWorkspace(db, { projectId: p1.id, path: "/home/user" });
-    await addWorkspace(db, {
-      projectId: p2.id,
-      path: "/home/user/my-app",
-    });
-    const resolved = await resolveWorkspace(db, "/home/user/my-app/src/index.ts");
+    const parentDir = await createTempWorkspaceDir();
+    const nestedDir = path.join(parentDir, "my-app");
+    await fs.mkdir(nestedDir, { recursive: true });
+    await addWorkspace(db, { projectId: p1.id, path: parentDir });
+    await addWorkspace(db, { projectId: p2.id, path: nestedDir });
+    const resolved = await resolveWorkspace(db, path.join(nestedDir, "src/index.ts"));
     expect(resolved).not.toBeNull();
     expect(resolved!.projectId).toBe(p2.id);
   });
@@ -1211,6 +1225,171 @@ describe("resolveWorktreeMainPath", () => {
     await fs.writeFile(path.join(submoduleDir, ".git"), `gitdir: ${gitdir}\n`);
 
     expect(await Effect.runPromise(resolveWorktreeMainPath(submoduleDir))).toBeNull();
+  });
+});
+
+// ── workspaceExistsOnDisk ──────────────────────────────────────────────────
+
+describe("workspaceExistsOnDisk", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function createTempDir(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), "depot-orphan-test-"));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it("returns true when the workspace path exists on disk", async () => {
+    const dir = await createTempDir();
+    expect(workspaceExistsOnDisk({ path: dir })).toBe(true);
+  });
+
+  it("returns false when the workspace path no longer exists", async () => {
+    const dir = await createTempDir();
+    await fs.rm(dir, { recursive: true, force: true });
+    expect(workspaceExistsOnDisk({ path: dir })).toBe(false);
+  });
+
+  it("returns false without throwing when fs.stat errors on the path", async () => {
+    // Traversing through a regular file produces an ENOTDIR — distinct from
+    // the plain ENOENT case above. The helper must swallow any fs error.
+    const dir = await createTempDir();
+    const filePath = path.join(dir, "regular-file");
+    await fs.writeFile(filePath, "hello");
+    const bogus = path.join(filePath, "nested");
+    expect(() => workspaceExistsOnDisk({ path: bogus })).not.toThrow();
+    expect(workspaceExistsOnDisk({ path: bogus })).toBe(false);
+  });
+});
+
+// ── resolveWorkspace orphan masking ────────────────────────────────────────
+
+describe("resolveWorkspace orphan masking", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function createTempDir(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), "depot-orphan-resolve-"));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it("ignores a workspace whose path was deleted on disk", async () => {
+    const project = await createProject(db, { name: "ghost-app" });
+    const wsDir = await createTempDir();
+    await addWorkspace(db, { projectId: project.id, path: wsDir });
+    await fs.rm(wsDir, { recursive: true, force: true });
+
+    const resolved = await resolveWorkspace(db, wsDir);
+    expect(resolved).toBeNull();
+  });
+
+  it("falls back to the next longest-prefix candidate when the best match is orphan", async () => {
+    const parent = await createProject(db, { name: "parent" });
+    const nested = await createProject(db, { name: "nested" });
+
+    const parentDir = await createTempDir();
+    const nestedDir = path.join(parentDir, "nested-app");
+    await fs.mkdir(nestedDir, { recursive: true });
+
+    await addWorkspace(db, { projectId: parent.id, path: parentDir });
+    await addWorkspace(db, { projectId: nested.id, path: nestedDir });
+
+    // Delete only the nested workspace — parent stays valid.
+    await fs.rm(nestedDir, { recursive: true, force: true });
+
+    const resolved = await resolveWorkspace(db, path.join(nestedDir, "src/index.ts"));
+    expect(resolved).not.toBeNull();
+    expect(resolved!.projectId).toBe(parent.id);
+  });
+});
+
+// ── resolveWorkspace resolution order ──────────────────────────────────────
+
+describe("resolveWorkspace resolution order", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function createTempDir(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), "depot-resolve-order-"));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it("prefers a worktree fallback over a too-broad ancestor workspace", async () => {
+    // A workspace registered at a broad path (e.g. ~) must not shadow a
+    // worktree whose main repo belongs to another registered project.
+    const ancestor = await createProject(db, { name: "too-broad" });
+    const real = await createProject(db, { name: "real-project" });
+
+    const ancestorDir = await createTempDir();
+    const mainRepoDir = path.join(ancestorDir, "real-project");
+    await fs.mkdir(mainRepoDir, { recursive: true });
+
+    const worktreeDir = path.join(ancestorDir, "worktree", "feature");
+    await fs.mkdir(worktreeDir, { recursive: true });
+    const gitdir = path.join(mainRepoDir, ".git", "worktrees", "feature");
+    await fs.mkdir(gitdir, { recursive: true });
+    await fs.writeFile(path.join(worktreeDir, ".git"), `gitdir: ${gitdir}\n`);
+
+    await addWorkspace(db, { projectId: ancestor.id, path: ancestorDir });
+    await addWorkspace(db, { projectId: real.id, path: mainRepoDir });
+
+    const resolved = await resolveWorkspace(db, worktreeDir);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.projectId).toBe(real.id);
+  });
+
+  it("returns the exact-match workspace even when a worktree fallback would resolve to another project", async () => {
+    // An exact cwd match must win unconditionally — the worktree fallback
+    // is only attempted when the cwd is below (not equal to) a registered path.
+    const exact = await createProject(db, { name: "exact" });
+    const other = await createProject(db, { name: "other" });
+
+    const exactDir = await createTempDir();
+    const otherMainRepo = await createTempDir();
+
+    const gitdir = path.join(otherMainRepo, ".git", "worktrees", "feature");
+    await fs.mkdir(gitdir, { recursive: true });
+    await fs.writeFile(path.join(exactDir, ".git"), `gitdir: ${gitdir}\n`);
+
+    await addWorkspace(db, { projectId: exact.id, path: exactDir });
+    await addWorkspace(db, { projectId: other.id, path: otherMainRepo });
+
+    const resolved = await resolveWorkspace(db, exactDir);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.projectId).toBe(exact.id);
+  });
+
+  it("falls back to an ancestor match only when no worktree fallback resolves", async () => {
+    // No worktree at all — the longest-prefix ancestor must still win.
+    const parent = await createProject(db, { name: "parent" });
+
+    const parentDir = await createTempDir();
+    const nestedDir = path.join(parentDir, "sub", "deep");
+    await fs.mkdir(nestedDir, { recursive: true });
+
+    await addWorkspace(db, { projectId: parent.id, path: parentDir });
+
+    const resolved = await resolveWorkspace(db, nestedDir);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.projectId).toBe(parent.id);
   });
 });
 

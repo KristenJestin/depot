@@ -39,8 +39,8 @@ export type RepoShipState = {
  * Pick the feature worktree for a repo. The main checkout is always the first
  * `git worktree list` entry and is never a ship target — only linked worktrees
  * are considered. When `worktreeHint` matches a linked worktree path, that one
- * wins (an explicit `prd.worktreePath` is authoritative). Otherwise, when the
- * repo has exactly one linked worktree, that is the feature worktree.
+ * wins. Otherwise, when the repo has exactly one linked worktree, that is the
+ * feature worktree.
  */
 export function pickFeatureWorktree(
   entries: WorktreeEntry[],

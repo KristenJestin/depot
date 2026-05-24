@@ -69,20 +69,13 @@ surface the output to the user (do not chain the doc sync, do not mark done).
 depot prd pre-ship-check <id>
 ```
 
-### 5. Mark done & capture merge SHAs
+### 5. Mark done
 
-- `depot prd done <id>` — this captures the done SHA for a mono-repo PRD; for a
-  multi-repo PRD the per-repo SHA capture is deferred to `capture-merge`.
-- If the merge was a **squash merge**, anchor the merge commit per repo once you
-  are on each base branch:
-  - Mono-repo: `depot prd capture-merge <id>` (bare — resolves the implicit
-    repo and captures HEAD).
-  - Multi-repo: `depot prd capture-merge <id> --repo <name1>=<sha1> --repo <name2>=<sha2> ...`
-    with the squash commit of each repo.
-    The squash rewrites each feature-branch HEAD into a single commit on the base
-    branch, which garbage-collects the activated/done SHAs. `capture-merge`
-    anchors the diff range to the squash commit(s) so the web review-diff page
-    stays usable retrospectively and covers every repo.
+- `depot prd done <id>` after every repo cleanup and pre-ship directive has
+  passed.
+- Depot no longer stores git SHAs or merge anchors. If the user needs the squash
+  commit for release notes, report it in the recap as plain terminal output
+  only; do not try to persist it in depot.
 
 ### 6. Chain doc sync (if not already done)
 
@@ -95,8 +88,7 @@ depot prd pre-ship-check <id>
 Output a per-repo recap. For **each repo**, one line listing:
 
 - the base branch pulled,
-- the worktree removed (or "no worktree"),
-- the merge SHA anchored (or "—" when not a squash merge).
+- the worktree removed (or "no worktree").
 
 Then a single line per PRD-level step (mark done, doc sync) — skipped vs done.
 

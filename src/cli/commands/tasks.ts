@@ -6,6 +6,7 @@ import type { TaskRow } from "#/db/schema";
 import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainPrds from "#/modules/prds/domain";
 import * as DomainReviews from "#/modules/reviews/domain";
+import * as DomainRepos from "#/modules/projects/repos";
 import { effortSchema, taskKindSchema } from "#/shared/schemas";
 import { getTaskDescriptionSections } from "#/modules/tasks/spec";
 import { formatDate } from "#/shared/utils";
@@ -82,6 +83,26 @@ async function resolveTaskId(
   return { ok: true, id: found.id };
 }
 
+/**
+ * Detect whether a CLI flag was passed more than once in the raw args.
+ *
+ * Citty resolves duplicate flags as "last wins" instead of erring, so for
+ * single-value flags we have to scan `ctx.rawArgs` ourselves when we want
+ * to refuse repetition outright. Used by `--repo` on tasks to enforce the
+ * 0..1 cardinality (a single repo per task).
+ */
+function flagRepeatedInRaw(rawArgs: readonly string[] | undefined, flag: string): boolean {
+  if (!rawArgs) return false;
+  let seen = 0;
+  for (const raw of rawArgs) {
+    if (raw === flag || raw.startsWith(`${flag}=`)) {
+      seen += 1;
+      if (seen > 1) return true;
+    }
+  }
+  return false;
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 const addCommand = command({
@@ -142,8 +163,19 @@ const addCommand = command({
       alias: "p",
       description: "Phase number this task belongs to (multi-phase PRDs only)",
     },
+    repo: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      expected: "a single repo name (from the PRD's repo scope)",
+      description: "Attach the task to a project_repo by name (must be in the PRD's repo scope)",
+    },
   },
-  run: async ({ args, output }) => {
+  run: async ({ args, rawArgs, output }) => {
+    if (flagRepeatedInRaw(rawArgs, "--repo")) {
+      return output.error(
+        "conflicting_input",
+        "A task can be attached to at most one repo. Pass --repo only once; for a cross-repo change, split into separate tasks and link them with --depends.",
+      );
+    }
     const description = await resolveTextInput({
       output,
       value: args.desc,
@@ -184,6 +216,18 @@ const addCommand = command({
       }
     }
 
+    let repoId: string | null | undefined = undefined;
+    if (args.repo !== undefined) {
+      const repo = await runEffect(DomainRepos.getRepo(prd.projectId, args.repo));
+      if (!repo) {
+        return output.error(
+          "not_found",
+          `Repo '${args.repo}' is not registered for project ${prd.projectId}.`,
+        );
+      }
+      repoId = repo.id;
+    }
+
     const task = await runEffect(
       DomainTasks.createTask({
         prdRevisionId: prd.id,
@@ -194,6 +238,7 @@ const addCommand = command({
         kind: args.kind,
         dependsOn: dependencyIds,
         phaseNumber: args.phase,
+        repoId,
       }),
     );
 
@@ -538,8 +583,24 @@ const updateCommand = command({
       expected: "one of critical, major, minor, info",
       description: "Finding severity (review tasks only)",
     },
+    repo: {
+      // Citty turns `--no-repo` into `repo = false` (boolean negation of the
+      // flag). We accept either: a string (set the attachment by repo name) or
+      // `false` (clear the attachment, i.e. `--no-repo`). A repeat `--repo X
+      // --repo Y` would surface as an array and fail validation cleanly.
+      schema: Schema.Union(Schema.String.pipe(Schema.minLength(1)), Schema.Literal(false)),
+      expected: "a single repo name (or --no-repo to clear)",
+      description:
+        "Attach the task to a project_repo by name (must be in the PRD's repo scope). Use --no-repo to clear.",
+    },
   },
-  run: async ({ args, ws, output }) => {
+  run: async ({ args, rawArgs, ws, output }) => {
+    if (flagRepeatedInRaw(rawArgs, "--repo")) {
+      return output.error(
+        "conflicting_input",
+        "A task can be attached to at most one repo. Pass --repo only once; for a cross-repo change, split into separate tasks and link them with --depends.",
+      );
+    }
     const task = await findTaskByRef(args.taskId, ws, output);
 
     // Only PRD tasks (not review tasks) are subject to the draft-only guard
@@ -570,11 +631,12 @@ const updateCommand = command({
       args.depends === undefined &&
       args.addDepends === undefined &&
       args.removeDepends === undefined &&
-      args.severity === undefined
+      args.severity === undefined &&
+      args.repo === undefined
     ) {
       return output.error(
         "no_changes",
-        "No changes provided. Use --title, --desc, --desc-file, --criteria, --criteria-file, --effort, --kind, --phase, --depends, --add-depends, --remove-depends, or --severity.",
+        "No changes provided. Use --title, --desc, --desc-file, --criteria, --criteria-file, --effort, --kind, --phase, --depends, --add-depends, --remove-depends, --severity, --repo, or --no-repo.",
       );
     }
 
@@ -611,6 +673,22 @@ const updateCommand = command({
       fileFlag: "--criteria-file",
     });
 
+    let repoId: string | null | undefined = undefined;
+    if (args.repo === false) {
+      repoId = null;
+    } else if (typeof args.repo === "string") {
+      const prd = await runEffect(DomainPrds.getPrd(task.prdRevisionId));
+      if (!prd) return output.error("not_found", `PRD not found: ${task.prdRevisionId}`);
+      const repo = await runEffect(DomainRepos.getRepo(prd.projectId, args.repo));
+      if (!repo) {
+        return output.error(
+          "not_found",
+          `Repo '${args.repo}' is not registered for project ${prd.projectId}.`,
+        );
+      }
+      repoId = repo.id;
+    }
+
     const updated = await runEffect(
       DomainTasks.updateTask(task.id, {
         title: args.title,
@@ -623,6 +701,7 @@ const updateCommand = command({
         addDependsOn: splitIds(args.addDepends),
         removeDependsOn: splitIds(args.removeDepends),
         severity: args.severity,
+        repoId,
       }),
     );
 

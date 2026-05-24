@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach } from "vite-plus/test";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { ResizableSplit } from "#/web/components/ui/resizable-panel";

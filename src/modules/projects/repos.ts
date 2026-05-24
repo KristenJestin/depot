@@ -1,20 +1,20 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
 import path from "node:path";
-import { projectRepos, type ProjectRepoRow } from "#/db/schema";
+import { projectRepos, type ProjectRepoRow, type WorkspaceRow } from "#/db/schema";
 import { Db } from "#/services/database";
 import { dbQuery } from "#/shared/db";
-import { generateId } from "#/shared/utils";
+import { generateId, normalizeWorkspacePath } from "#/shared/utils";
 import { ValidationError } from "#/shared/errors";
-import { resolveGitRoot } from "#/lib/git";
+import { resolveGitRoot, resolveMainRepoRoot } from "#/lib/git";
 import { getConfig } from "#/modules/projects/config";
 
 /**
  * A resolved repo for a project. Either a real `project_repo` row or the
  * implicit single repo derived from the workspace path when the project has
  * no registered repos. `resolveProjectRepos` is the one function every other
- * consumer (capture-merge, guard, diff API) goes through so they never have
- * to branch on mono- vs multi-repo.
+ * consumer (directive runs, guards, repo-aware context) goes through so they
+ * never have to branch on mono- vs multi-repo.
  */
 export type ResolvedRepo = {
   id: string | null;
@@ -27,10 +27,15 @@ export type ResolvedRepo = {
 
 const IMPLICIT_REPO_NAME = "(default)";
 
-const toResolved = (row: ProjectRepoRow): ResolvedRepo => ({
+const resolveRegisteredRepoPath = (repoPath: string, workspacePath: string): string =>
+  path.isAbsolute(repoPath) ? path.resolve(repoPath) : path.resolve(workspacePath, repoPath);
+
+const normalizedPathKey = (p: string): string => normalizeWorkspacePath(path.resolve(p));
+
+const toResolved = (row: ProjectRepoRow, workspacePath: string): ResolvedRepo => ({
   id: row.id,
   name: row.name,
-  path: row.path,
+  path: resolveRegisteredRepoPath(row.path, workspacePath),
   isPrimary: row.isPrimary,
   baseBranch: row.baseBranch,
   implicit: false,
@@ -125,6 +130,46 @@ export const updateRepo = (
   });
 
 /**
+ * Resolve the `project_repo` row that `cwd` belongs to, relative to a
+ * registered workspace. Returns `null` for any legitimate case where no
+ * specific sub-repo applies: mono-repo project (no `project_repo` registered),
+ * cwd at the shell root of a multi-repo project (outside every registered
+ * sub-repo), or non-git workspace.
+ *
+ * The matching path is the **main** repo root resolved via
+ * `git rev-parse --git-common-dir`, so a linked worktree of a sub-repo is
+ * recognised as that sub-repo even when the worktree directory itself lives
+ * elsewhere on disk. The longest-prefix match wins, so nested repos resolve to
+ * the innermost registered one.
+ */
+export const resolveCurrentRepo = (ws: WorkspaceRow, cwd: string) =>
+  Effect.gen(function* () {
+    const repos = yield* listRepos(ws.projectId);
+    if (repos.length === 0) return null;
+    const repoRoot = yield* resolveMainRepoRoot(cwd);
+    if (!repoRoot) return null;
+    const normalizedRoot = normalizedPathKey(repoRoot);
+    const wsPath = path.resolve(ws.path);
+
+    let best: ProjectRepoRow | null = null;
+    let bestLen = -1;
+    for (const repo of repos) {
+      const repoAbs = path.isAbsolute(repo.path) ? repo.path : path.resolve(wsPath, repo.path);
+      const normalizedRepoAbs = normalizedPathKey(repoAbs);
+      if (
+        normalizedRoot === normalizedRepoAbs ||
+        normalizedRoot.startsWith(normalizedRepoAbs + "/")
+      ) {
+        if (normalizedRepoAbs.length > bestLen) {
+          best = repo;
+          bestLen = normalizedRepoAbs.length;
+        }
+      }
+    }
+    return best;
+  });
+
+/**
  * Resolve the registered `project_repo` whose root matches the git repo
  * containing `cwdOrPath`. Returns `null` when the path is not inside a git
  * repo or when no registered repo matches the resolved root.
@@ -135,8 +180,8 @@ export const resolveRepoFromPath = (projectId: string, cwdOrPath: string) =>
     if (repos.length === 0) return null;
     const gitRoot = yield* resolveGitRoot(cwdOrPath);
     if (!gitRoot) return null;
-    const normalizedRoot = path.resolve(gitRoot);
-    const match = repos.find((repo) => path.resolve(repo.path) === normalizedRoot);
+    const normalizedRoot = normalizedPathKey(gitRoot);
+    const match = repos.find((repo) => normalizedPathKey(repo.path) === normalizedRoot);
     return match ?? null;
   });
 
@@ -151,7 +196,7 @@ export const resolveProjectRepos = (projectId: string, workspacePath: string) =>
   Effect.gen(function* () {
     const repos = yield* listRepos(projectId);
     if (repos.length > 0) {
-      return repos.map(toResolved);
+      return repos.map((repo) => toResolved(repo, workspacePath));
     }
     const gitRoot = yield* resolveGitRoot(workspacePath);
     const baseBranchConfig = yield* getConfig(projectId, "baseBranch");

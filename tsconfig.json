@@ -12,7 +12,8 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "paths": {
-      "#/*": ["./src/*"]
+      "#/*": ["./src/*"],
+      "vitest": ["./node_modules/vite-plus/dist/test/index.d.ts"]
     }
   },
   "include": ["src", "tests"],

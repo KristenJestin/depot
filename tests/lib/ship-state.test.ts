@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 import { Effect } from "effect";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";

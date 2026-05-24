@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 
 /**
@@ -59,6 +59,25 @@ const PRDS = {
   ],
 };
 
+type MockWorkspace = {
+  id: string;
+  path: string;
+  label: string | null;
+  projectId: string;
+  projectName: string;
+  isOrphan?: boolean;
+};
+
+let mockWorkspaces: MockWorkspace[] = [
+  {
+    id: "ws-1",
+    path: "/home/u/acme",
+    label: "acme",
+    projectId: "proj-1",
+    projectName: "Acme",
+  },
+];
+
 vi.mock("#/web/lib/queries", () => ({
   prdsQuery: { list: { options: () => ({ queryKey: ["prds"] }) } },
   contextQuery: { options: () => ({ queryKey: ["context"] }) },
@@ -70,20 +89,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => {
     if (queryKey[0] === "prds") return { data: PRDS };
     if (queryKey[0] === "context") return { data: { workspaceId: "ws-1" } };
-    if (queryKey[0] === "workspaces")
-      return {
-        data: {
-          workspaces: [
-            {
-              id: "ws-1",
-              path: "/home/u/acme",
-              label: "acme",
-              projectId: "proj-1",
-              projectName: "Acme",
-            },
-          ],
-        },
-      };
+    if (queryKey[0] === "workspaces") return { data: { workspaces: mockWorkspaces } };
     return { data: undefined };
   },
   useMutation: () => ({ mutate: vi.fn<() => void>(), isPending: false }),
@@ -115,6 +121,15 @@ describe("AppSidebar", () => {
   beforeEach(() => {
     pathname = "/";
     lastMatchParams = {};
+    mockWorkspaces = [
+      {
+        id: "ws-1",
+        path: "/home/u/acme",
+        label: "acme",
+        projectId: "proj-1",
+        projectName: "Acme",
+      },
+    ];
     installLocalStorage();
     window.localStorage.clear();
   });
@@ -182,5 +197,33 @@ describe("AppSidebar", () => {
 
     const switcher = screen.getByRole("button", { name: "Switch workspace" });
     expect(within(switcher).getByText("acme")).toBeInTheDocument();
+  });
+
+  it("never lists workspaces flagged as orphan in the switcher dropdown", async () => {
+    mockWorkspaces = [
+      {
+        id: "ws-1",
+        path: "/home/u/acme",
+        label: "acme",
+        projectId: "proj-1",
+        projectName: "Acme",
+        isOrphan: false,
+      },
+      {
+        id: "ws-2",
+        path: "/home/u/ghost",
+        label: "ghost-orphan",
+        projectId: "proj-1",
+        projectName: "Acme",
+        isOrphan: true,
+      },
+    ];
+
+    await renderSidebar();
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch workspace" }));
+
+    expect(screen.getAllByText("acme").length).toBeGreaterThan(0);
+    expect(screen.queryByText("ghost-orphan")).not.toBeInTheDocument();
   });
 });

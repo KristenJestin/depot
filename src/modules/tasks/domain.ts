@@ -21,6 +21,7 @@ import {
 import { dbQuery } from "#/shared/db";
 import { logActivity } from "#/modules/activity/domain";
 import { getPrd } from "#/modules/prds/domain";
+import { assertTaskRepoInPrdScope } from "#/modules/prds/repos";
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ export const createTask = (input: {
   dependsOn?: string[];
   phaseNumber?: number;
   kind?: TaskKind;
+  repoId?: string | null;
 }) =>
   Effect.gen(function* () {
     if (!input.doneCriteria || input.doneCriteria.trim() === "") {
@@ -54,6 +56,8 @@ export const createTask = (input: {
     }
 
     const db = yield* Db;
+
+    yield* assertTaskRepoInPrdScope(input.prdRevisionId, input.repoId ?? null);
 
     const existing = yield* dbQuery(() =>
       db.query.tasks.findMany({ where: { prdRevisionId: input.prdRevisionId } }),
@@ -78,6 +82,7 @@ export const createTask = (input: {
           kind: input.kind ?? "slice",
           phaseNumber: input.phaseNumber ?? null,
           status: "pending",
+          repoId: input.repoId ?? null,
           blockedReason: null,
           skipReason: null,
           startedAt: null,
@@ -113,6 +118,7 @@ export const updateTask = (
     addDependsOn?: string[];
     removeDependsOn?: string[];
     severity?: SeverityLevel | null;
+    repoId?: string | null;
   },
 ) =>
   Effect.gen(function* () {
@@ -133,6 +139,7 @@ export const updateTask = (
         ? "dependsOn"
         : null,
       changes.severity !== undefined ? "severity" : null,
+      changes.repoId !== undefined ? "repoId" : null,
     ].filter((field): field is string => field !== null);
 
     if (fields.length === 0) {
@@ -187,6 +194,10 @@ export const updateTask = (
       nextDependsOn = JSON.stringify(resolved);
     }
 
+    if (changes.repoId !== undefined) {
+      yield* assertTaskRepoInPrdScope(task.prdRevisionId, changes.repoId);
+    }
+
     const storedDescription =
       changes.description !== undefined
         ? normalizeTaskDescriptionForStorage(changes.description)
@@ -205,6 +216,7 @@ export const updateTask = (
           phaseNumber: changes.phaseNumber !== undefined ? changes.phaseNumber : task.phaseNumber,
           dependsOn: nextDependsOn ?? task.dependsOn,
           severity: changes.severity !== undefined ? changes.severity : task.severity,
+          repoId: changes.repoId !== undefined ? changes.repoId : task.repoId,
         })
         .where(eq(tasks.id, id))
         .returning(),

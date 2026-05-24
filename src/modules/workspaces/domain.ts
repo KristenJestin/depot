@@ -6,9 +6,33 @@ import { Db } from "#/services/database";
 import { WorkspaceNotFoundError, WorkspaceHasLinkedPrdsError } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import fs from "node:fs/promises";
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
 // ── Functions ─────────────────────────────────────────────────────────────────
+
+/**
+ * Check whether the workspace's path still exists on disk.
+ * Synchronous and swallowing: any fs error (ENOENT, ENOTDIR, EACCES, …)
+ * returns `false` rather than throwing — the resolution path never breaks
+ * because a workspace points into the void.
+ */
+export function workspaceExistsOnDisk(ws: { path: string }): boolean {
+  try {
+    statSync(ws.path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function canonicalizeWorkspacePathForStorage(input: string): string {
+  try {
+    return realpathSync.native(input);
+  } catch {
+    return normalizeWorkspacePath(input);
+  }
+}
 
 /**
  * Walk up from `startDir` looking for a `.git` file (not directory).
@@ -46,7 +70,7 @@ export const addWorkspace = (input: { projectId: string; path: string; label?: s
   Effect.gen(function* () {
     const db = yield* Db;
     const id = generateId();
-    const canonicalPath = normalizeWorkspacePath(input.path);
+    const canonicalPath = canonicalizeWorkspacePathForStorage(input.path);
     const rows = yield* dbQuery(() =>
       db
         .insert(workspaces)
@@ -62,10 +86,20 @@ export const addWorkspace = (input: { projectId: string; path: string; label?: s
   });
 
 /**
- * Resolve the current workspace using longest-prefix matching on canonical paths.
- * Commands run from any nested subdirectory resolve to the correct workspace.
- * If no match is found and the current path is inside a git worktree,
- * falls back to matching against the main repo path.
+ * Resolve the current workspace from a cwd.
+ *
+ * Resolution order — designed so a too-broad ancestor workspace (e.g. one
+ * registered at `~`) cannot shadow a worktree that belongs to another
+ * registered project:
+ *
+ *   1. Exact match (cwd == workspace.path) — always wins.
+ *   2. Git worktree fallback (`resolveWorktreeMainPath` → match against
+ *      registered workspaces) — preferred over a mere ancestor match.
+ *   3. Longest-prefix ancestor match — last resort.
+ *   4. Otherwise `null`.
+ *
+ * Orphan workspaces (path deleted on disk) are masked: the row stays in
+ * the DB but never wins a match.
  */
 export const resolveWorkspace = (currentPath: string) =>
   Effect.gen(function* () {
@@ -73,10 +107,15 @@ export const resolveWorkspace = (currentPath: string) =>
     const allWorkspaces = yield* dbQuery(() => db.query.workspaces.findMany());
     const canonicalCurrentPath = normalizeWorkspacePath(currentPath);
 
-    const findBestMatch = (candidatePath: string) => {
-      let bestMatch: (typeof allWorkspaces)[number] | null = null;
+    const liveWorkspaces = allWorkspaces.filter((ws) => workspaceExistsOnDisk(ws));
+
+    const findExactMatch = (candidatePath: string) =>
+      liveWorkspaces.find((ws) => normalizeWorkspacePath(ws.path) === candidatePath) ?? null;
+
+    const findLongestAncestor = (candidatePath: string) => {
+      let bestMatch: (typeof liveWorkspaces)[number] | null = null;
       let bestLen = 0;
-      for (const ws of allWorkspaces) {
+      for (const ws of liveWorkspaces) {
         const wsPath = normalizeWorkspacePath(ws.path);
         if (candidatePath === wsPath || candidatePath.startsWith(wsPath + "/")) {
           if (wsPath.length > bestLen) {
@@ -88,13 +127,16 @@ export const resolveWorkspace = (currentPath: string) =>
       return bestMatch;
     };
 
-    const directMatch = findBestMatch(canonicalCurrentPath);
-    if (directMatch) return directMatch;
+    const exactMatch = findExactMatch(canonicalCurrentPath);
+    if (exactMatch) return exactMatch;
 
     const mainRepoPath = yield* resolveWorktreeMainPath(currentPath);
-    if (!mainRepoPath) return null;
+    if (mainRepoPath) {
+      const worktreeMatch = findLongestAncestor(normalizeWorkspacePath(mainRepoPath));
+      if (worktreeMatch) return worktreeMatch;
+    }
 
-    return findBestMatch(normalizeWorkspacePath(mainRepoPath));
+    return findLongestAncestor(canonicalCurrentPath);
   });
 
 export const listWorkspaces = (filter: { projectId?: string } = {}) =>

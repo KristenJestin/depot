@@ -33,16 +33,6 @@ export const KNOWN_PROJECT_CONFIG_KEYS: Record<string, ProjectConfigKeyDescripto
     validate: (v) =>
       v.length > 0 ? { ok: true } : { ok: false, reason: "Profile name must be non-empty" },
   },
-  branchNamingConvention: {
-    label: "Branch naming convention",
-    description:
-      "Pattern used by orchestrators to derive branch names from PRD IDs (e.g. 'feat/{prdId}').",
-    default: "feat/{prdId}",
-    validate: (v) =>
-      v.includes("{prdId}")
-        ? { ok: true }
-        : { ok: false, reason: "Pattern must contain '{prdId}' placeholder" },
-  },
   protectedFiles: {
     label: "Protected files",
     description:

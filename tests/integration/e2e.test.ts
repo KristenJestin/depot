@@ -1,5 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 import { eq } from "drizzle-orm";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
 import { prdRevisions } from "#/db/schema";
@@ -26,10 +29,17 @@ import {
  */
 describe("end-to-end workflow", () => {
   let db: Database;
+  const tempDirs: string[] = [];
 
   beforeEach(async () => {
     const result = await createTestDb();
     db = result.db;
+  });
+
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("runs a complete agent session lifecycle", async () => {
@@ -40,15 +50,18 @@ describe("end-to-end workflow", () => {
     });
     expect(project.status).toBe("active");
 
-    // 2. Agent links workspace
+    // 2. Agent links workspace (real dir on disk so resolveWorkspace doesn't
+    //    mask it as orphan).
+    const wsDir = await fs.mkdtemp(path.join(tmpdir(), "depot-e2e-"));
+    tempDirs.push(wsDir);
     const ws = await addWorkspace(db, {
       projectId: project.id,
-      path: "/home/agent/depot",
+      path: wsDir,
       label: "main",
     });
 
     // 3. Workspace resolves from nested path
-    const resolved = await resolveWorkspace(db, "/home/agent/depot/src/lib/workflow.ts");
+    const resolved = await resolveWorkspace(db, path.join(wsDir, "src/lib/workflow.ts"));
     expect(resolved).not.toBeNull();
     expect(resolved!.id).toBe(ws.id);
 

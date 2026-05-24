@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import * as fs from "node:fs/promises";
@@ -12,8 +12,10 @@ import {
   removeRepo,
   resolveRepoFromPath,
   resolveProjectRepos,
+  resolveCurrentRepo,
 } from "#/modules/projects/repos";
-import { assertRepoRegistered, assertShaExists } from "#/lib/repo-guard";
+import { addWorkspace } from "#/modules/workspaces/domain";
+import { assertRepoRegistered } from "#/lib/repo-guard";
 import type { Database } from "#/db/client";
 
 async function makeGitRepo(): Promise<{ root: string; sha: string }> {
@@ -126,13 +128,112 @@ describe("project repos", () => {
       run(assertRepoRegistered(projectId, foreign.root, registered.root)),
     ).rejects.toThrow(/not registered/);
   });
+});
 
-  it("assertShaExists accepts a real SHA and rejects an unknown one", async () => {
-    const gitRepo = await makeGitRepo();
-    tempDirs.push(gitRepo.root);
-    await expect(run(assertShaExists(gitRepo.root, gitRepo.sha))).resolves.toBeUndefined();
-    await expect(
-      run(assertShaExists(gitRepo.root, "0000000000000000000000000000000000000000")),
-    ).rejects.toThrow(/does not exist/);
+describe("resolveCurrentRepo", () => {
+  let db: Database;
+  let run: ReturnType<typeof makeRun>;
+  let projectId: string;
+  const tempDirs: string[] = [];
+
+  beforeEach(async () => {
+    db = createTestDb().db;
+    run = makeRun(db);
+    const project = await run(createProject({ name: "test" }));
+    projectId = project.id;
+  });
+
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function makeTmpDir(prefix = "depot-current-repo-"): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), prefix));
+    const real = await fs.realpath(dir);
+    tempDirs.push(real);
+    return real;
+  }
+
+  async function initGit(dir: string): Promise<void> {
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["config", "user.email", "t@t.t"], { cwd: dir });
+    execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+    await fs.writeFile(path.join(dir, "f.txt"), "hello");
+    execFileSync("git", ["add", "."], { cwd: dir });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
+  }
+
+  it("returns null for a mono-repo project (no project_repo registered)", async () => {
+    const wsDir = await makeTmpDir();
+    await initGit(wsDir);
+    const ws = await run(addWorkspace({ projectId, path: wsDir }));
+
+    const result = await run(resolveCurrentRepo(ws, wsDir));
+    expect(result).toBeNull();
+  });
+
+  it("returns the matching project_repo when cwd is inside a registered sub-repo", async () => {
+    const wsDir = await makeTmpDir();
+    const apiDir = path.join(wsDir, "api");
+    const frontDir = path.join(wsDir, "front");
+    await fs.mkdir(apiDir, { recursive: true });
+    await fs.mkdir(frontDir, { recursive: true });
+    await initGit(apiDir);
+    await initGit(frontDir);
+
+    const ws = await run(addWorkspace({ projectId, path: wsDir }));
+    await run(addRepo({ projectId, name: "api", path: "api", isPrimary: true }));
+    const front = await run(addRepo({ projectId, name: "front", path: "front" }));
+
+    const nestedDir = path.join(frontDir, "src", "components");
+    await fs.mkdir(nestedDir, { recursive: true });
+
+    const result = await run(resolveCurrentRepo(ws, nestedDir));
+    expect(result?.id).toBe(front.id);
+    expect(result?.name).toBe("front");
+  });
+
+  it("returns null when cwd is at the shell root (outside any sub-repo)", async () => {
+    const wsDir = await makeTmpDir();
+    const apiDir = path.join(wsDir, "api");
+    await fs.mkdir(apiDir, { recursive: true });
+    await initGit(wsDir);
+    await initGit(apiDir);
+
+    const ws = await run(addWorkspace({ projectId, path: wsDir }));
+    await run(addRepo({ projectId, name: "api", path: "api" }));
+
+    const result = await run(resolveCurrentRepo(ws, wsDir));
+    expect(result).toBeNull();
+  });
+
+  it("resolves a git worktree of a sub-repo back to the matching project_repo", async () => {
+    const wsDir = await makeTmpDir();
+    const apiDir = path.join(wsDir, "api");
+    await fs.mkdir(apiDir, { recursive: true });
+    await initGit(apiDir);
+    execFileSync("git", ["branch", "feat"], { cwd: apiDir });
+
+    const worktreeParent = await makeTmpDir("depot-worktrees-");
+    const worktreePath = path.join(worktreeParent, "api-feat");
+    execFileSync("git", ["worktree", "add", "-q", worktreePath, "feat"], { cwd: apiDir });
+
+    const ws = await run(addWorkspace({ projectId, path: wsDir }));
+    const api = await run(addRepo({ projectId, name: "api", path: "api" }));
+
+    const result = await run(resolveCurrentRepo(ws, worktreePath));
+    expect(result?.id).toBe(api.id);
+    expect(result?.name).toBe("api");
+  });
+
+  it("returns null for a non-git workspace", async () => {
+    const wsDir = await makeTmpDir();
+    const ws = await run(addWorkspace({ projectId, path: wsDir }));
+    await run(addRepo({ projectId, name: "api", path: "api" }));
+
+    const result = await run(resolveCurrentRepo(ws, wsDir));
+    expect(result).toBeNull();
   });
 });

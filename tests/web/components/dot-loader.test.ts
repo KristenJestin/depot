@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { computeDelay } from "#/web/components/ui/dot-loader";
 
 describe("computeDelay", () => {

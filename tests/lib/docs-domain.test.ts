@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { createTestDb, makeRun } from "../helpers/db";
 import {
   registerDocArtifact,
@@ -205,81 +205,18 @@ describe("doc profiles + sync", () => {
     expect(range.sources[0]?.since).toBe("15 days ago");
   });
 
-  it("resolveDiffRange uses PRD SHAs when prdRevisionId is supplied", async () => {
-    const prd = await run(createPrd({ projectId, title: "P" }));
-    // Direct DB poke to simulate an activated PRD with a SHA captured.
-    const { prdRevisions } = await import("#/db/schema");
-    const { eq } = await import("drizzle-orm");
-    db.update(prdRevisions)
-      .set({ activatedAtSha: "deadbeef", doneAtSha: "feedbeef" })
-      .where(eq(prdRevisions.id, prd.id))
-      .run();
-
+  it("resolveDiffRange falls back to the HEAD~20 time window when no sinceExpr is provided", async () => {
     await run(
       createProfile({
         projectId,
-        name: "p",
+        name: "fallback",
         targetRoot: "./docs",
         sources: [{ name: "core", path: "./" }],
       }),
     );
-    const range = await run(
-      resolveDiffRange({ profileName: "p", projectId, prdRevisionId: prd.id }),
-    );
-    expect(range.sources[0]?.mode).toBe("sha");
-    expect(range.sources[0]?.since).toBe("deadbeef");
-    expect(range.sources[0]?.until).toBe("feedbeef");
-  });
-
-  it("resolveDiffRange falls back to mergedAtSha when only a squash merge was captured", async () => {
-    const prd = await run(createPrd({ projectId, title: "Squashed PRD" }));
-    const { prdRevisions } = await import("#/db/schema");
-    const { eq } = await import("drizzle-orm");
-    // No activatedAtSha — the PRD was merged (squash) without depot activation.
-    db.update(prdRevisions)
-      .set({ mergedAtSha: "5qua5hed" })
-      .where(eq(prdRevisions.id, prd.id))
-      .run();
-
-    await run(
-      createProfile({
-        projectId,
-        name: "squash-doc",
-        targetRoot: "./docs",
-        sources: [{ name: "core", path: "./" }],
-      }),
-    );
-    const range = await run(
-      resolveDiffRange({ profileName: "squash-doc", projectId, prdRevisionId: prd.id }),
-    );
-    expect(range.sources[0]?.mode).toBe("sha");
-    expect(range.sources[0]?.since).toBe("5qua5hed^");
-    expect(range.sources[0]?.until).toBe("5qua5hed");
-  });
-
-  it("resolveDiffRange anchors until on mergedAtSha when doneAtSha is unset", async () => {
-    const prd = await run(createPrd({ projectId, title: "Activated + squashed PRD" }));
-    const { prdRevisions } = await import("#/db/schema");
-    const { eq } = await import("drizzle-orm");
-    // Activated then squash-merged: activatedAtSha known, doneAtSha never
-    // captured — until falls back to the squash commit.
-    db.update(prdRevisions)
-      .set({ activatedAtSha: "ac71va7e", mergedAtSha: "5qua5hed" })
-      .where(eq(prdRevisions.id, prd.id))
-      .run();
-
-    await run(
-      createProfile({
-        projectId,
-        name: "merge-anchor-doc",
-        targetRoot: "./docs",
-        sources: [{ name: "core", path: "./" }],
-      }),
-    );
-    const range = await run(
-      resolveDiffRange({ profileName: "merge-anchor-doc", projectId, prdRevisionId: prd.id }),
-    );
-    expect(range.sources[0]?.since).toBe("ac71va7e");
-    expect(range.sources[0]?.until).toBe("5qua5hed");
+    const range = await run(resolveDiffRange({ profileName: "fallback", projectId }));
+    expect(range.sources[0]?.mode).toBe("time-window");
+    expect(range.sources[0]?.since).toBe("HEAD~20");
+    expect(range.sources[0]?.until).toBeNull();
   });
 });

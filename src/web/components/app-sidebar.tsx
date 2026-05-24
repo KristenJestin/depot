@@ -2,6 +2,7 @@ import * as React from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BookOpenIcon,
   CheckIcon,
   ChevronsUpDownIcon,
   CogIcon,
@@ -62,7 +63,11 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const { data: contextData } = useQuery(contextQuery.options());
   const { data: wsData } = useQuery(workspacesQuery.options());
 
-  const workspaces = wsData?.workspaces ?? [];
+  // Orphan workspaces (folder removed on disk) are filtered out by the
+  // /api/workspaces endpoint by default; this client-side guard mirrors
+  // the same rule so the switcher never offers an orphan even if a
+  // caller (or future opt-in) hands us one with `isOrphan: true`.
+  const workspaces = (wsData?.workspaces ?? []).filter((w) => !w.isOrphan);
   const currentId = contextData?.workspaceId ?? null;
   const current = workspaces.find((w) => w.id === currentId);
 
@@ -375,6 +380,13 @@ export function AppSidebar() {
                 params={{ id: activeProjectId }}
                 label="Docs"
                 icon={FileTextIcon}
+                collapsed={collapsed}
+              />
+              <SidebarLink
+                to="/projects/$id/adrs"
+                params={{ id: activeProjectId }}
+                label="ADRs"
+                icon={BookOpenIcon}
                 collapsed={collapsed}
               />
               <SidebarLink

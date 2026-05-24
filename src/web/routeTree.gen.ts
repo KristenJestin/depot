@@ -15,7 +15,8 @@ import { Route as PrdsIdRouteImport } from "./routes/prds.$id";
 import { Route as PrdsIdIndexRouteImport } from "./routes/prds.$id.index";
 import { Route as ProjectsIdSettingsRouteImport } from "./routes/projects.$id.settings";
 import { Route as ProjectsIdDocsRouteImport } from "./routes/projects.$id.docs";
-import { Route as PrdsIdReviewDiffRouteImport } from "./routes/prds.$id.review-diff";
+import { Route as ProjectsIdAdrsIndexRouteImport } from "./routes/projects.$id.adrs.index";
+import { Route as ProjectsIdAdrsAdrIdRouteImport } from "./routes/projects.$id.adrs.$adrId";
 import { Route as PrdsIdReviewsReviewIdRouteImport } from "./routes/prds.$id.reviews.$reviewId";
 
 const IndexRoute = IndexRouteImport.update({
@@ -48,10 +49,15 @@ const ProjectsIdDocsRoute = ProjectsIdDocsRouteImport.update({
   path: "/projects/$id/docs",
   getParentRoute: () => rootRouteImport,
 } as any);
-const PrdsIdReviewDiffRoute = PrdsIdReviewDiffRouteImport.update({
-  id: "/review-diff",
-  path: "/review-diff",
-  getParentRoute: () => PrdsIdRoute,
+const ProjectsIdAdrsIndexRoute = ProjectsIdAdrsIndexRouteImport.update({
+  id: "/projects/$id/adrs/",
+  path: "/projects/$id/adrs/",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ProjectsIdAdrsAdrIdRoute = ProjectsIdAdrsAdrIdRouteImport.update({
+  id: "/projects/$id/adrs/$adrId",
+  path: "/projects/$id/adrs/$adrId",
+  getParentRoute: () => rootRouteImport,
 } as any);
 const PrdsIdReviewsReviewIdRoute = PrdsIdReviewsReviewIdRouteImport.update({
   id: "/reviews/$reviewId",
@@ -63,31 +69,34 @@ export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/prds/$id": typeof PrdsIdRouteWithChildren;
   "/projects/": typeof ProjectsIndexRoute;
-  "/prds/$id/review-diff": typeof PrdsIdReviewDiffRoute;
   "/projects/$id/docs": typeof ProjectsIdDocsRoute;
   "/projects/$id/settings": typeof ProjectsIdSettingsRoute;
   "/prds/$id/": typeof PrdsIdIndexRoute;
   "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
+  "/projects/$id/adrs/$adrId": typeof ProjectsIdAdrsAdrIdRoute;
+  "/projects/$id/adrs/": typeof ProjectsIdAdrsIndexRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/projects": typeof ProjectsIndexRoute;
-  "/prds/$id/review-diff": typeof PrdsIdReviewDiffRoute;
   "/projects/$id/docs": typeof ProjectsIdDocsRoute;
   "/projects/$id/settings": typeof ProjectsIdSettingsRoute;
   "/prds/$id": typeof PrdsIdIndexRoute;
   "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
+  "/projects/$id/adrs/$adrId": typeof ProjectsIdAdrsAdrIdRoute;
+  "/projects/$id/adrs": typeof ProjectsIdAdrsIndexRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
   "/prds/$id": typeof PrdsIdRouteWithChildren;
   "/projects/": typeof ProjectsIndexRoute;
-  "/prds/$id/review-diff": typeof PrdsIdReviewDiffRoute;
   "/projects/$id/docs": typeof ProjectsIdDocsRoute;
   "/projects/$id/settings": typeof ProjectsIdSettingsRoute;
   "/prds/$id/": typeof PrdsIdIndexRoute;
   "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
+  "/projects/$id/adrs/$adrId": typeof ProjectsIdAdrsAdrIdRoute;
+  "/projects/$id/adrs/": typeof ProjectsIdAdrsIndexRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -95,30 +104,33 @@ export interface FileRouteTypes {
     | "/"
     | "/prds/$id"
     | "/projects/"
-    | "/prds/$id/review-diff"
     | "/projects/$id/docs"
     | "/projects/$id/settings"
     | "/prds/$id/"
-    | "/prds/$id/reviews/$reviewId";
+    | "/prds/$id/reviews/$reviewId"
+    | "/projects/$id/adrs/$adrId"
+    | "/projects/$id/adrs/";
   fileRoutesByTo: FileRoutesByTo;
   to:
     | "/"
     | "/projects"
-    | "/prds/$id/review-diff"
     | "/projects/$id/docs"
     | "/projects/$id/settings"
     | "/prds/$id"
-    | "/prds/$id/reviews/$reviewId";
+    | "/prds/$id/reviews/$reviewId"
+    | "/projects/$id/adrs/$adrId"
+    | "/projects/$id/adrs";
   id:
     | "__root__"
     | "/"
     | "/prds/$id"
     | "/projects/"
-    | "/prds/$id/review-diff"
     | "/projects/$id/docs"
     | "/projects/$id/settings"
     | "/prds/$id/"
-    | "/prds/$id/reviews/$reviewId";
+    | "/prds/$id/reviews/$reviewId"
+    | "/projects/$id/adrs/$adrId"
+    | "/projects/$id/adrs/";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -127,6 +139,8 @@ export interface RootRouteChildren {
   ProjectsIndexRoute: typeof ProjectsIndexRoute;
   ProjectsIdDocsRoute: typeof ProjectsIdDocsRoute;
   ProjectsIdSettingsRoute: typeof ProjectsIdSettingsRoute;
+  ProjectsIdAdrsAdrIdRoute: typeof ProjectsIdAdrsAdrIdRoute;
+  ProjectsIdAdrsIndexRoute: typeof ProjectsIdAdrsIndexRoute;
 }
 
 declare module "@tanstack/react-router" {
@@ -173,12 +187,19 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof ProjectsIdDocsRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    "/prds/$id/review-diff": {
-      id: "/prds/$id/review-diff";
-      path: "/review-diff";
-      fullPath: "/prds/$id/review-diff";
-      preLoaderRoute: typeof PrdsIdReviewDiffRouteImport;
-      parentRoute: typeof PrdsIdRoute;
+    "/projects/$id/adrs/": {
+      id: "/projects/$id/adrs/";
+      path: "/projects/$id/adrs";
+      fullPath: "/projects/$id/adrs/";
+      preLoaderRoute: typeof ProjectsIdAdrsIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/projects/$id/adrs/$adrId": {
+      id: "/projects/$id/adrs/$adrId";
+      path: "/projects/$id/adrs/$adrId";
+      fullPath: "/projects/$id/adrs/$adrId";
+      preLoaderRoute: typeof ProjectsIdAdrsAdrIdRouteImport;
+      parentRoute: typeof rootRouteImport;
     };
     "/prds/$id/reviews/$reviewId": {
       id: "/prds/$id/reviews/$reviewId";
@@ -191,13 +212,11 @@ declare module "@tanstack/react-router" {
 }
 
 interface PrdsIdRouteChildren {
-  PrdsIdReviewDiffRoute: typeof PrdsIdReviewDiffRoute;
   PrdsIdIndexRoute: typeof PrdsIdIndexRoute;
   PrdsIdReviewsReviewIdRoute: typeof PrdsIdReviewsReviewIdRoute;
 }
 
 const PrdsIdRouteChildren: PrdsIdRouteChildren = {
-  PrdsIdReviewDiffRoute: PrdsIdReviewDiffRoute,
   PrdsIdIndexRoute: PrdsIdIndexRoute,
   PrdsIdReviewsReviewIdRoute: PrdsIdReviewsReviewIdRoute,
 };
@@ -211,6 +230,8 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsIndexRoute: ProjectsIndexRoute,
   ProjectsIdDocsRoute: ProjectsIdDocsRoute,
   ProjectsIdSettingsRoute: ProjectsIdSettingsRoute,
+  ProjectsIdAdrsAdrIdRoute: ProjectsIdAdrsAdrIdRoute,
+  ProjectsIdAdrsIndexRoute: ProjectsIdAdrsIndexRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

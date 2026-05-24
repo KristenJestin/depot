@@ -78,6 +78,20 @@ so `.env` is automatically picked up. Vitest also loads `.env` automatically.
 - If behavior and docs disagree, follow the current codebase and update docs only when appropriate.
 - When changing CLI behavior, verify the user-facing command path and output.
 
+## Agent skills
+
+### Issue tracker
+
+Issues et PRDs vivent comme fichiers markdown sous `.scratch/<feature>/`. Voir `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Vocabulaire canonique à cinq rôles (`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`), inscrit en ligne `Status:` dans chaque fichier d'issue. Voir `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Layout single-context : `CONTEXT.md` + `docs/adr/` à la racine (créés au fil de l'eau par `/grill-with-docs`). Voir `docs/agents/domain.md`.
+
 <!-- intent-skills:start -->
 
 ## Skill Loading

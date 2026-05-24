@@ -4,6 +4,22 @@ import type { Database } from "#/db/client";
 import { addWorkspace, createProject, getProject, resolveWorkspace } from "#/lib/workflow";
 import { normalizeWorkspacePath } from "#/shared/utils";
 
+/**
+ * Paths where silent auto-create would produce a workspace so broad it
+ * shadows every project beneath it (PRD 0004). Currently:
+ *   - the user's home directory exactly
+ *   - the filesystem root `/`
+ *
+ * Non-git folders are deliberately NOT in this list — a project may
+ * legitimately not be a git repo.
+ */
+function isForbiddenAutoCreatePath(canonicalPath: string): boolean {
+  if (canonicalPath === "/") return true;
+  const home = process.env.HOME ?? process.env.USERPROFILE;
+  if (!home) return false;
+  return canonicalPath === normalizeWorkspacePath(home);
+}
+
 interface GitContext {
   gitRoot: string;
   branch: string | undefined;
@@ -89,6 +105,13 @@ export async function resolveOrCreateWorkspaceForPath(db: Database, currentPath:
       project: existingProject,
       created: false,
     };
+  }
+
+  if (isForbiddenAutoCreatePath(normalizedPath)) {
+    throw new Error(
+      `Refusing to auto-create a workspace at '${normalizedPath}' — this path is too broad and would shadow every project beneath it. ` +
+        `Cd into a project directory, or run \`depot init <name>\` from the intended project root to create a workspace explicitly.`,
+    );
   }
 
   const git = await detectGitContext(currentPath);

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { createTestDb, makeRun } from "../helpers/db";
 import {
   setConfig,
@@ -49,7 +49,7 @@ describe("project config", () => {
   it("isKnownKey covers the published keys", () => {
     expect(isKnownKey("baseBranch")).toBe(true);
     expect(isKnownKey("defaultDocProfile")).toBe(true);
-    expect(isKnownKey("branchNamingConvention")).toBe(true);
+    expect(isKnownKey("branchNamingConvention")).toBe(false);
     expect(isKnownKey("randomMadeUpKey")).toBe(false);
   });
 
@@ -63,11 +63,8 @@ describe("project config", () => {
     expect(ttl.validate("0").ok).toBe(false);
     expect(ttl.validate("ten").ok).toBe(false);
 
-    const naming = KNOWN_PROJECT_CONFIG_KEYS.branchNamingConvention!;
-    expect(naming.validate("feat/{prdId}").ok).toBe(true);
-    expect(naming.validate("hardcoded-branch-name").ok).toBe(false);
-
     expect(isKnownProjectConfigKey("baseBranch")).toBe(true);
+    expect(isKnownProjectConfigKey("branchNamingConvention")).toBe(false);
     expect(isKnownProjectConfigKey("nope")).toBe(false);
   });
 });

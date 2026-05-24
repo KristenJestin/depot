@@ -174,7 +174,6 @@ export const listSyncRuns = (profileId: string, options: { prdId?: string; limit
 export type ResolveRangeInput = {
   profileName: string;
   projectId: string;
-  prdRevisionId?: string;
   sinceExpr?: string;
   untilExpr?: string;
 };
@@ -184,7 +183,7 @@ export type ResolvedSourceRange = {
   path: string;
   since: string | null;
   until: string | null;
-  mode: "sha" | "time-window" | "expr";
+  mode: "time-window" | "expr";
 };
 
 export const resolveDiffRange = (input: ResolveRangeInput) =>
@@ -202,73 +201,23 @@ export const resolveDiffRange = (input: ResolveRangeInput) =>
     }
 
     const sources = JSON.parse(profile.sources) as DocSource[];
-    const ranges: ResolvedSourceRange[] = [];
-
-    let prdRev: {
-      activatedAtSha: string | null;
-      doneAtSha: string | null;
-      mergedAtSha: string | null;
-    } | null = null;
-    if (input.prdRevisionId) {
-      prdRev = yield* dbQuery(() =>
-        db.query.prdRevisions.findFirst({ where: { id: input.prdRevisionId } }),
-      ).pipe(
-        Effect.map((r) =>
-          r
-            ? {
-                activatedAtSha: r.activatedAtSha,
-                doneAtSha: r.doneAtSha,
-                mergedAtSha: r.mergedAtSha,
-              }
-            : null,
-        ),
-      );
-    }
-
-    for (const source of sources) {
-      if (input.sinceExpr) {
-        ranges.push({
-          name: source.name,
-          path: source.path,
-          since: input.sinceExpr,
-          until: input.untilExpr ?? null,
-          mode: "expr",
-        });
-      } else if (prdRev?.activatedAtSha) {
-        // Squash-merge survival: after a squash merge the feature branch is
-        // gone and `activatedAtSha`/`doneAtSha` can become unreachable. The
-        // doc agent resolves the range to actual commits; when only the squash
-        // commit is reachable, `mergedAtSha` (the single squash commit) is the
-        // correct anchor. The web diff API mirrors this fallback by probing
-        // `git cat-file -e` — here we hand both SHAs to the doc agent so it can
-        // pick the reachable one without a second round-trip.
-        ranges.push({
-          name: source.name,
-          path: source.path,
-          since: prdRev.activatedAtSha,
-          until: prdRev.doneAtSha ?? prdRev.mergedAtSha,
-          mode: "sha",
-        });
-      } else if (prdRev?.mergedAtSha) {
-        // Never activated through depot but a squash merge was captured —
-        // diff the single squash commit (`<sha>^..<sha>`).
-        ranges.push({
-          name: source.name,
-          path: source.path,
-          since: `${prdRev.mergedAtSha}^`,
-          until: prdRev.mergedAtSha,
-          mode: "sha",
-        });
-      } else {
-        ranges.push({
-          name: source.name,
-          path: source.path,
-          since: "HEAD~20",
-          until: null,
-          mode: "time-window",
-        });
-      }
-    }
+    const ranges: ResolvedSourceRange[] = sources.map((source) =>
+      input.sinceExpr
+        ? {
+            name: source.name,
+            path: source.path,
+            since: input.sinceExpr,
+            until: input.untilExpr ?? null,
+            mode: "expr",
+          }
+        : {
+            name: source.name,
+            path: source.path,
+            since: "HEAD~20",
+            until: null,
+            mode: "time-window",
+          },
+    );
 
     return { profileId: profile.id, sources: ranges };
   });

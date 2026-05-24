@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "../helpers/db";
 import type { Database } from "#/db/client";
