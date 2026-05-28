@@ -1,6 +1,6 @@
 {
   "name": "@netsirk/depot",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "AI agent task and PRD management CLI",
   "keywords": [
     "agent",
@@ -51,8 +51,9 @@
     "test:watch": "vp test --watch",
     "typecheck": "tsc --noEmit",
     "release": "npm publish",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui",
+    "test:e2e": "vp pack && vp test run -c vitest.e2e.config.ts",
+    "test:e2e:web": "playwright test",
+    "test:e2e:web:ui": "playwright test --ui",
     "e2e:setup": "playwright install chromium",
     "seed": "bun run scripts/seed.ts"
   },

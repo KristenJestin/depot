@@ -1391,6 +1391,39 @@ describe("resolveWorkspace resolution order", () => {
     expect(resolved).not.toBeNull();
     expect(resolved!.projectId).toBe(parent.id);
   });
+
+  it("prefers the more specific ancestor workspace when both ancestor and worktree fallback resolve", async () => {
+    // Mirrors the nyx-feature pattern: a feature-group workspace is
+    // registered at `~/Projects/_worktrees/<feature>` and contains git
+    // worktrees whose main repos live in `~/Projects/<main-repo>`. From
+    // a sub-folder of the feature-group, the worktree fallback would
+    // remount to the main repo workspace — but the feature-group is the
+    // more specific (and intended) workspace for that cwd.
+    const mainProject = await createProject(db, { name: "main-project" });
+    const featureProject = await createProject(db, { name: "feature-group-project" });
+
+    const mainRepoDir = await createTempDir();
+    const featureGroupDir = await createTempDir();
+    const featureSubRepoDir = path.join(featureGroupDir, "sub-repo");
+    await fs.mkdir(featureSubRepoDir, { recursive: true });
+
+    // The sub-repo inside the feature-group is a git linked worktree
+    // whose main repo is at mainRepoDir — exactly like nyx's
+    // nyx worktree pointing to ~/Projects/nyx/nyx.
+    const gitdir = path.join(mainRepoDir, ".git", "worktrees", "feature");
+    await fs.mkdir(gitdir, { recursive: true });
+    await fs.writeFile(path.join(featureSubRepoDir, ".git"), `gitdir: ${gitdir}\n`);
+
+    await addWorkspace(db, { projectId: mainProject.id, path: mainRepoDir });
+    await addWorkspace(db, { projectId: featureProject.id, path: featureGroupDir });
+
+    // From a path inside the feature-group's sub-repo, the feature-group
+    // workspace (longer ancestor path) must win over the main repo
+    // workspace (reached via worktree fallback).
+    const resolved = await resolveWorkspace(db, path.join(featureSubRepoDir, "src"));
+    expect(resolved).not.toBeNull();
+    expect(resolved!.projectId).toBe(featureProject.id);
+  });
 });
 
 // ── phaseAdvance activity log ─────────────────────────────────────────────────

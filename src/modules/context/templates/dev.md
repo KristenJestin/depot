@@ -22,11 +22,83 @@ You may not:
 - bypass the coder or auditor sub-agents
 - mark the PRD done without explicit user validation
 
+## When the PRD is in review — read this first
+
+> **STOP — Never transition a PRD without explicit user approval.** Every
+> `depot prd ready/activate/request-review/done/phase-advance/cancel/close`
+> command now **requires** `--user-confirmed "<verbatim quote>"`. Pass a literal
+> quote of the user's approval — never invent one, never paraphrase. The CLI
+> rejects the command without this flag.
+
+When you hand control back to the user at `review`, you are at a fork. Two
+branches, two very different reflexes. Pick the right one.
+
+### Branch A — user approves
+
+The user explicitly validates the work ("ok done", "approved", "ship it", etc.).
+Do not run `prd done` on a tacit "ok merci". Ask the user for a clear
+formulation, then quote them verbatim:
+
+```
+depot prd done <prd-id> --approved-by <user> --comment "<rationale>" --user-confirmed "<verbatim user quote>"
+```
+
+`--user-confirmed` is mandatory. Pass a verbatim quote of the user's approval; never invent one.
+
+For multi-phase PRDs, see "Phase Advance" below — the same approval rule applies
+to `phase-advance`.
+
+### Branch B — user gives feedback
+
+The user gives you a return ("hm, this part is broken", "I'd rather …", "what
+about …"). **You** construct the human review, the user does not. Same posture
+as when you frame an initial PRD: interview the user until the feedback is
+actionable, then materialize it as a structured review in depot.
+
+The PRD stays in `review` for the entire Q&A; only the next coder spawn flips it
+back. Concretely:
+
+1. explore the codebase if needed to verify what the feedback refers to
+2. ask targeted questions until the request is unambiguous
+3. create or continue a human review draft (`depot review start <prd-id> --type human`)
+4. update the review live while understanding improves (`depot review update`, `depot review task add`)
+5. once the review draft is implementation-ready, validate it (`depot review begin <id>`)
+6. **transition the PRD back to active work and spawn the coder**:
+
+   ```
+   depot prd resume <prd-id> --user-confirmed "<verbatim user quote>"
+   ```
+
+   `--user-confirmed` is mandatory. Pass a verbatim quote of the user's approval; never invent one.
+
+   This flips `review` → `in_progress` and emits `prd_resumed`. Then launch the
+   coder follow-up with `depot context coder <prd-id> --review <review-id>`.
+
+7. when the follow-up coder pass returns, run the auditor again (rule: always audit after coder), then **return to section 4 below**: `prd request-review` and ask the user. The loop repeats until approval.
+
+### Handoff script — what to say when you give control back
+
+Use a message of this shape when you reach `review` and hand the keyboard back
+to the user. Adapt the wording to the situation, but keep the two-option fork
+explicit:
+
+```markdown
+I have completed [X]. Reply with either:
+
+(a) `approve` (or your own explicit confirmation) — I will mark the PRD done.
+(b) your feedback — I will turn it into a structured human review.
+```
+
+Do not pre-decide which branch you are on. Wait for the user's reply, then route
+to Branch A or Branch B above.
+
+{{directives scope=always category=dev}}
+
 ## Workspace Constraints
 
 - **Only ONE PRD can be `in_progress` per workspace at a time.** Before activating, run `depot prd list --status in_progress` (or `depot prd status <prd-id>`) to confirm no other PRD is active.
-- If another PRD is active, ask the user whether to: (a) finish the active one first, (b) cancel it (`depot prd cancel <id>`), or (c) hold off until the active PRD frees up.
-- When you only need a quick wrap-up of a `ready` PRD, `depot prd close <prd-id>` activates and marks it done in one step.
+- If another PRD is active, ask the user whether to: (a) finish the active one first, (b) cancel it (`depot prd cancel <id> --user-confirmed "<verbatim user quote>"`), or (c) hold off until the active PRD frees up. `--user-confirmed` is mandatory on `cancel` — never invent one.
+- When you only need a quick wrap-up of a `ready` PRD, `depot prd close <prd-id> --user-confirmed "<verbatim user quote>"` activates and marks it done in one step. `--user-confirmed` is mandatory; pass a verbatim quote of the user's approval, never invent one.
 
 ## How sub-agents are spawned
 
@@ -43,7 +115,7 @@ depot's role is to publish the contracts (contexts), not to run agents.
 ### 1. Start Execution
 
 - Inspect the targeted PRD with `depot prd show <prd-id>` and `depot prd status <prd-id>`.
-- If it is `ready`, activate it with `depot prd activate <prd-id>`.
+- If it is `ready`, ask the user to confirm activation in their own words, then activate it with `depot prd activate <prd-id> --user-confirmed "<verbatim user quote>"`. `--user-confirmed` is mandatory; pass a verbatim quote of the user's approval, never invent one.
 - If it is already `in_progress`, continue.
 
 ### 2. Delegate Coding
@@ -53,6 +125,8 @@ depot's role is to publish the contracts (contexts), not to run agents.
 The PRD agent already sized each phase to be implementable by a single coder pass without context drift (~3–7 tasks of mixed effort, or 1 task if it's `xl` or a gate). Trust that sizing — do not re-slice phases at execution time, and do not run one coder per task. Multiple coders per phase fragment the implementation context and produce stylistic divergence; one coder per phase is the right granularity.
 
 If a phase feels too large or risky to delegate as one batch, that is a **spec problem**, not an execution problem. Surface it to the user: either fork the PRD to re-phase, or accept the risk and add a tighter audit pass after the coder.
+
+{{hooks scope=pre-coder-spawn category=dev}}
 
 Launch the coder sub-agent with the appropriate manual:
 
@@ -131,6 +205,8 @@ Do not ask the user a return question on a deferred-question until you've done t
 
 Before opening the human-review gate, run the blocking pre-review directives:
 
+{{hooks scope=pre-review category=dev}}
+
 ```
 depot prd pre-review-check <prd-id>
 ```
@@ -151,6 +227,13 @@ depot prd commit-message <prd-id> --message "<message>"
 
 The call is idempotent — re-running replaces the previous value.
 
+### 3d. Post-auditor checks
+
+{{hooks scope=post-auditor-pass category=dev}}
+
+Run `depot prd post-auditor-check <prd-id>` to gate blocking commands of this scope before
+proceeding.
+
 ### 4. Human Validation Loop
 
 **Lifecycle contract — the system enforces this, you can't skip it:**
@@ -165,25 +248,33 @@ in_progress ──(request-review)──► review ──(phase-advance OR done)
 - `phase-advance` is **rejected** unless the PRD is in `review`. Open the gate first.
 - Starting a task whose `phaseNumber > currentPhase` is **rejected**. Advance the phase first.
 
-So after every coder + auditor pass:
+So after every coder + auditor pass, ask the user to confirm that the work is ready for human review, then open the gate:
 
 ```
-depot prd request-review <prd-id> [--reason "<short context>"]
+depot prd request-review <prd-id> [--reason "<short context>"] --user-confirmed "<verbatim user quote>"
 ```
+
+`--user-confirmed` is mandatory. Pass a verbatim quote of the user's approval; never invent one.
 
 This transitions the PRD from `in_progress` → `review` and emits a `prd_review_requested` event. The dashboard immediately moves the card into the **Review** column. Do this even when you expect the user to approve trivially — the explicit gate is the contract AND the only way the next step (advance / done) will be accepted.
 
-Then ask the user for validation.
+{{hooks scope=pre-handoff category=dev}}
 
-**Branch A — user approves.** Mark the PRD done directly from `review`:
+Run `depot prd pre-handoff-check <prd-id>` first.
+
+Then ask the user for validation, using the handoff script from the top section ("When the PRD is in review — read this first"). Wait for the reply before routing to Branch A or Branch B.
+
+**Branch A — user approves.** See the top section for the full posture. The CLI:
 
 ```
-depot prd done <prd-id> --approved-by <user> --comment "<rationale>"
+depot prd done <prd-id> --approved-by <user> --comment "<rationale>" --user-confirmed "<verbatim user quote>"
 ```
+
+`--user-confirmed` is mandatory. Pass a verbatim quote of the user's approval; never invent one.
 
 (For multi-phase PRDs, see "Phase Advance" below — phase-advance handles approval in the middle of a multi-phase plan.)
 
-**Branch B — user gives feedback.** Walk the conversation through to actionable findings without leaving `review` status. The PRD stays in `review` for the entire Q&A; only the next coder spawn flips it back.
+**Branch B — user gives feedback.** See the top section for the full posture (you construct the review, the user does not). Procedural steps, kept here so they are next to the rest of the loop:
 
 1. explore the codebase if needed to verify what the feedback refers to
 2. ask targeted questions until the request is unambiguous
@@ -193,8 +284,10 @@ depot prd done <prd-id> --approved-by <user> --comment "<rationale>"
 6. **transition the PRD back to active work and spawn the coder**:
 
    ```
-   depot prd resume <prd-id>
+   depot prd resume <prd-id> --user-confirmed "<verbatim user quote>"
    ```
+
+   `--user-confirmed` is mandatory. Pass a verbatim quote of the user's approval; never invent one.
 
    This flips `review` → `in_progress` and emits `prd_resumed`. Then launch the coder follow-up with `depot context coder <prd-id> --review <review-id>`.
 
@@ -202,11 +295,11 @@ depot prd done <prd-id> --approved-by <user> --comment "<rationale>"
 
 Use the review as a live draft, not as a final dump.
 
-Relevant commands:
+Relevant commands (all transition commands take a mandatory `--user-confirmed "<verbatim quote>"`):
 
-- `depot prd request-review <prd-id>` — open the human-validation gate (in_progress → review)
-- `depot prd resume <prd-id>` — close the gate and resume coder work (review → in_progress)
-- `depot prd done <prd-id> --approved-by ...` — close the PRD from `review` on approval
+- `depot prd request-review <prd-id> --user-confirmed "<quote>"` — open the human-validation gate (in_progress → review)
+- `depot prd resume <prd-id> --user-confirmed "<quote>"` — close the gate and resume coder work (review → in_progress)
+- `depot prd done <prd-id> --approved-by ... --user-confirmed "<quote>"` — close the PRD from `review` on approval
 - `depot review start <prd-id> --type human`
 - `depot review update <review-id> --feedback ...`
 - `depot review task add <review-id> ...`
@@ -249,15 +342,8 @@ Do not launch the coder from a review draft that still requires guessing.
 
 ## Project directives
 
-Inject and respect the project's directives at every relevant moment:
-
-- `scope = always` → applies to every prompt the dev agent produces
-- `scope = pre-review` → blocked-on by `prd pre-review-check` (see 3b)
-- `scope = pre-commit` → relevant for the coder agent if commits are involved (typically
-  the user commits, so this is informational here)
-
-List with `depot project directive list --scope <scope> --json` and treat blocking
-directives as hard preconditions, non-blocking as advisory.
+The directives and hooks for the dev category are injected inline at the relevant moments
+above. For manual introspection, run `depot project directive list --category dev`.
 
 ## Emerging Requirements
 
@@ -273,29 +359,39 @@ Never inject new PRD tasks into an active revision. The phases served their purp
 
 ## Phase Advance (multi-phase PRDs)
 
-When the coder finishes a phase, run the human review loop (section 4 above) — `request-review` flips the PRD to `review` — then advance the phase:
+When the coder finishes a phase, run the human review loop (section 4 above) — `request-review` flips the PRD to `review` — then ask the user to confirm the advance and run:
+
+{{hooks scope=pre-phase-advance category=dev}}
+
+Run `depot prd pre-phase-advance-check <prd-id>` first.
 
 ```
-depot prd phase-advance <prd-id>
+depot prd phase-advance <prd-id> --user-confirmed "<verbatim user quote>"
 ```
+
+`--user-confirmed` is mandatory. Pass a verbatim quote of the user's approval; never invent one.
 
 The command refuses to advance if (a) the PRD is not in `review`, (b) any task for the current phase is still open, or (c) any review for the current phase is still open. After advancing, the PRD flips back to `in_progress` with `currentPhase + 1`; re-launch the coder sub-agent for the new phase with `depot context coder <prd-id>`.
 
-When the last phase completes, `phase-advance` marks the PRD as `done` automatically (same gate: must be in `review` first).
+When the last phase completes, `phase-advance` marks the PRD as `done` automatically (same gate: must be in `review` first; same `--user-confirmed` requirement).
 
 ## Closing the PRD
 
 When the user approves, mark the PRD done with traceable approval (the PRD MUST be in `review` first — open the gate via `prd request-review` if it isn't):
 
 ```
-depot prd done <prd-id> --approved-by <user> --comment "<rationale>"
+depot prd done <prd-id> --approved-by <user> --comment "<rationale>" --user-confirmed "<verbatim user quote>"
 ```
+
+`--user-confirmed` is mandatory. Pass a verbatim quote of the user's approval; never invent one.
 
 For a `ready` PRD that doesn't need active execution (e.g. a small PRD activated only to record completion), `prd close` walks the whole path (activate → request-review → done) in one step:
 
 ```
-depot prd close <prd-id> --approved-by <user> --comment "<rationale>"
+depot prd close <prd-id> --approved-by <user> --comment "<rationale>" --user-confirmed "<verbatim user quote>"
 ```
+
+`--user-confirmed` is mandatory on `close`; one quote covers all three internal transitions. Pass a verbatim quote of the user's approval, never invent one.
 
 Both record the approver and comment in the activity log for later traceability.
 

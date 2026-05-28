@@ -25,6 +25,11 @@ import {
 } from "#/web/components/ui/select";
 import { Textarea } from "#/web/components/ui/textarea";
 import { cn } from "#/web/lib/utils";
+import {
+  VALID_DIRECTIVE_CATEGORIES,
+  validScopesForCategory,
+  type DirectiveCategory,
+} from "#/shared/validator";
 
 type ConfigItem = {
   key: string;
@@ -38,6 +43,7 @@ type ConfigItem = {
 
 type Directive = {
   id: string;
+  category: DirectiveCategory;
   scope: string;
   title: string;
   instruction: string;
@@ -161,6 +167,7 @@ function DirectivesSection({ projectId }: { projectId: string }) {
     },
   });
 
+  const [newCategory, setNewCategory] = React.useState<DirectiveCategory>("dev");
   const [newScope, setNewScope] = React.useState("pre-review");
   const [newKind, setNewKind] = React.useState<"command" | "rule">("command");
   const [newRepoTarget, setNewRepoTarget] = React.useState("auto");
@@ -175,6 +182,7 @@ function DirectivesSection({ projectId }: { projectId: string }) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          category: newCategory,
           scope: newScope,
           kind: newKind,
           repoTarget: newRepoTarget,
@@ -262,6 +270,9 @@ function DirectivesSection({ projectId }: { projectId: string }) {
               <li key={d.id} className="rounded-md border border-card-border bg-card p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{d.title}</span>
+                  <Badge variant="subtle" className="text-[10px]">
+                    {d.category}
+                  </Badge>
                   <Badge variant="outline" className="text-[10px]">
                     {d.kind}
                   </Badge>
@@ -320,7 +331,34 @@ function DirectivesSection({ projectId }: { projectId: string }) {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Add directive
         </h3>
-        <div className="mt-3 grid grid-cols-2 gap-3">
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <label className="text-xs">
+            Category
+            <Select
+              value={newCategory}
+              onValueChange={(value) => {
+                const next = (value ?? "dev") as DirectiveCategory;
+                setNewCategory(next);
+                // Scope filtering depends on category; reset scope to the first
+                // valid one if the current selection is no longer compatible.
+                const valid = validScopesForCategory(next);
+                if (!valid.includes(newScope as (typeof valid)[number])) {
+                  setNewScope(valid[0] ?? "always");
+                }
+              }}
+            >
+              <SelectTrigger className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {VALID_DIRECTIVE_CATEGORIES.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </label>
           <label className="text-xs">
             Scope
             <Select value={newScope} onValueChange={(value) => setNewScope(value ?? "")}>
@@ -328,13 +366,11 @@ function DirectivesSection({ projectId }: { projectId: string }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
-                {["always", "pre-review", "pre-commit", "pre-doc-sync", "pre-ship", "on-error"].map(
-                  (scope) => (
-                    <SelectItem key={scope} value={scope}>
-                      {scope}
-                    </SelectItem>
-                  ),
-                )}
+                {validScopesForCategory(newCategory).map((scope) => (
+                  <SelectItem key={scope} value={scope}>
+                    {scope}
+                  </SelectItem>
+                ))}
               </SelectPopup>
             </Select>
           </label>

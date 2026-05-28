@@ -96,7 +96,8 @@ The default database path is:
 ~/.depot/depot.db
 ```
 
-You can override that with `DB_PATH`.
+You can override that with `DEPOT_DB_PATH` (the legacy `DB_PATH` is still honoured for one
+release with a deprecation warning printed on stderr).
 
 When `depot` opens the database, it:
 

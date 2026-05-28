@@ -125,11 +125,58 @@ export const VALID_DIRECTIVE_SCOPES = [
   "pre-doc-sync",
   "pre-ship",
   "on-error",
+  "pre-coder-spawn",
+  "post-auditor-pass",
+  "pre-handoff",
+  "pre-phase-advance",
 ] as const;
 export type DirectiveScope = (typeof VALID_DIRECTIVE_SCOPES)[number];
 
 export const VALID_DIRECTIVE_KINDS = ["command", "rule"] as const;
 export type DirectiveKind = (typeof VALID_DIRECTIVE_KINDS)[number];
+
+// Category dimension introduced in PRD 0013. Each directive is filed under one
+// of these so the renderer can inject it into the matching agent template
+// (prd / dev / coder / auditor / doc / ship). NOT NULL is enforced at the
+// domain layer (`createDirective`) rather than at the SQL layer — SQLite
+// cannot retro-fit NOT NULL via ALTER TABLE without recreating the table, and
+// the backfill in the migration guarantees the column is populated for every
+// existing row.
+export const VALID_DIRECTIVE_CATEGORIES = [
+  "prd",
+  "dev",
+  "coder",
+  "auditor",
+  "doc",
+  "ship",
+] as const;
+export type DirectiveCategory = (typeof VALID_DIRECTIVE_CATEGORIES)[number];
+
+// Authoritative `(category, scope)` validity table (PRD 0013). A directive
+// must target exactly one valid pair. If the same instruction should apply
+// to two categories (e.g. coder and auditor) it is duplicated — kept simple
+// on purpose.
+export const VALID_CATEGORY_SCOPES: Record<DirectiveCategory, readonly DirectiveScope[]> = {
+  prd: ["always"],
+  dev: [
+    "always",
+    "pre-coder-spawn",
+    "pre-review",
+    "post-auditor-pass",
+    "pre-handoff",
+    "pre-phase-advance",
+  ],
+  coder: ["always", "pre-commit"],
+  auditor: ["always", "pre-review"],
+  doc: ["always", "pre-doc-sync"],
+  ship: ["always", "pre-ship"],
+};
+
+export const isValidCategoryScope = (category: DirectiveCategory, scope: DirectiveScope): boolean =>
+  (VALID_CATEGORY_SCOPES[category] ?? []).includes(scope);
+
+export const validScopesForCategory = (category: DirectiveCategory): readonly DirectiveScope[] =>
+  VALID_CATEGORY_SCOPES[category] ?? [];
 
 // Built-in repo targets for `kind: command` directives. Any other value is
 // interpreted as a `project_repo.name` and validated dynamically against the
@@ -201,6 +248,10 @@ export const VALID_EVENT_TYPES = [
   "pre_review_check",
   "pre_ship_check",
   "pre_doc_sync_check",
+  "pre_coder_check",
+  "post_auditor_check",
+  "pre_handoff_check",
+  "pre_phase_advance_check",
 ] as const;
 
 export type EventType = (typeof VALID_EVENT_TYPES)[number];

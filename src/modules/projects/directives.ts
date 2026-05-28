@@ -7,8 +7,14 @@ import { Db } from "#/services/database";
 import { dbQuery } from "#/shared/db";
 import { generateId } from "#/shared/utils";
 import { ValidationError } from "#/shared/errors";
+import {
+  VALID_DIRECTIVE_CATEGORIES,
+  isValidCategoryScope,
+  validScopesForCategory,
+} from "#/shared/validator";
 import type {
   ActivitySource,
+  DirectiveCategory,
   DirectiveKind,
   DirectiveScope,
   DirectiveRunStatus,
@@ -53,12 +59,16 @@ const assertSafeInstruction = (kind: DirectiveKind, instruction: string) => {
   }
 };
 
+// `category` is typed optional so legacy call sites (CLI/web) still compile
+// while T6 wires the `--category` flag; missing or invalid values are rejected
+// at runtime so the contract is enforced from this PRD on.
 export const createDirective = (input: {
   projectId: string;
   scope: DirectiveScope;
   title: string;
   instruction: string;
   kind: DirectiveKind;
+  category?: DirectiveCategory;
   blocking?: boolean;
   position?: number;
   repoTarget?: string;
@@ -69,6 +79,28 @@ export const createDirective = (input: {
     } catch (e) {
       return yield* Effect.fail(
         new ValidationError({ reason: e instanceof Error ? e.message : String(e) }),
+      );
+    }
+    if (input.category === undefined || input.category === null) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Directive category is required. One of: ${VALID_DIRECTIVE_CATEGORIES.join(", ")}.`,
+        }),
+      );
+    }
+    if (!(VALID_DIRECTIVE_CATEGORIES as readonly string[]).includes(input.category)) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Unknown directive category: '${input.category}'. One of: ${VALID_DIRECTIVE_CATEGORIES.join(", ")}.`,
+        }),
+      );
+    }
+    if (!isValidCategoryScope(input.category, input.scope)) {
+      const allowed = validScopesForCategory(input.category).join(", ");
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Invalid (category, scope): (${input.category}, ${input.scope}). Allowed scopes for category '${input.category}': ${allowed || "none"}.`,
+        }),
       );
     }
     const db = yield* Db;
@@ -85,6 +117,7 @@ export const createDirective = (input: {
           id: generateId(),
           projectId: input.projectId,
           scope: input.scope,
+          category: input.category,
           title: input.title,
           instruction: input.instruction,
           kind: input.kind,
@@ -161,12 +194,17 @@ export const getDirective = (id: string) =>
 
 export const listDirectives = (
   projectId: string,
-  options: { scope?: DirectiveScope; enabledOnly?: boolean } = {},
+  options: {
+    scope?: DirectiveScope;
+    category?: DirectiveCategory;
+    enabledOnly?: boolean;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const where: Record<string, unknown> = { projectId };
     if (options.scope) where.scope = options.scope;
+    if (options.category) where.category = options.category;
     if (options.enabledOnly) where.enabled = true;
     return yield* dbQuery(() =>
       db.query.projectDirectives.findMany({

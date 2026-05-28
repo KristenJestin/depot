@@ -11,6 +11,8 @@ pipeline iterates over the PRD's repos — each repo has its own base branch and
 its own feature worktree. A mono-repo PRD has a single implicit repo and the
 pipeline behaves exactly as before, with no extra configuration.
 
+{{directives scope=always category=ship}}
+
 ## Per-repo state
 
 `depot context ship <prd-id>` injects a **Repos** block listing, per repo:
@@ -71,8 +73,10 @@ depot prd pre-ship-check <id>
 
 ### 5. Mark done
 
-- `depot prd done <id>` after every repo cleanup and pre-ship directive has
-  passed.
+- Ask the user to confirm the PRD is shippable, then run
+  `depot prd done <id> --user-confirmed "<verbatim user quote>"` after every
+  repo cleanup and pre-ship directive has passed. `--user-confirmed` is
+  mandatory; pass a verbatim quote of the user's approval, never invent one.
 - Depot no longer stores git SHAs or merge anchors. If the user needs the squash
   commit for release notes, report it in the recap as plain terminal output
   only; do not try to persist it in depot.

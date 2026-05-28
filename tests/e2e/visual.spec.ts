@@ -6,7 +6,7 @@ import { test, expect, type Page } from "@playwright/test";
  * is stable, then asserts against a screenshot baseline.
  *
  * Baselines are not committed. Generate them once with:
- *   bun run test:e2e -- --update-snapshots
+ *   bun run test:e2e:web -- --update-snapshots
  */
 
 const NOW = "2026-05-20T10:00:00.000Z";

@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   applyMigrations,
+  currentDbMode,
+  defaultDbPath,
+  defaultDepotDir,
   openDatabase,
   openDatabaseWith,
   resolveMigrationsFolder,
@@ -220,5 +223,87 @@ describe("db client", () => {
     ).toThrow(/syntax error/i);
 
     expect(closeCount).toBe(1);
+  });
+});
+
+describe("currentDbMode", () => {
+  const originalDepot = process.env["DEPOT_DB_PATH"];
+  const originalLegacy = process.env["DB_PATH"];
+
+  beforeEach(() => {
+    delete process.env["DEPOT_DB_PATH"];
+    delete process.env["DB_PATH"];
+  });
+
+  afterEach(() => {
+    if (originalDepot === undefined) {
+      delete process.env["DEPOT_DB_PATH"];
+    } else {
+      process.env["DEPOT_DB_PATH"] = originalDepot;
+    }
+    if (originalLegacy === undefined) {
+      delete process.env["DB_PATH"];
+    } else {
+      process.env["DB_PATH"] = originalLegacy;
+    }
+  });
+
+  it("returns prod with the default ~/.depot path when no env var is set", () => {
+    const mode = currentDbMode();
+    expect(mode.kind).toBe("prod");
+    expect(mode.path).toBe(`${defaultDepotDir()}/depot.db`);
+  });
+
+  it("classifies DEPOT_DB_PATH containing .depot-dev as dev", () => {
+    process.env["DEPOT_DB_PATH"] = ".depot-dev/depot.db";
+    expect(currentDbMode()).toEqual({ kind: "dev", path: ".depot-dev/depot.db" });
+  });
+
+  it("classifies any other DEPOT_DB_PATH as custom", () => {
+    process.env["DEPOT_DB_PATH"] = "/tmp/test.db";
+    expect(currentDbMode()).toEqual({ kind: "custom", path: "/tmp/test.db" });
+  });
+
+  it("falls back to the legacy DB_PATH when DEPOT_DB_PATH is unset", () => {
+    process.env["DB_PATH"] = ".depot-dev/depot.db";
+    expect(currentDbMode()).toEqual({ kind: "dev", path: ".depot-dev/depot.db" });
+  });
+
+  it("prefers DEPOT_DB_PATH over the legacy DB_PATH when both are set", () => {
+    process.env["DEPOT_DB_PATH"] = "/tmp/preferred.db";
+    process.env["DB_PATH"] = "/tmp/legacy.db";
+    expect(currentDbMode()).toEqual({ kind: "custom", path: "/tmp/preferred.db" });
+  });
+});
+
+describe("defaultDbPath", () => {
+  const originalDepot = process.env["DEPOT_DB_PATH"];
+  const originalLegacy = process.env["DB_PATH"];
+
+  beforeEach(() => {
+    delete process.env["DEPOT_DB_PATH"];
+    delete process.env["DB_PATH"];
+  });
+
+  afterEach(() => {
+    if (originalDepot === undefined) {
+      delete process.env["DEPOT_DB_PATH"];
+    } else {
+      process.env["DEPOT_DB_PATH"] = originalDepot;
+    }
+    if (originalLegacy === undefined) {
+      delete process.env["DB_PATH"];
+    } else {
+      process.env["DB_PATH"] = originalLegacy;
+    }
+  });
+
+  it("returns the production path when no env var is set", () => {
+    expect(defaultDbPath()).toBe(`${defaultDepotDir()}/depot.db`);
+  });
+
+  it("returns the override when DEPOT_DB_PATH is set", () => {
+    process.env["DEPOT_DB_PATH"] = "/tmp/from-env.db";
+    expect(defaultDbPath()).toBe("/tmp/from-env.db");
   });
 });

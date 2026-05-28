@@ -1,5 +1,5 @@
 import { Schema, Effect } from "effect";
-import { command } from "#/cli/command";
+import { command, type CommandOutput } from "#/cli/command";
 import { runEffect } from "#/cli/runtime";
 import * as DomainProjects from "#/modules/projects/domain";
 import * as DomainWorkspaces from "#/modules/workspaces/domain";
@@ -14,8 +14,12 @@ import * as DomainDirectives from "#/modules/projects/directives";
 import * as DomainRepos from "#/modules/projects/repos";
 import { existsSync } from "node:fs";
 import {
+  VALID_DIRECTIVE_CATEGORIES,
   VALID_DIRECTIVE_KINDS,
   VALID_DIRECTIVE_SCOPES,
+  isValidCategoryScope,
+  validScopesForCategory,
+  type DirectiveCategory,
   type DirectiveScope,
 } from "#/shared/validator";
 
@@ -490,6 +494,14 @@ const directiveAddCommand = command({
       required: true,
       description: `Directive scope (${VALID_DIRECTIVE_SCOPES.join("|")})`,
     },
+    // `category` is intentionally NOT marked required so the framework's
+    // generic "is required" message does not preempt the guidance-rich
+    // validation we emit ourselves. PRD 0013 Q3 mandates immediate rejection
+    // when the flag is missing — that policy lives in the `run` handler.
+    category: {
+      schema: Schema.String,
+      description: `Directive category (${VALID_DIRECTIVE_CATEGORIES.join("|")})`,
+    },
     kind: {
       schema: Schema.Literal(...VALID_DIRECTIVE_KINDS),
       required: true,
@@ -505,10 +517,12 @@ const directiveAddCommand = command({
     },
   },
   run: async ({ args, ws, output }) => {
+    const category = requireDirectiveCategory(args.category, args.scope, output);
     const item = await runEffect(
       DomainDirectives.createDirective({
         projectId: ws.projectId,
         scope: args.scope,
+        category,
         kind: args.kind,
         title: args.title,
         instruction: args.instruction,
@@ -518,21 +532,78 @@ const directiveAddCommand = command({
       }),
     );
     if (output.isJson()) output.success({ item });
-    else output.print(`Created directive ${item.id} (${item.scope}) — '${item.title}'`);
+    else
+      output.print(
+        `Created directive ${item.id} (${item.category}/${item.scope}) — '${item.title}'`,
+      );
   },
 });
+
+/**
+ * Resolve the `--category` flag and validate `(category, scope)` against the
+ * authoritative table in `validator.ts`. On any failure, terminates the
+ * process via `output.error` with a guidance message that lists either the
+ * allowed categories or the valid scopes for the user's category.
+ *
+ * Per PRD 0013 Q3 the rejection is immediate — no inference from `scope`, no
+ * deprecation grace window.
+ */
+function requireDirectiveCategory(
+  rawCategory: string | undefined,
+  scope: DirectiveScope,
+  output: CommandOutput,
+): DirectiveCategory {
+  const list = VALID_DIRECTIVE_CATEGORIES.join(", ");
+  // Treat an empty string the same as a missing flag — the schema is
+  // `Schema.String` (not Literal) so `--category ""` would otherwise fall
+  // through to the "unknown value" branch and lose the guidance-rich message
+  // PRD 0013 Q3 mandates for the absent-flag case.
+  if (rawCategory === undefined || rawCategory === "") {
+    output.error(
+      "category_required",
+      `depot project directive add requires --category <cat>. ` +
+        `Each directive must be filed under exactly one of: ${list}. ` +
+        `Example: depot project directive add --category coder --scope pre-commit ` +
+        `--kind rule --title "Run formatter" --instruction "format before committing". ` +
+        `See docs/concepts/index.md for the (category, scope) compatibility table.`,
+    );
+  }
+  if (!(VALID_DIRECTIVE_CATEGORIES as readonly string[]).includes(rawCategory)) {
+    output.error(
+      "category_invalid",
+      `--category received unknown value '${rawCategory}'. ` + `Allowed categories: ${list}.`,
+    );
+  }
+  const category = rawCategory as DirectiveCategory;
+  if (!isValidCategoryScope(category, scope)) {
+    const validScopes = validScopesForCategory(category);
+    const scopeList = validScopes.length > 0 ? validScopes.join(", ") : "(none)";
+    output.error(
+      "category_scope_invalid",
+      `Invalid (category, scope) combination: (${category}, ${scope}). ` +
+        `Valid scopes for category '${category}': ${scopeList}. ` +
+        `See docs/concepts/index.md for the full compatibility table.`,
+    );
+  }
+  return category;
+}
 
 const directiveListCommand = command({
   meta: { name: "list", description: "List project directives" },
   workspace: true,
   args: {
     scope: { schema: Schema.Literal(...VALID_DIRECTIVE_SCOPES) },
+    category: {
+      schema: Schema.Literal(...VALID_DIRECTIVE_CATEGORIES),
+      description: `Filter by directive category (${VALID_DIRECTIVE_CATEGORIES.join("|")})`,
+    },
     enabledOnly: { schema: Schema.Boolean, type: "boolean", default: false },
   },
   run: async ({ args, ws, output }) => {
     const items = await runEffect(
       DomainDirectives.listDirectives(ws.projectId, {
         scope: args.scope,
+        category: args.category,
         enabledOnly: args.enabledOnly,
       }),
     );
@@ -546,7 +617,13 @@ const directiveListCommand = command({
     }
     for (const d of items) {
       const flags = `${d.enabled ? "enabled" : "disabled"}${d.blocking ? "" : ", non-blocking"}`;
-      output.print(`${d.id}  [${d.scope}] #${d.position}  ${d.title}  (${d.kind}, ${flags})`);
+      // `d.category` is nullable in SQLite (cannot retro-fit NOT NULL via ALTER
+      // TABLE); legacy rows that escaped the backfill render as `?` so the
+      // integrity issue is visible instead of producing a literal "null".
+      const category = d.category ?? "?";
+      output.print(
+        `${d.id}  [${category}/${d.scope}] #${d.position}  ${d.title}  (${d.kind}, ${flags})`,
+      );
     }
   },
 });
@@ -568,6 +645,7 @@ const directiveShowCommand = command({
     else {
       output.fields([
         ["ID", item.id],
+        ["Category", item.category],
         ["Scope", item.scope],
         ["Kind", item.kind],
         ["Repo target", item.repoTarget],

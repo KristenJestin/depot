@@ -687,21 +687,24 @@ describe("prd view model", () => {
     };
 
     const stages = buildStageCards(data);
+    const byPhase = new Map(stages.map((s) => [s.phaseNumber, s] as const));
 
-    expect(stages.map((stage) => stage.id)).toEqual(["phase-1", "phase-2"]);
-    expect(stages[0]).toMatchObject({
+    expect(new Set(stages.map((s) => s.id))).toEqual(new Set(["phase-1", "phase-2"]));
+    expect(byPhase.get(1)).toMatchObject({
       title: "Phase 1",
       phaseNumber: 1,
       current: true,
+      // Pre-activation (ready): no phase is `future` — all phases render at
+      // the same level for the author to vet the plan.
       future: false,
     });
-    expect(stages[1]).toMatchObject({
+    expect(byPhase.get(2)).toMatchObject({
       title: "Phase 2",
       phaseNumber: 2,
       current: false,
-      future: true,
+      future: false,
     });
-    expect(stages[1]?.items.map((item) => item.title)).toEqual(["Prepare the second phase"]);
+    expect(byPhase.get(2)?.items.map((item) => item.title)).toEqual(["Prepare the second phase"]);
   });
 
   it("treats phase 1 as the implicit current phase for a not-yet-activated PRD", () => {
@@ -764,15 +767,19 @@ describe("prd view model", () => {
     };
 
     const stages = buildStageCards(data);
+    const byPhase = new Map(stages.map((s) => [s.phaseNumber, s] as const));
 
-    expect(stages.map((stage) => stage.id)).toEqual(["phase-1", "phase-2", "phase-3"]);
-    expect(stages[0]).toMatchObject({
+    expect(new Set(stages.map((s) => s.id))).toEqual(new Set(["phase-1", "phase-2", "phase-3"]));
+    expect(byPhase.get(1)).toMatchObject({
       phaseNumber: 1,
       current: true,
+      // Pre-activation (ready) with no explicit currentPhase: phase 1 is the
+      // implicit "next current", but no phase is `future` — the planner sees
+      // all phases at the same visual level.
       future: false,
     });
-    expect(stages[1]).toMatchObject({ phaseNumber: 2, current: false, future: true });
-    expect(stages[2]).toMatchObject({ phaseNumber: 3, current: false, future: true });
+    expect(byPhase.get(2)).toMatchObject({ phaseNumber: 2, current: false, future: false });
+    expect(byPhase.get(3)).toMatchObject({ phaseNumber: 3, current: false, future: false });
   });
 
   it("attributes an unphased agent review to the closest phase on a phased PRD", () => {
@@ -1179,5 +1186,129 @@ describe("prd view model", () => {
     // surfaces. The user can still drill in via the review drawer.
     expect(reviewStage?.items).toHaveLength(1);
     expect(reviewStage?.items[0]?.id).toBe("audit-global-audit");
+  });
+
+  describe("isFuturePhase via buildStageCards `card.future`", () => {
+    // The shape needed by buildStageCards. Inlined as a helper to keep the four
+    // status-driven cases compact and aligned.
+    type DetailPrd = Parameters<typeof buildStageCards>[0]["prd"];
+    type DetailTask = Parameters<typeof buildStageCards>[0]["tasks"][number];
+
+    const now = "2026-05-25T10:00:00.000Z";
+
+    function makePrd(
+      status: DetailPrd["status"],
+      currentPhase: DetailPrd["currentPhase"],
+    ): DetailPrd {
+      return {
+        id: "rev-future",
+        prdId: "prd-future",
+        projectId: "proj-1",
+        workspaceId: null,
+        revision: 1,
+        title: "Future-phase PRD",
+        context: null,
+        scope: null,
+        problem: null,
+        solution: null,
+        implementationDecisions: null,
+        testingDecisions: null,
+        status,
+        auditCycles: 0,
+        currentPhase,
+        supersededAt: null,
+        createdAt: now,
+        updatedAt: now,
+        readyAt: now,
+        activatedAt: status === "draft" || status === "ready" ? null : now,
+        suggestedCommitMessage: null,
+      };
+    }
+
+    function makeTask(phase: number, status: DetailTask["status"] = "pending"): DetailTask {
+      return {
+        id: `phase-${phase}-task`,
+        prdRevisionId: "rev-future",
+        position: phase,
+        title: `Task in phase ${phase}`,
+        description: "Intent:\nplaceholder",
+        descriptionFormat: "structured_v1",
+        doneCriteria: "Phase done",
+        dependsOn: "[]",
+        effort: "m",
+        kind: "slice",
+        phaseNumber: phase,
+        status,
+        reviewId: null,
+        severity: null,
+        axis: null,
+        repoId: null,
+        triageState: "ready-for-agent",
+        linkedFilePath: null,
+        linkedStartLine: null,
+        linkedEndLine: null,
+        linkedDiffSha: null,
+        blockedReason: null,
+        skipReason: null,
+        createdAt: now,
+        startedAt: status === "pending" ? null : now,
+        completedAt: status === "done" ? now : null,
+      };
+    }
+
+    function makeData(
+      status: DetailPrd["status"],
+      currentPhase: DetailPrd["currentPhase"],
+      tasks: DetailTask[],
+    ): Parameters<typeof buildStageCards>[0] {
+      return {
+        prd: makePrd(status, currentPhase),
+        tasks,
+        reviews: [],
+        revisions: [],
+        activity: [],
+      };
+    }
+
+    it("draft PRD: no phase card is marked future (3 phases)", () => {
+      const stages = buildStageCards(
+        makeData("draft", null, [makeTask(1), makeTask(2), makeTask(3)]),
+      );
+
+      expect(new Set(stages.map((s) => s.id))).toEqual(new Set(["phase-1", "phase-2", "phase-3"]));
+      expect(stages.every((s) => s.future === false)).toBe(true);
+      // Preserve Q1 decision: phase 1 still flagged as current via markCurrentStage.
+      expect(stages.find((s) => s.phaseNumber === 1)?.current).toBe(true);
+    });
+
+    it("ready PRD: no phase card is marked future (3 phases)", () => {
+      const stages = buildStageCards(
+        makeData("ready", null, [makeTask(1), makeTask(2), makeTask(3)]),
+      );
+
+      expect(new Set(stages.map((s) => s.id))).toEqual(new Set(["phase-1", "phase-2", "phase-3"]));
+      expect(stages.every((s) => s.future === false)).toBe(true);
+      expect(stages.find((s) => s.phaseNumber === 1)?.current).toBe(true);
+    });
+
+    it("in_progress PRD with currentPhase=2 / 3 phases: only phase 3 is future", () => {
+      const stages = buildStageCards(
+        makeData("in_progress", 2, [makeTask(1, "done"), makeTask(2, "in_progress"), makeTask(3)]),
+      );
+
+      const byPhase = new Map(stages.map((s) => [s.phaseNumber, s] as const));
+      expect(byPhase.get(1)?.future).toBe(false);
+      expect(byPhase.get(2)?.future).toBe(false);
+      expect(byPhase.get(2)?.current).toBe(true);
+      expect(byPhase.get(3)?.future).toBe(true);
+    });
+
+    it("done PRD: no phase card is marked future (regression guard)", () => {
+      const stages = buildStageCards(
+        makeData("done", 3, [makeTask(1, "done"), makeTask(2, "done"), makeTask(3, "done")]),
+      );
+
+      expect(stages.map((s) => s.future)).toEqual([false, false, false]);
+    });
   });
 });

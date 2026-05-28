@@ -8,8 +8,12 @@ import { getRuntime } from "#/services/database";
 import { logActivity } from "#/modules/activity/domain";
 import { KNOWN_PROJECT_CONFIG_KEYS, isKnownProjectConfigKey } from "#/shared/project-config-keys";
 import {
+  VALID_DIRECTIVE_CATEGORIES,
   VALID_DIRECTIVE_KINDS,
   VALID_DIRECTIVE_SCOPES,
+  isValidCategoryScope,
+  validScopesForCategory,
+  type DirectiveCategory,
   type DirectiveKind,
   type DirectiveScope,
 } from "#/shared/validator";
@@ -193,6 +197,7 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
   .post("/projects/:id/directives", async (c) => {
     const { id } = c.req.param();
     type Body = {
+      category?: string;
       scope?: string;
       kind?: string;
       title?: string;
@@ -202,8 +207,16 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
       repoTarget?: string;
     };
     const body = (await c.req.json()) as Body;
-    if (!body.scope || !body.kind || !body.title || !body.instruction) {
-      return c.json({ error: "scope, kind, title, instruction are required" }, 422);
+    if (!body.category || !body.scope || !body.kind || !body.title || !body.instruction) {
+      return c.json({ error: "category, scope, kind, title, instruction are required" }, 422);
+    }
+    if (!VALID_DIRECTIVE_CATEGORIES.includes(body.category as DirectiveCategory)) {
+      return c.json(
+        {
+          error: `Unknown category: ${body.category}. Allowed: ${VALID_DIRECTIVE_CATEGORIES.join(", ")}`,
+        },
+        422,
+      );
     }
     if (!VALID_DIRECTIVE_SCOPES.includes(body.scope as DirectiveScope)) {
       return c.json({ error: `Unknown scope: ${body.scope}` }, 422);
@@ -211,10 +224,20 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
     if (!VALID_DIRECTIVE_KINDS.includes(body.kind as DirectiveKind)) {
       return c.json({ error: `Unknown kind: ${body.kind}` }, 422);
     }
+    if (!isValidCategoryScope(body.category as DirectiveCategory, body.scope as DirectiveScope)) {
+      const valid = validScopesForCategory(body.category as DirectiveCategory);
+      return c.json(
+        {
+          error: `Scope '${body.scope}' is not valid for category '${body.category}'. Valid scopes: ${valid.join(", ")}`,
+        },
+        422,
+      );
+    }
     try {
       const item = await getRuntime().runPromise(
         DomainDirectives.createDirective({
           projectId: id,
+          category: body.category as DirectiveCategory,
           scope: body.scope as DirectiveScope,
           kind: body.kind as DirectiveKind,
           title: body.title,

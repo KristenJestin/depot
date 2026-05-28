@@ -56,14 +56,21 @@ Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain l
 
 ### Dev DB isolation — mandatory
 
-The project root contains a `.env` file that sets `DB_PATH=.depot-dev/depot.db`.
+The project root contains a `.env` file that sets `DEPOT_DB_PATH=.depot-dev/depot.db`
+(the legacy `DB_PATH` var is still honoured for one release but the CLI prints a deprecation
+warning on stderr).
 `bun run depot --` builds the CLI (`vp pack`) then runs the dist via `node --env-file-if-exists=.env`,
 so `.env` is automatically picked up. Vitest also loads `.env` automatically.
+
+On every invocation the CLI prints a one-line banner on stderr identifying the target DB:
+`[depot] DB: dev|custom|prod (<path>)`. The `prod` banner is highlighted (yellow on a TTY,
+prefixed with `WARNING: ` otherwise) to make accidental writes against `~/.depot/depot.db`
+obvious. Set `DEPOT_QUIET=1` or pass `--json` to suppress the banner.
 
 - **Always use `bun run depot --` for local CLI testing**, never the global `depot` binary.
   `bun run depot --` writes to `.depot-dev/depot.db`, not `~/.depot/depot.db`.
 - **Never run `bun run db:migrate` or apply migrations manually against `~/.depot/depot.db`.**
-  If you need to test a migration, set `DB_PATH` to a throwaway path and verify there first.
+  If you need to test a migration, set `DEPOT_DB_PATH` to a throwaway path and verify there first.
 - When you change `src/db/schema.ts`, regenerate migrations with `bun run db:generate`, verify
   the generated SQL is additive (ALTER TABLE ADD COLUMN, CREATE TABLE, CREATE INDEX).
   If the schema change requires dropping or renaming tables, write a data-preserving migration:

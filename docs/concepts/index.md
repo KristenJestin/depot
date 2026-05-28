@@ -296,7 +296,8 @@ Important runtime behaviors:
 
 - the depot directory is created automatically when needed
 - SQLite migrations are applied automatically on open
-- the database path can be overridden with `DB_PATH`
+- the database path can be overridden with `DEPOT_DB_PATH` (the legacy `DB_PATH` is still
+  honoured with a deprecation warning)
 - there is no remote service dependency in the current architecture
 
 That keeps the workflow local, deterministic, terminal-friendly, and inspectable.

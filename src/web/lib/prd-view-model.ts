@@ -512,6 +512,13 @@ function orderStageCards(cards: StageCard[]): StageCard[] {
 }
 
 function isFuturePhase(prd: DetailPrd, phaseNumber: number): boolean {
+  // In draft / ready the PRD is still being planned: every phase is equally
+  // "to come", so nothing should be flagged future. This keeps the
+  // `FuturePhases` accordion empty (and unmounted) so the reader sees all
+  // phases at the same visual level instead of having to expand a section.
+  if (prd.status === "draft" || prd.status === "ready") {
+    return false;
+  }
   if (prd.status === "done" || prd.status === "canceled") {
     return false;
   }
@@ -519,9 +526,9 @@ function isFuturePhase(prd: DetailPrd, phaseNumber: number): boolean {
   if (prd.currentPhase !== null && prd.currentPhase !== undefined) {
     return phaseNumber > prd.currentPhase;
   }
-  // Pre-activation (draft / ready): phase 1 is the implicit "next current",
-  // everything beyond it is future and should fold into the "Future phases"
-  // collapsible instead of cluttering the timeline.
+  // Activated PRD without an explicit currentPhase: phase 1 is the implicit
+  // "next current", everything beyond it is future and should fold into the
+  // "Future phases" collapsible instead of cluttering the timeline.
   return phaseNumber > 1;
 }
 

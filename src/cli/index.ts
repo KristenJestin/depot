@@ -14,6 +14,7 @@ import { serveCommand } from "./commands/serve";
 import { adrCommand } from "./commands/adrs";
 import { command } from "#/cli/command";
 import { setDebug, setJsonMode } from "#/shared/logger";
+import { logDbBoot } from "#/cli/log-db-boot";
 import pkg from "../../package.json";
 
 process.on("warning", (warning) => {
@@ -24,6 +25,8 @@ process.on("warning", (warning) => {
 if (!process.stdout.isTTY && !process.env["NO_COLOR"] && !process.env["FORCE_COLOR"]) {
   process.env["NO_COLOR"] = "1";
 }
+
+logDbBoot();
 
 const main = command({
   meta: {

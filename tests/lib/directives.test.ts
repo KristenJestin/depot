@@ -39,6 +39,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Format",
         instruction: "echo format",
@@ -48,6 +49,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-ship",
+        category: "ship",
         kind: "rule",
         title: "Update CHANGELOG",
         instruction: "always update CHANGELOG before ship",
@@ -67,6 +69,7 @@ describe("project directives", () => {
         createDirective({
           projectId,
           scope: "pre-review",
+          category: "dev",
           kind: "command",
           title: "Bad",
           instruction: "rm -rf /tmp/foo",
@@ -80,6 +83,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Lint",
         instruction: "echo lint",
@@ -95,6 +99,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Tmp",
         instruction: "echo tmp",
@@ -110,6 +115,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo success",
         instruction: "echo hello",
@@ -127,6 +133,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Fails",
         instruction: "exit 7",
@@ -142,6 +149,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "A - ok",
         instruction: "echo a",
@@ -151,6 +159,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "B - fails",
         instruction: "exit 3",
@@ -160,6 +169,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "C - never runs",
         instruction: "echo c",
@@ -177,6 +187,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Format",
         instruction: "echo format",
@@ -187,6 +198,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "API only",
         instruction: "echo api",
@@ -201,6 +213,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "A",
         instruction: "echo a",
@@ -210,6 +223,7 @@ describe("project directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "B",
         instruction: "echo b",
@@ -218,6 +232,267 @@ describe("project directives", () => {
     await run(reorderDirectives(projectId, "pre-review", [b.id, a.id]));
     const list = await run(listDirectives(projectId, { scope: "pre-review" }));
     expect(list.map((d) => d.title)).toEqual(["B", "A"]);
+  });
+});
+
+describe("createDirective category validation (PRD 0013 / T1)", () => {
+  let db: Database;
+  let run: ReturnType<typeof makeRun>;
+  let projectId: string;
+
+  beforeEach(async () => {
+    db = createTestDb().db;
+    run = makeRun(db);
+    projectId = (await run(createProject({ name: "test" }))).id;
+  });
+
+  it("rejects when category is missing", async () => {
+    await expect(
+      run(
+        createDirective({
+          projectId,
+          scope: "always",
+          kind: "rule",
+          title: "no cat",
+          instruction: "be polite",
+        }),
+      ),
+    ).rejects.toThrow(/category is required/i);
+  });
+
+  it("rejects when (category, scope) is not in the validity table", async () => {
+    await expect(
+      run(
+        createDirective({
+          projectId,
+          scope: "pre-doc-sync",
+          category: "dev",
+          kind: "rule",
+          title: "wrong combo",
+          instruction: "noop",
+        }),
+      ),
+    ).rejects.toThrow(/invalid \(category, scope\)/i);
+
+    await expect(
+      run(
+        createDirective({
+          projectId,
+          scope: "pre-commit",
+          category: "prd",
+          kind: "rule",
+          title: "wrong combo",
+          instruction: "noop",
+        }),
+      ),
+    ).rejects.toThrow(/invalid \(category, scope\)/i);
+
+    await expect(
+      run(
+        createDirective({
+          projectId,
+          scope: "pre-ship",
+          category: "doc",
+          kind: "rule",
+          title: "wrong combo",
+          instruction: "noop",
+        }),
+      ),
+    ).rejects.toThrow(/invalid \(category, scope\)/i);
+  });
+
+  it("accepts every (category, scope) pair declared valid by the spec", async () => {
+    const valid: Array<{
+      category: "prd" | "dev" | "coder" | "auditor" | "doc" | "ship";
+      scope:
+        | "always"
+        | "pre-review"
+        | "pre-commit"
+        | "pre-doc-sync"
+        | "pre-ship"
+        | "on-error"
+        | "pre-coder-spawn"
+        | "post-auditor-pass"
+        | "pre-handoff"
+        | "pre-phase-advance";
+    }> = [
+      { category: "prd", scope: "always" },
+      { category: "dev", scope: "always" },
+      { category: "dev", scope: "pre-coder-spawn" },
+      { category: "dev", scope: "pre-review" },
+      { category: "dev", scope: "post-auditor-pass" },
+      { category: "dev", scope: "pre-handoff" },
+      { category: "dev", scope: "pre-phase-advance" },
+      { category: "coder", scope: "always" },
+      { category: "coder", scope: "pre-commit" },
+      { category: "auditor", scope: "always" },
+      { category: "auditor", scope: "pre-review" },
+      { category: "doc", scope: "always" },
+      { category: "doc", scope: "pre-doc-sync" },
+      { category: "ship", scope: "always" },
+      { category: "ship", scope: "pre-ship" },
+    ];
+    expect(valid).toHaveLength(15);
+    for (const pair of valid) {
+      const created = await run(
+        createDirective({
+          projectId,
+          scope: pair.scope,
+          category: pair.category,
+          kind: "rule",
+          title: `${pair.category}/${pair.scope}`,
+          instruction: "ok",
+        }),
+      );
+      expect(created.category).toBe(pair.category);
+      expect(created.scope).toBe(pair.scope);
+    }
+    const all = await run(listDirectives(projectId));
+    expect(all).toHaveLength(15);
+  });
+
+  it("rejects an unknown category value", async () => {
+    await expect(
+      run(
+        createDirective({
+          projectId,
+          scope: "always",
+          // unknown category casted in — runtime guard must still trip.
+          category: "frontend" as unknown as "dev",
+          kind: "rule",
+          title: "bad cat",
+          instruction: "noop",
+        }),
+      ),
+    ).rejects.toThrow(/unknown directive category/i);
+  });
+});
+
+describe("listDirectives category filter (PRD 0013 / T1)", () => {
+  let db: Database;
+  let run: ReturnType<typeof makeRun>;
+  let projectId: string;
+
+  beforeEach(async () => {
+    db = createTestDb().db;
+    run = makeRun(db);
+    projectId = (await run(createProject({ name: "test" }))).id;
+    await run(
+      createDirective({
+        projectId,
+        scope: "always",
+        category: "dev",
+        kind: "rule",
+        title: "dev always",
+        instruction: "ok",
+      }),
+    );
+    await run(
+      createDirective({
+        projectId,
+        scope: "always",
+        category: "coder",
+        kind: "rule",
+        title: "coder always",
+        instruction: "ok",
+      }),
+    );
+    await run(
+      createDirective({
+        projectId,
+        scope: "pre-commit",
+        category: "coder",
+        kind: "rule",
+        title: "coder pre-commit",
+        instruction: "ok",
+      }),
+    );
+  });
+
+  it("returns every row when no filter is provided (backward-compat)", async () => {
+    const rows = await run(listDirectives(projectId));
+    expect(rows).toHaveLength(3);
+  });
+
+  it("filters by category alone", async () => {
+    const rows = await run(listDirectives(projectId, { category: "coder" }));
+    expect(rows.map((r) => r.title).sort()).toEqual(["coder always", "coder pre-commit"]);
+  });
+
+  it("filters by scope alone (existing behaviour intact)", async () => {
+    const rows = await run(listDirectives(projectId, { scope: "always" }));
+    expect(rows.map((r) => r.title).sort()).toEqual(["coder always", "dev always"]);
+  });
+
+  it("combines category and scope filters", async () => {
+    const rows = await run(listDirectives(projectId, { category: "coder", scope: "pre-commit" }));
+    expect(rows.map((r) => r.title)).toEqual(["coder pre-commit"]);
+  });
+});
+
+describe("project_directives.category backfill migration (PRD 0013 / T1)", () => {
+  let db: Database;
+  let run: ReturnType<typeof makeRun>;
+  let projectId: string;
+
+  beforeEach(async () => {
+    db = createTestDb().db;
+    run = makeRun(db);
+    projectId = (await run(createProject({ name: "test" }))).id;
+  });
+
+  it("backfills category from scope for every legacy scope", async () => {
+    const cases: Array<{ scope: string; expected: string }> = [
+      { scope: "pre-doc-sync", expected: "doc" },
+      { scope: "pre-ship", expected: "ship" },
+      { scope: "pre-commit", expected: "coder" },
+      { scope: "pre-review", expected: "dev" },
+      { scope: "always", expected: "dev" },
+      { scope: "on-error", expected: "dev" },
+    ];
+    const sqliteClient = (
+      db as unknown as {
+        $client: {
+          prepare: (sql: string) => {
+            run: (...args: unknown[]) => void;
+            all: (...args: unknown[]) => unknown[];
+          };
+        };
+      }
+    ).$client;
+    // Simulate pre-migration rows: each is inserted with NULL `category`, just
+    // like a row that existed before the ALTER TABLE landed.
+    for (const c of cases) {
+      sqliteClient
+        .prepare(
+          "INSERT INTO project_directives (id, project_id, scope, category, title, instruction, kind, repo_target, blocking, position, enabled, created_at, updated_at) " +
+            "VALUES (?, ?, ?, NULL, ?, ?, 'rule', 'auto', 1, 0, 1, ?, ?)",
+        )
+        .run(`leg-${c.scope}`, projectId, c.scope, `legacy ${c.scope}`, "noop", 0, 0);
+    }
+    // Re-run the backfill statement from the migration — drizzle's migrator
+    // has already applied it once on the in-memory DB, but applying it again
+    // is idempotent because of the `WHERE category IS NULL` clause.
+    sqliteClient
+      .prepare(
+        "UPDATE project_directives SET category = CASE scope " +
+          "WHEN 'pre-doc-sync' THEN 'doc' " +
+          "WHEN 'pre-ship'     THEN 'ship' " +
+          "WHEN 'pre-commit'   THEN 'coder' " +
+          "WHEN 'pre-review'   THEN 'dev' " +
+          "WHEN 'always'       THEN 'dev' " +
+          "WHEN 'on-error'     THEN 'dev' " +
+          "ELSE 'dev' END WHERE category IS NULL",
+      )
+      .run();
+    const rows = sqliteClient
+      .prepare("SELECT scope, category FROM project_directives ORDER BY scope")
+      .all() as Array<{ scope: string; category: string }>;
+    expect(rows).toHaveLength(cases.length);
+    const byScope = new Map(rows.map((r) => [r.scope, r.category]));
+    for (const c of cases) {
+      expect(byScope.get(c.scope)).toBe(c.expected);
+    }
   });
 });
 
@@ -314,6 +589,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo cwd",
         instruction: "echo cwd",
@@ -335,6 +611,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Should fail if run",
         instruction: "exit 1",
@@ -356,6 +633,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -376,6 +654,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -393,6 +672,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -416,6 +696,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -442,6 +723,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -460,6 +742,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -481,6 +764,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -502,6 +786,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -531,6 +816,7 @@ describe("repo-aware directives", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -573,6 +859,7 @@ describe("runDirective — PRD-scoped activity log (PRD 0007 T2)", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -590,6 +877,7 @@ describe("runDirective — PRD-scoped activity log (PRD 0007 T2)", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -615,6 +903,7 @@ describe("runDirective — PRD-scoped activity log (PRD 0007 T2)", () => {
       createDirective({
         projectId,
         scope: "pre-ship",
+        category: "ship",
         kind: "command",
         title: "Print cwd",
         instruction: "echo cwd",
@@ -650,6 +939,7 @@ describe("runDirective — PRD-scoped activity log (PRD 0007 T2)", () => {
       createDirective({
         projectId,
         scope: "pre-ship",
+        category: "ship",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -669,6 +959,7 @@ describe("runDirective — PRD-scoped activity log (PRD 0007 T2)", () => {
       createDirective({
         projectId,
         scope: "pre-ship",
+        category: "ship",
         kind: "command",
         title: "Echo",
         instruction: "echo hi",
@@ -687,6 +978,7 @@ describe("runDirective — PRD-scoped activity log (PRD 0007 T2)", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "A",
         instruction: "echo a",
@@ -696,6 +988,7 @@ describe("runDirective — PRD-scoped activity log (PRD 0007 T2)", () => {
       createDirective({
         projectId,
         scope: "pre-review",
+        category: "dev",
         kind: "command",
         title: "B",
         instruction: "echo b",

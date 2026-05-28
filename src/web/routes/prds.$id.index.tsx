@@ -52,6 +52,10 @@ function PrdDetailRoute() {
   const summary = buildDetailSummary(data);
   const stages = buildStageCards(data);
   const revisions = buildRevisionEntries(data);
+  // In draft / ready the PRD is still being planned — every phase is equally
+  // "to come". Expand all timeline cards so the author can review the whole
+  // plan at a glance without clicking phase by phase.
+  const expandAllStages = data.prd.status === "draft" || data.prd.status === "ready";
   const headRevision = revisions.find((revision) => revision.isHead);
   const isSuperseded = data.prd.supersededAt !== null;
   const selectedTask =
@@ -146,7 +150,7 @@ function PrdDetailRoute() {
         onLeftClose={() => setTasksOpen(false)}
         left={
           <div className="p-4" onClickCapture={handlePaneClick}>
-            <StageTimeline cards={stages} />
+            <StageTimeline cards={stages} expandAll={expandAllStages} />
           </div>
         }
         rightTitle="Activity"

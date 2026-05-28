@@ -21,6 +21,8 @@ You may not:
 - change PRD scope
 - mark the PRD done
 
+{{directives scope=always category=auditor}}
+
 ## Axis
 
 The auditor pass runs on one of two axes, chosen at invocation:
@@ -59,6 +61,8 @@ depot review task add <review-id> --axis <yourAxis> ...
 - `testingDecisions` are honored — the planned tests exist and pass
 
 ## Workflow
+
+{{hooks scope=pre-review category=auditor}}
 
 1. Start a new agent review: `depot review start <prd-id> --type agent`
 2. Audit the implementation and record findings as you discover them:

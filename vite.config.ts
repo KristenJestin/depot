@@ -67,6 +67,10 @@ export default defineConfig({
     testTimeout: 10000,
     root: path.resolve(import.meta.dirname),
     include: ["tests/**/*.test.{ts,tsx}"],
+    // E2E scenarios live under tests/e2e/**/*.e2e.test.ts and require the
+    // built CLI (`vp pack`) + their own vitest config. Run them via
+    // `bun run test:e2e`, not the default fast unit-test loop.
+    exclude: ["node_modules/**", "dist/**", "tests/e2e/**/*.e2e.test.ts"],
     setupFiles: ["tests/web/setup.ts"],
   },
 
@@ -86,7 +90,7 @@ export default defineConfig({
     semi: true,
     tabWidth: 2,
     trailingComma: "all",
-    ignorePatterns: ["dist/**", "node_modules/**", "src/web/routeTree.gen.ts"],
+    ignorePatterns: ["dist/**", "node_modules/**", "src/web/routeTree.gen.ts", ".scratch/**"],
   },
 
   pack: {

@@ -223,21 +223,29 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
     sha: Schema.optional(Schema.String),
+    userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
   }),
-  prd_ready: Schema.Struct({ prdRevisionId: Schema.optional(Schema.String), title: Schema.String }),
+  prd_ready: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    title: Schema.String,
+    userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
   prd_review_requested: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
     reason: Schema.optional(Schema.String),
+    userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   prd_resumed: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
+    userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   prd_done: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
     sha: Schema.optional(Schema.String),
+    userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   prd_approved: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),
@@ -248,6 +256,7 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
   prd_canceled: Schema.Struct({
     prdRevisionId: Schema.optional(Schema.String),
     title: Schema.String,
+    userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   prd_forked: Schema.Struct({
     sourcePrdRevisionId: Schema.String,
@@ -290,6 +299,7 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     fromPhase: Schema.Number,
     toPhase: Schema.optional(Schema.Number),
     sha: Schema.optional(Schema.String),
+    userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   coder_progress: Schema.Struct({
     stage: Schema.Literal("start", "edit", "verify", "tool", "note", "error"),
@@ -365,6 +375,26 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     failingDirectiveId: Schema.optional(Schema.String),
   }),
   pre_doc_sync_check: Schema.Struct({
+    ok: Schema.Boolean,
+    failingDirectiveId: Schema.optional(Schema.String),
+  }),
+  pre_coder_check: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    ok: Schema.Boolean,
+    failingDirectiveId: Schema.optional(Schema.String),
+  }),
+  post_auditor_check: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    ok: Schema.Boolean,
+    failingDirectiveId: Schema.optional(Schema.String),
+  }),
+  pre_handoff_check: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
+    ok: Schema.Boolean,
+    failingDirectiveId: Schema.optional(Schema.String),
+  }),
+  pre_phase_advance_check: Schema.Struct({
+    prdRevisionId: Schema.optional(Schema.String),
     ok: Schema.Boolean,
     failingDirectiveId: Schema.optional(Schema.String),
   }),

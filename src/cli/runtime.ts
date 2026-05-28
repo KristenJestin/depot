@@ -6,6 +6,7 @@ import { resolveWorkspace } from "#/modules/workspaces/domain";
 import { resolveCurrentRepo } from "#/modules/projects/repos";
 import { resolveOrCreateWorkspaceForPath } from "#/modules/workspaces/bootstrap";
 import { outputError } from "#/cli/output";
+import { buildNoWorkspaceMessage } from "#/cli/no-workspace-help";
 
 /**
  * Run an Effect that requires the Db service using the shared runtime.
@@ -17,28 +18,42 @@ export async function runEffect<A, E>(effect: Effect.Effect<A, E, Db>): Promise<
 
 /**
  * Resolve the workspace matching the current working directory.
- * Exits with code 1 if no workspace is found.
+ *
+ * - By default, exits with code 1 (via `outputError`) when no workspace is
+ *   found. This is the right behaviour for top-level command handlers.
+ * - When `throwOnMissing: true` is passed, throws an Error instead so callers
+ *   that want to degrade gracefully (e.g. `depot context …` best-effort
+ *   helpers) can catch and fall back. Without this option the existing
+ *   try/catch wrappers in those helpers are dead code in production because
+ *   `outputError` calls `process.exit(1)` before the catch block runs.
  */
 export async function resolveCurrentWorkspace(
-  options: { autoCreate?: boolean; cwd?: string } = {},
+  options: { autoCreate?: boolean; cwd?: string; throwOnMissing?: boolean } = {},
 ) {
   const rawCwd = options.cwd ?? process.cwd();
   const cwd = normalizeWorkspacePath(rawCwd);
   log.debug("Resolving workspace for", cwd);
 
+  const failMissing = (code: string, message: string): never => {
+    if (options.throwOnMissing) {
+      throw new Error(`${code}: ${message}`);
+    }
+    return outputError(code, message);
+  };
+
   const db = await getDb().catch((e: unknown) =>
-    outputError("db_error", e instanceof Error ? e.message : "Failed to initialize database."),
+    failMissing("db_error", e instanceof Error ? e.message : "Failed to initialize database."),
   );
 
   let ws = await runEffect(resolveWorkspace(cwd)).catch((e: unknown) =>
-    outputError("db_error", e instanceof Error ? e.message : "Failed to query workspaces."),
+    failMissing("db_error", e instanceof Error ? e.message : "Failed to query workspaces."),
   );
 
   if (!ws && options.autoCreate) {
     try {
       ws = (await resolveOrCreateWorkspaceForPath(db, rawCwd)).workspace;
     } catch (e: unknown) {
-      outputError(
+      failMissing(
         "auto_create_refused",
         e instanceof Error ? e.message : "Failed to auto-create workspace.",
       );
@@ -46,10 +61,8 @@ export async function resolveCurrentWorkspace(
   }
 
   if (!ws) {
-    outputError(
-      "no_workspace",
-      "No workspace found for current directory. Run `depot init` to create a new project here, or `depot workspace add --project <id|name>` to attach this folder to an existing project.",
-    );
+    const message = await buildNoWorkspaceMessage(cwd, db);
+    return failMissing("no_workspace", message);
   }
 
   log.debug("Resolved workspace", ws.id, "->", ws.path);

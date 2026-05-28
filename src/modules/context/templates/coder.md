@@ -18,6 +18,8 @@ You may not:
 - mark PRDs ready, in progress, or done
 - invent tasks outside the assigned context unless the user explicitly redirects the workflow through the dev agent
 
+{{directives scope=always category=coder}}
+
 ## Session Start
 
 Load live workflow state before starting:
@@ -139,6 +141,13 @@ If during implementation you discover work outside the assigned scope (unexpecte
 3. Continue with other independent tasks if any; do not halt the entire pass for one scope gap.
 
 This makes escalations structured so the orchestrator and auditor can filter them.
+
+## Pre-commit checks
+
+If your pass involves making any commits, honor the project's pre-commit hooks before
+writing them.
+
+{{hooks scope=pre-commit category=coder}}
 
 ## Rules
 

@@ -88,15 +88,20 @@ export const addWorkspace = (input: { projectId: string; path: string; label?: s
 /**
  * Resolve the current workspace from a cwd.
  *
- * Resolution order — designed so a too-broad ancestor workspace (e.g. one
- * registered at `~`) cannot shadow a worktree that belongs to another
- * registered project:
+ * Resolution order:
  *
  *   1. Exact match (cwd == workspace.path) — always wins.
- *   2. Git worktree fallback (`resolveWorktreeMainPath` → match against
- *      registered workspaces) — preferred over a mere ancestor match.
- *   3. Longest-prefix ancestor match — last resort.
- *   4. Otherwise `null`.
+ *   2. Among the candidates below, the one with the most specific path
+ *      (longest registered workspace path) wins:
+ *        a. longest-prefix ancestor of the cwd itself, and
+ *        b. longest-prefix ancestor of the worktree main repo
+ *           (when the cwd lives in a git linked worktree).
+ *      "Longest wins" naturally protects against a too-broad ancestor
+ *      workspace (e.g. one registered at `~`) shadowing a more specific
+ *      worktree, AND keeps a feature-group workspace registered at
+ *      `~/Projects/_worktrees/<feature>` from being shadowed by the main
+ *      repo workspace its sub-repos are based on.
+ *   3. Otherwise `null`.
  *
  * Orphan workspaces (path deleted on disk) are masked: the row stays in
  * the DB but never wins a match.
@@ -130,13 +135,22 @@ export const resolveWorkspace = (currentPath: string) =>
     const exactMatch = findExactMatch(canonicalCurrentPath);
     if (exactMatch) return exactMatch;
 
+    const ancestorMatch = findLongestAncestor(canonicalCurrentPath);
+
     const mainRepoPath = yield* resolveWorktreeMainPath(currentPath);
-    if (mainRepoPath) {
-      const worktreeMatch = findLongestAncestor(normalizeWorkspacePath(mainRepoPath));
-      if (worktreeMatch) return worktreeMatch;
+    const worktreeMatch = mainRepoPath
+      ? findLongestAncestor(normalizeWorkspacePath(mainRepoPath))
+      : null;
+
+    // Both candidates are valid — keep the one whose path is most specific.
+    if (ancestorMatch && worktreeMatch) {
+      return normalizeWorkspacePath(ancestorMatch.path).length >=
+        normalizeWorkspacePath(worktreeMatch.path).length
+        ? ancestorMatch
+        : worktreeMatch;
     }
 
-    return findLongestAncestor(canonicalCurrentPath);
+    return ancestorMatch ?? worktreeMatch;
   });
 
 export const listWorkspaces = (filter: { projectId?: string } = {}) =>

@@ -255,11 +255,46 @@ export function defaultDepotDir(): string {
 }
 
 /**
- * Resolve the default database path: `~/.depot/depot.db`.
+ * Describes which database the CLI is about to operate on.
+ *
+ * - `prod`   : the user's real `~/.depot/depot.db` (no env override).
+ * - `dev`    : an explicit override whose path contains `.depot-dev`
+ *              (the convention used by this repo's local dev workflow).
+ * - `custom` : any other explicit override (CI, throwaway tests, etc.).
+ */
+export type DbMode = { kind: "prod" | "dev" | "custom"; path: string };
+
+const DEV_PATH_SEGMENT = ".depot-dev";
+
+function classifyOverride(rawPath: string): DbMode {
+  const kind = rawPath.includes(DEV_PATH_SEGMENT) ? "dev" : "custom";
+  return { kind, path: rawPath };
+}
+
+/**
+ * Resolve which database the CLI is going to open, without opening it.
+ *
+ * Precedence:
+ * 1. `DEPOT_DB_PATH` (current, preferred env var).
+ * 2. `DB_PATH`       (legacy env var, still honoured for one release).
+ * 3. `~/.depot/depot.db` (production default).
+ */
+export function currentDbMode(): DbMode {
+  const explicit = process.env["DEPOT_DB_PATH"];
+  if (explicit) {
+    return classifyOverride(explicit);
+  }
+  const legacy = process.env["DB_PATH"];
+  if (legacy) {
+    return classifyOverride(legacy);
+  }
+  return { kind: "prod", path: `${defaultDepotDir()}/depot.db` };
+}
+
+/**
+ * Resolve the default database path. Delegates to `currentDbMode()` so that
+ * env var precedence and the dev/custom/prod classification live in one place.
  */
 export function defaultDbPath(): string {
-  if (process.env["DB_PATH"]) {
-    return process.env["DB_PATH"];
-  }
-  return `${defaultDepotDir()}/depot.db`;
+  return currentDbMode().path;
 }

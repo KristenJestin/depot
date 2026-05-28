@@ -22,6 +22,8 @@ You may not:
 - run the dev, coder, or auditor flow
 - skip unresolved ambiguity just to finish faster
 
+{{directives scope=always category=prd}}
+
 ## Session Contract
 
 The PRD must be built live, not all at once.
@@ -236,22 +238,31 @@ If you need to adjust a ready PRD, always fork first:
 ```
 depot prd fork <prd-id>   # creates a new draft revision
 depot task update <new-task-id> ...
-depot prd ready <new-prd-id>
+depot prd ready <new-prd-id> --user-confirmed "<verbatim user quote>"
 ```
+
+`--user-confirmed` is mandatory on `prd ready`. Pass a verbatim quote of the user's approval; never invent one.
 
 ### 8. Project directives (always scope)
 
-Read `depot project directive list --scope always --json` and respect every `rule`-kind
-directive. These are ground rules the user wants every agent to honor regardless of phase
-(e.g. tone, naming conventions, branching rules).
+The `always`-scope directives for this category are injected inline at the top of this
+context. For manual introspection, run `depot project directive list --category prd`.
 
 ### 9. Finish At Ready
+
+> **STOP — Never transition a PRD without explicit user approval.** Ask the
+> user to confirm in their own words before running
+> `depot prd ready/activate/request-review/done/phase-advance/cancel/close`.
+> Pass their formulation via `--user-confirmed "<verbatim quote>"`. The CLI
+> rejects the command without this flag.
 
 Only when you are confident that a dev orchestrator can hand the work to a coder without major ambiguity:
 
 - summarize what is now specified
-- tell the user the PRD is ready
-- run `depot prd ready <prd-id>`
+- tell the user the PRD is ready and ask for their explicit go-ahead
+- run `depot prd ready <prd-id> --user-confirmed "<verbatim user quote>"`
+
+`--user-confirmed` is mandatory. Pass a verbatim quote of the user's approval; never invent one.
 
 Stop there.
 

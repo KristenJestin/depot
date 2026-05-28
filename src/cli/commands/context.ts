@@ -1,11 +1,13 @@
 import { Schema } from "effect";
 import { command } from "#/cli/command";
 import { getContextTemplate } from "#/modules/context";
+import { renderTemplate } from "#/modules/context/renderer";
 import { runEffect, resolveCurrentWorkspace } from "#/cli/runtime";
 import { getPrd } from "#/modules/prds/domain";
 import { resolveRepoShipState, renderRepoShipState } from "#/modules/context/ship-state";
 import { resolveDocState, renderDocState } from "#/modules/context/doc-state";
 import { listProfiles, listSyncRuns } from "#/modules/docs/sync";
+import { log } from "#/shared/logger";
 
 /**
  * Resolve the current `project_repo` for the cwd and render the line printed in
@@ -16,7 +18,10 @@ import { listProfiles, listSyncRuns } from "#/modules/docs/sync";
  */
 async function renderCurrentRepoLine(): Promise<string | null> {
   try {
-    const { currentRepo } = await resolveCurrentWorkspace({ autoCreate: false });
+    const { currentRepo } = await resolveCurrentWorkspace({
+      autoCreate: false,
+      throwOnMissing: true,
+    });
     if (currentRepo) {
       return `Repo    : ${currentRepo.name}`;
     }
@@ -54,7 +59,7 @@ async function docSyncRanForPrd(projectId: string, prdId: string): Promise<boole
  */
 async function renderShipState(prdTarget: string): Promise<string> {
   try {
-    const { ws } = await resolveCurrentWorkspace({ autoCreate: false });
+    const { ws } = await resolveCurrentWorkspace({ autoCreate: false, throwOnMissing: true });
     if (!prdTarget) {
       return "Repos   : (no PRD specified — pass a PRD id to see per-repo state)";
     }
@@ -76,13 +81,32 @@ async function renderShipState(prdTarget: string): Promise<string> {
 }
 
 /**
+ * Pass the resolved static template body through `renderTemplate`, which
+ * substitutes `{{directives …}}` / `{{hooks …}}` markers with the project's
+ * current directives. The renderer is best-effort: any failure (workspace not
+ * found, DB error, etc.) degrades to the raw template plus a one-line warning
+ * on stderr — the agent's access to the universal contract is more important
+ * than a clean substitution.
+ */
+async function renderTemplateWithFallback(template: string): Promise<string> {
+  try {
+    const { ws } = await resolveCurrentWorkspace({ autoCreate: false, throwOnMissing: true });
+    return await runEffect(renderTemplate(template, ws.projectId));
+  } catch (e: unknown) {
+    const reason = e instanceof Error ? e.message : String(e);
+    log.error(`Warning: renderer failed, emitting raw template (${reason})`);
+    return template;
+  }
+}
+
+/**
  * Resolve and render the precomputed doc state for `context doc`: the active
  * doc profiles and the last `doc_sync_run` per profile. Best-effort — degrades
  * to a one-line note when the workspace cannot be resolved.
  */
 async function renderDocContextState(): Promise<string> {
   try {
-    const { ws } = await resolveCurrentWorkspace({ autoCreate: false });
+    const { ws } = await resolveCurrentWorkspace({ autoCreate: false, throwOnMissing: true });
     const states = await runEffect(resolveDocState(ws.projectId));
     return renderDocState(states);
   } catch {
@@ -174,7 +198,8 @@ export const contextCommand = command({
     }
 
     if (mode) {
-      lines.push(getContextTemplate(mode));
+      const template = getContextTemplate(mode);
+      lines.push(await renderTemplateWithFallback(template));
     }
 
     output.print(lines.join("\n"));

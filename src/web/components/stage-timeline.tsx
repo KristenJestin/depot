@@ -48,7 +48,19 @@ type TaskGroup = {
   rows: StageItem[];
 };
 
-export function StageTimeline({ cards }: { cards: StageCard[] }) {
+export function StageTimeline({
+  cards,
+  expandAll = false,
+}: {
+  cards: StageCard[];
+  /**
+   * When true, every card in the timeline is expanded on mount instead of
+   * only the one matching `defaultOpenId`. Used in draft / ready PRDs where
+   * every phase is equally "to come" and the reader wants the whole plan
+   * dépliée d'un seul coup.
+   */
+  expandAll?: boolean;
+}) {
   const phases = buildTimelinePhases(cards);
   const defaultOpenId = phases.flatMap((phase) => phase.cards).find((card) => card.current)?.id;
   const activePhases = phases.filter((phase) => !phase.future);
@@ -57,10 +69,19 @@ export function StageTimeline({ cards }: { cards: StageCard[] }) {
   return (
     <div className="space-y-4">
       {futurePhases.length > 0 ? (
-        <FuturePhases phases={futurePhases} defaultOpenId={defaultOpenId ?? null} />
+        <FuturePhases
+          phases={futurePhases}
+          defaultOpenId={defaultOpenId ?? null}
+          expandAll={expandAll}
+        />
       ) : null}
       {activePhases.map((phase) => (
-        <PhaseSection key={phase.id} phase={phase} defaultOpenId={defaultOpenId ?? null} />
+        <PhaseSection
+          key={phase.id}
+          phase={phase}
+          defaultOpenId={defaultOpenId ?? null}
+          expandAll={expandAll}
+        />
       ))}
     </div>
   );
@@ -69,9 +90,11 @@ export function StageTimeline({ cards }: { cards: StageCard[] }) {
 function FuturePhases({
   phases,
   defaultOpenId,
+  expandAll,
 }: {
   phases: TimelinePhase[];
   defaultOpenId: string | null;
+  expandAll: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -97,7 +120,12 @@ function FuturePhases({
       <CollapsiblePanel>
         <div className="space-y-4 mt-4">
           {phases.map((phase) => (
-            <PhaseSection key={phase.id} phase={phase} defaultOpenId={defaultOpenId} />
+            <PhaseSection
+              key={phase.id}
+              phase={phase}
+              defaultOpenId={defaultOpenId}
+              expandAll={expandAll}
+            />
           ))}
         </div>
       </CollapsiblePanel>
@@ -108,9 +136,11 @@ function FuturePhases({
 function PhaseSection({
   phase,
   defaultOpenId,
+  expandAll,
 }: {
   phase: TimelinePhase;
   defaultOpenId: string | null;
+  expandAll: boolean;
 }) {
   return (
     <section className={["space-y-2", phase.future ? "opacity-70" : ""].filter(Boolean).join(" ")}>
@@ -120,7 +150,11 @@ function PhaseSection({
       </div>
       <div className="space-y-2">
         {phase.cards.map((card) => (
-          <TimelineCardView key={card.id} card={card} defaultOpen={card.id === defaultOpenId} />
+          <TimelineCardView
+            key={card.id}
+            card={card}
+            defaultOpen={expandAll || card.id === defaultOpenId}
+          />
         ))}
       </div>
     </section>

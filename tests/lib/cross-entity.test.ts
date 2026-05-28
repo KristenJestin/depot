@@ -81,4 +81,40 @@ describe("cross-entity helpers", () => {
       /does not belong to workspace/,
     );
   });
+
+  it("CrossEntityError message includes PRD title and both workspace paths/labels", async () => {
+    // Regression for the PRD 2.6 follow-up: opaque IDs in error messages
+    // (PRD '01K…' does not belong to workspace '01K…') were illegible for
+    // agents. Now the message includes labels, paths, and the PRD title.
+    const prd = await run(
+      createPrd({
+        projectId: projectA,
+        title: "Consultation des factures par admin",
+      }),
+    );
+    const { markPrdReady } = await import("#/modules/prds/domain");
+    await run(markPrdReady(prd.id));
+    await run(activatePrd(prd.id, workspaceA));
+
+    // workspaceA is at /tmp/a (no label), workspaceB is at /tmp/b (no label).
+    await expect(run(assertPrdInWorkspace(prd.id, workspaceB))).rejects.toThrow(
+      /Consultation des factures par admin/,
+    );
+    await expect(run(assertPrdInWorkspace(prd.id, workspaceB))).rejects.toThrow(/\/tmp\/a/);
+    await expect(run(assertPrdInWorkspace(prd.id, workspaceB))).rejects.toThrow(/\/tmp\/b/);
+    await expect(run(assertPrdInWorkspace(prd.id, workspaceB))).rejects.toThrow(
+      /Either cd to that workspace/,
+    );
+  });
+
+  it("CrossEntityError message includes project name when PRD belongs to a different project", async () => {
+    const prd = await run(createPrd({ projectId: projectA, title: "X" }));
+    await expect(run(assertPrdInProject(prd.id, projectB))).rejects.toThrow(/'B'/);
+  });
+
+  it("CrossEntityError message includes both project names when workspace belongs to wrong project", async () => {
+    await expect(run(assertWorkspaceInProject(workspaceB, projectA))).rejects.toThrow(/'B'/);
+    await expect(run(assertWorkspaceInProject(workspaceB, projectA))).rejects.toThrow(/'A'/);
+    await expect(run(assertWorkspaceInProject(workspaceB, projectA))).rejects.toThrow(/\/tmp\/b/);
+  });
 });

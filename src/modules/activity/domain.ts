@@ -11,7 +11,13 @@ import {
 import { dbQuery } from "#/shared/db";
 import { activityPayloadSchemas } from "#/shared/schemas";
 import type { ActivitySource, EventType } from "#/shared/validator";
-import { assertWorkspaceInProject, assertPrdInProject } from "#/lib/cross-entity";
+import {
+  assertWorkspaceInProject,
+  assertPrdInProject,
+  formatPrdWorkspaceMismatch,
+  formatTaskProjectMismatch,
+  formatTaskWorkspaceMismatch,
+} from "#/lib/cross-entity";
 
 // ── Repo attribution helper ───────────────────────────────────────────────────
 
@@ -84,11 +90,12 @@ export const logActivity = (input: {
         prdRev.workspaceId !== null &&
         prdRev.workspaceId !== input.workspaceId
       ) {
-        return yield* Effect.fail(
-          new CrossEntityError({
-            reason: `PRD '${input.prdRevisionId}' does not belong to workspace '${input.workspaceId}'`,
-          }),
+        const reason = yield* formatPrdWorkspaceMismatch(
+          input.prdRevisionId,
+          input.workspaceId,
+          prdRev.workspaceId,
         );
+        return yield* Effect.fail(new CrossEntityError({ reason }));
       }
     }
 
@@ -110,22 +117,16 @@ export const logActivity = (input: {
         return yield* Effect.fail(new PrdNotFoundError({ id: task.prdRevisionId }));
       }
       if (taskRev.projectId !== input.projectId) {
-        return yield* Effect.fail(
-          new CrossEntityError({
-            reason: `Task '${input.taskId}' does not belong to project '${input.projectId}'`,
-          }),
-        );
+        const reason = yield* formatTaskProjectMismatch(input.taskId, input.projectId);
+        return yield* Effect.fail(new CrossEntityError({ reason }));
       }
       if (
         input.workspaceId &&
         taskRev.workspaceId !== null &&
         taskRev.workspaceId !== input.workspaceId
       ) {
-        return yield* Effect.fail(
-          new CrossEntityError({
-            reason: `Task '${input.taskId}' does not belong to workspace '${input.workspaceId}'`,
-          }),
-        );
+        const reason = yield* formatTaskWorkspaceMismatch(input.taskId, input.workspaceId);
+        return yield* Effect.fail(new CrossEntityError({ reason }));
       }
       if (prdRev && taskRev.id !== prdRev.id) {
         return yield* Effect.fail(

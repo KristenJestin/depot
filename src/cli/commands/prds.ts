@@ -16,6 +16,11 @@ import { effortSchema } from "#/shared/schemas";
 import { formatDate, formatDateWithRelative } from "#/shared/utils";
 import { parseJsonSchema } from "#/lib/json";
 import { VALID_PRD_STATUSES } from "#/shared/validator";
+import {
+  attachUserConfirmationToLatestActivity,
+  requireUserConfirmation,
+  userConfirmedArg,
+} from "#/cli/user-confirmation";
 
 const createCommand = command({
   meta: { name: "create", description: "Create a new PRD in draft status" },
@@ -331,8 +336,10 @@ const activateCommand = command({
       positional: true,
       description: "PRD ID",
     },
+    userConfirmed: userConfirmedArg,
   },
   run: async ({ args, ws, output }) => {
+    const userConfirmation = requireUserConfirmation(args, "depot prd activate", output);
     const result = await runEffect(
       DomainPrds.activatePrd(args.prdId, ws.id).pipe(
         Effect.match({
@@ -355,6 +362,7 @@ const activateCommand = command({
       throw e;
     }
     const activated = result.item;
+    await attachUserConfirmationToLatestActivity(activated.id, "prd_activated", userConfirmation);
     if (output.isJson()) {
       output.success({ item: activated });
     } else {
@@ -376,14 +384,17 @@ const readyCommand = command({
       positional: true,
       description: "PRD ID",
     },
+    userConfirmed: userConfirmedArg,
   },
   run: async ({ args, output }) => {
+    const userConfirmation = requireUserConfirmation(args, "depot prd ready", output);
     const updated = await runEffect(
       DomainPrds.markPrdReady(args.prdId).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
       ),
     );
     if (!updated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    await attachUserConfirmationToLatestActivity(updated.id, "prd_ready", userConfirmation);
     if (output.isJson()) {
       output.success({ item: updated });
     } else {
@@ -413,14 +424,18 @@ const doneCommand = command({
       schema: Schema.String.pipe(Schema.minLength(1)),
       description: "Approval comment / rationale (recorded in activity log)",
     },
+    userConfirmed: userConfirmedArg,
   },
   run: async ({ args, output }) => {
+    const userConfirmation = requireUserConfirmation(args, "depot prd done", output);
     const updated = await runEffect(
       DomainPrds.donePrd(args.prdId).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
       ),
     );
     if (!updated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+
+    await attachUserConfirmationToLatestActivity(updated.id, "prd_done", userConfirmation);
 
     if (args.approvedBy || args.comment) {
       await runEffect(
@@ -466,14 +481,17 @@ const cancelCommand = command({
       positional: true,
       description: "PRD ID",
     },
+    userConfirmed: userConfirmedArg,
   },
   run: async ({ args, output }) => {
+    const userConfirmation = requireUserConfirmation(args, "depot prd cancel", output);
     const updated = await runEffect(
       DomainPrds.cancelPrd(args.prdId).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
       ),
     );
     if (!updated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    await attachUserConfirmationToLatestActivity(updated.id, "prd_canceled", userConfirmation);
     if (output.isJson()) {
       output.success({ item: updated });
     } else {
@@ -501,14 +519,21 @@ const requestReviewCommand = command({
       required: false,
       description: "Optional context recorded on the prd_review_requested event",
     },
+    userConfirmed: userConfirmedArg,
   },
   run: async ({ args, output }) => {
+    const userConfirmation = requireUserConfirmation(args, "depot prd request-review", output);
     const updated = await runEffect(
       DomainPrds.requestReviewPrd(args.prdId, args.reason).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
       ),
     );
     if (!updated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    await attachUserConfirmationToLatestActivity(
+      updated.id,
+      "prd_review_requested",
+      userConfirmation,
+    );
     if (output.isJson()) {
       output.success({ item: updated });
     } else {
@@ -531,14 +556,17 @@ const resumeCommand = command({
       positional: true,
       description: "PRD ID",
     },
+    userConfirmed: userConfirmedArg,
   },
   run: async ({ args, output }) => {
+    const userConfirmation = requireUserConfirmation(args, "depot prd resume", output);
     const updated = await runEffect(
       DomainPrds.resumePrd(args.prdId).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
       ),
     );
     if (!updated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    await attachUserConfirmationToLatestActivity(updated.id, "prd_resumed", userConfirmation);
     if (output.isJson()) {
       output.success({ item: updated });
     } else {
@@ -799,14 +827,23 @@ const phaseAdvanceCommand = command({
       positional: true,
       description: "PRD ID",
     },
+    userConfirmed: userConfirmedArg,
   },
   run: async ({ args, output }) => {
+    const userConfirmation = requireUserConfirmation(args, "depot prd phase-advance", output);
     const result = await runEffect(
       DomainPrds.phaseAdvance(args.prdId).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
       ),
     );
     if (!result) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    await attachUserConfirmationToLatestActivity(result.prd.id, "phase_advanced", userConfirmation);
+    if (!result.advanced) {
+      // The final phase also emits a `prd_done` event from the domain side.
+      // Annotate it with the same confirmation so the audit trail stays
+      // consistent with the user's single approval.
+      await attachUserConfirmationToLatestActivity(result.prd.id, "prd_done", userConfirmation);
+    }
     if (output.isJson()) {
       output.success({ item: result.prd, advanced: result.advanced });
     } else {
@@ -1241,8 +1278,13 @@ const closeCommand = command({
       schema: Schema.String.pipe(Schema.minLength(1)),
       description: "Approval comment",
     },
+    userConfirmed: userConfirmedArg,
   },
   run: async ({ args, ws, output }) => {
+    // `close` walks the activate → request-review → done chain with a single
+    // user confirmation. The same literal quote is attached to all three
+    // activity_log events so the audit trail shows the wrapper as one unit.
+    const userConfirmation = requireUserConfirmation(args, "depot prd close", output);
     const prd = await runEffect(DomainPrds.getPrd(args.prdId));
     if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
 
@@ -1255,6 +1297,7 @@ const closeCommand = command({
       );
       if (!a) return output.error("not_found", `PRD not found: ${args.prdId}`);
       activated = a;
+      await attachUserConfirmationToLatestActivity(activated.id, "prd_activated", userConfirmation);
     } else if (prd.status !== "in_progress") {
       return output.error(
         "invalid_status",
@@ -1274,6 +1317,11 @@ const closeCommand = command({
       );
       if (!reviewed) return output.error("not_found", `PRD not found: ${args.prdId}`);
       activated = reviewed;
+      await attachUserConfirmationToLatestActivity(
+        activated.id,
+        "prd_review_requested",
+        userConfirmation,
+      );
     }
 
     const updated = await runEffect(
@@ -1282,6 +1330,8 @@ const closeCommand = command({
       ),
     );
     if (!updated) return output.error("not_found", `PRD not found: ${args.prdId}`);
+
+    await attachUserConfirmationToLatestActivity(updated.id, "prd_done", userConfirmation);
 
     if (args.approvedBy || args.comment) {
       await runEffect(
@@ -1785,13 +1835,31 @@ const commitMessageCommand = command({
 
 // ── Pre-X checks ──────────────────────────────────────────────────────────────
 
+// Wrapper command shared by every `prd <hook>-check` CLI entry point. Each
+// wrapper runs the blocking `kind=command` directives matching a given scope
+// for the PRD across every repo it targets, then emits a single high-level
+// activity event aggregating the run. Per-directive `directive_run` events are
+// emitted inside `runDirective` itself.
 const buildCheckCommand = (
-  scope: "pre-review" | "pre-ship",
+  commandName: string,
+  scope:
+    | "pre-review"
+    | "pre-ship"
+    | "pre-coder-spawn"
+    | "post-auditor-pass"
+    | "pre-handoff"
+    | "pre-phase-advance",
   description: string,
-  eventType: "pre_review_check" | "pre_ship_check",
+  eventType:
+    | "pre_review_check"
+    | "pre_ship_check"
+    | "pre_coder_check"
+    | "post_auditor_check"
+    | "pre_handoff_check"
+    | "pre_phase_advance_check",
 ) =>
   command({
-    meta: { name: `${scope}-check`, description },
+    meta: { name: commandName, description },
     workspace: true,
     args: {
       prdId: {
@@ -1881,14 +1949,40 @@ const buildCheckCommand = (
   });
 
 const preReviewCheckCommand = buildCheckCommand(
+  "pre-review-check",
   "pre-review",
   "Run blocking pre-review directives for a PRD",
   "pre_review_check",
 );
 const preShipCheckCommand = buildCheckCommand(
+  "pre-ship-check",
   "pre-ship",
   "Run blocking pre-ship directives for a PRD",
   "pre_ship_check",
+);
+const preCoderCheckCommand = buildCheckCommand(
+  "pre-coder-check",
+  "pre-coder-spawn",
+  "Run blocking pre-coder-spawn directives for a PRD",
+  "pre_coder_check",
+);
+const postAuditorCheckCommand = buildCheckCommand(
+  "post-auditor-check",
+  "post-auditor-pass",
+  "Run blocking post-auditor-pass directives for a PRD",
+  "post_auditor_check",
+);
+const preHandoffCheckCommand = buildCheckCommand(
+  "pre-handoff-check",
+  "pre-handoff",
+  "Run blocking pre-handoff directives for a PRD",
+  "pre_handoff_check",
+);
+const prePhaseAdvanceCheckCommand = buildCheckCommand(
+  "pre-phase-advance-check",
+  "pre-phase-advance",
+  "Run blocking pre-phase-advance directives for a PRD",
+  "pre_phase_advance_check",
 );
 
 export const prdCommand = command({
@@ -1917,6 +2011,10 @@ export const prdCommand = command({
     "commit-message": commitMessageCommand,
     "pre-review-check": preReviewCheckCommand,
     "pre-ship-check": preShipCheckCommand,
+    "pre-coder-check": preCoderCheckCommand,
+    "post-auditor-check": postAuditorCheckCommand,
+    "pre-handoff-check": preHandoffCheckCommand,
+    "pre-phase-advance-check": prePhaseAdvanceCheckCommand,
     story: storyCommand,
     "out-of-scope": outOfScopeCommand,
     repos: reposCommand,

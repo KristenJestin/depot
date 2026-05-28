@@ -4,6 +4,7 @@ dist/
 .depot-dev/
 .env
 .prds/
+.claude/worktrees/
 test-results/
 dev-server*.log
 playwright-report/

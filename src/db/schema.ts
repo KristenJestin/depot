@@ -26,6 +26,7 @@ import {
   VALID_PENDING_ACTION_STATUSES,
   VALID_DIRECTIVE_SCOPES,
   VALID_DIRECTIVE_KINDS,
+  VALID_DIRECTIVE_CATEGORIES,
   VALID_DIRECTIVE_RUN_STATUSES,
 } from "#/shared/validator";
 import { generateId } from "#/shared/utils";
@@ -508,6 +509,11 @@ export const projectDirectives = sqliteTable(
       .notNull()
       .references(() => projects.id),
     scope: text({ enum: VALID_DIRECTIVE_SCOPES }).notNull(),
+    // PRD 0013: explicit category for renderer routing. Not NOT-NULL at the
+    // SQL layer because SQLite cannot retro-fit it via ALTER TABLE without
+    // recreating the table; the backfill migration populates every existing
+    // row, and `createDirective` rejects null values from then on.
+    category: text({ enum: VALID_DIRECTIVE_CATEGORIES }),
     title: text().notNull(),
     instruction: text().notNull(),
     kind: text({ enum: VALID_DIRECTIVE_KINDS }).notNull(),
