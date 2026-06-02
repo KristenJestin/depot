@@ -22,21 +22,20 @@ import { e2eScenario, getRepoRoot } from "../runtime";
  *  2. **Corrupted DB** — drop non-SQLite bytes at `<scenarioRoot>/depot.db`.
  *     `depot --version` must not touch the DB (exit 0), but a command that
  *     does need it (`depot project list`) must fail with a non-zero exit
- *     and an error message that mentions the underlying SQLite condition.
+ *     and a clean single-line `Error: …` message that names the underlying
+ *     SQLite condition and the DB path.
  *
  *  3. **Read-only DB** — initialise a real DB, `chmod 444` it, then verify
  *     reads still work and writes fail cleanly with a message containing
  *     `readonly`.
  *
- * NOTE on the corrupted / read-only sub-cases: depot currently surfaces
- * SQLite / drizzle failures as `(FiberFailure)` blobs that include a
- * full JS stack trace. The PRD flags this style as "stack trace
- * cryptique" and asks the author to either fix it in `src/` or document
- * the behaviour with a `// FIXME` and assert what depot does today. We
- * picked the second option: the test asserts the human-readable substrings
- * we *do* care about (`file is not a database`, `readonly`) and tolerates
- * the trace prefix until a follow-up wraps `openDatabase` and the effect
- * runtime's unhandled failures in a friendlier formatter.
+ * Cases 2 and 3 used to assert `expect.contains(stderr, "FiberFailure")`
+ * because depot surfaced raw effect/drizzle stack traces. PRD 0017 / T1
+ * wraps those failures into the format `Error: <msg> (DB: <path>, kind:
+ * database)`, so the assertions below now check the clean format and
+ * explicitly forbid `FiberFailure` from leaking back into stderr. A
+ * `DEPOT_DEBUG=1` probe at the end of case 2 confirms the raw stack still
+ * reappears when developers opt in.
  */
 
 const SEED_PROJECT_ID = "proj-seed-mig-asc";
@@ -108,15 +107,25 @@ describe("e2e DB robustness — migrations + corrupted + read-only (PRD 0016 / T
       const combined = `${listing.stdout}\n${listing.stderr}`;
       ctx.expect.contains(combined, "file is not a database");
 
-      // FIXME(PRD 0016 / T4): depot surfaces SQLite open failures as an effect
-      //   `(FiberFailure)` blob with a full JS stack trace instead of a
-      //   one-line, path-prefixed error message. The PRD calls this out
-      //   ("pas de stack trace cryptique"). We assert today's behaviour
-      //   verbatim so a future fix that rewraps the error must consciously
-      //   delete this expectation. The visible-to-the-user error string
-      //   (`file is not a database`) is checked above, which is what
-      //   matters for the "graceful failure" acceptance criterion.
-      ctx.expect.contains(listing.stderr, "FiberFailure");
+      // PRD 0017 / T1: depot now surfaces DB-open failures as a single
+      //   `Error: …` line on stderr instead of a raw `(FiberFailure)` blob.
+      //   The line must name the underlying SQLite condition and the path
+      //   to the offending DB so the user can locate it without grepping a
+      //   stack trace.
+      ctx.expect.contains(listing.stderr, "Error: file is not a database");
+      ctx.expect.contains(listing.stderr, "DB:");
+      ctx.expect.contains(listing.stderr, dbPath);
+      ctx.expect.notContains(listing.stderr, "FiberFailure");
+      ctx.expect.notContains(listing.stderr, "at file://");
+
+      // DEPOT_DEBUG=1 must re-enable the full stack so developers can still
+      // dig when they need to. The clean header line stays on top.
+      const debugListing = await ctx.agent.run("depot project list", {
+        expectExit: "any",
+        env: { DEPOT_DEBUG: "1" },
+      });
+      ctx.expect.contains(debugListing.stderr, "Error: file is not a database");
+      ctx.expect.contains(debugListing.stderr, "DatabaseError");
     }, "corrupted DB file");
   });
 
@@ -154,14 +163,23 @@ describe("e2e DB robustness — migrations + corrupted + read-only (PRD 0016 / T
         );
       }
 
-      // FIXME(PRD 0016 / T4): same caveat as case 2 — depot relays the
-      //   drizzle `DatabaseError` through the effect runtime, which prints
-      //   `(FiberFailure)` plus the underlying JS stack. The error message
-      //   ("attempt to write a readonly database") is correct and contains
-      //   the keyword the user needs, but the surrounding noise is what
-      //   the PRD wants killed. Asserting it here so the FIXME is hard to
-      //   miss when someone wraps the failure prettily.
-      ctx.expect.contains(writeAttempt.stderr, "FiberFailure");
+      // PRD 0017 / T1: write failures against a read-only DB now produce a
+      //   single `Error: …` line on stderr — no `(FiberFailure)` blob, no
+      //   stack frames. The DB path appears in the header so the user
+      //   knows which file to chmod.
+      const stderrLower = writeAttempt.stderr.toLowerCase();
+      const mentionsReadonly =
+        stderrLower.includes("readonly") || stderrLower.includes("read-only");
+      if (!mentionsReadonly) {
+        throw new Error(
+          `expected write-to-read-only stderr to mention 'readonly'/'read-only', got: ${writeAttempt.stderr}`,
+        );
+      }
+      ctx.expect.contains(writeAttempt.stderr, "Error:");
+      ctx.expect.contains(writeAttempt.stderr, "DB:");
+      ctx.expect.contains(writeAttempt.stderr, dbPath);
+      ctx.expect.notContains(writeAttempt.stderr, "FiberFailure");
+      ctx.expect.notContains(writeAttempt.stderr, "at file://");
 
       await chmod(dbPath, 0o644);
     }, "read-only DB");

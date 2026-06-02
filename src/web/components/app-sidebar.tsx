@@ -2,8 +2,11 @@ import * as React from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArchiveIcon,
   BookOpenIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   ChevronsUpDownIcon,
   CogIcon,
   FileTextIcon,
@@ -17,18 +20,53 @@ import {
 
 import { cn } from "#/web/lib/utils";
 import { usePersistedState } from "#/web/lib/use-persisted-state";
-import { contextQuery, prdsQuery, switchWorkspace, workspacesQuery } from "#/web/lib/queries";
+import {
+  contextQuery,
+  prdsQuery,
+  projectsQuery,
+  switchWorkspace,
+  workspacesQuery,
+} from "#/web/lib/queries";
 import { PrdStatusIcon } from "#/web/components/prd-status-icon";
 import type { PrdListResponse, Workspace } from "#/web/lib/api-types";
 
 const COLLAPSED_STORAGE_KEY = "depot.sidebar.collapsed";
+const ARCHIVES_STORAGE_KEY = "depot.sidebar.archivesOpen";
 
 type SidebarPrd = PrdListResponse["prds"][number];
+type SidebarPrdStatus = SidebarPrd["status"];
 
-function workspaceDisplayName(ws: Workspace): string {
-  if (ws.label) return ws.label;
-  const parts = ws.path.replace(/\\/g, "/").split("/");
-  return parts[parts.length - 1] || ws.path;
+// Active statuses, ordered the way the PRD list should read top-to-bottom:
+// what needs attention first (review), then in-flight work, then what's
+// ready to start, then the backlog. `done`/`canceled` are deliberately
+// absent — they live in the collapsible "Archives" section instead.
+const ACTIVE_STATUS_ORDER: SidebarPrdStatus[] = ["review", "in_progress", "ready", "draft"];
+const ARCHIVED_STATUSES: ReadonlySet<SidebarPrdStatus> = new Set(["done", "canceled"]);
+
+function statusRank(status: SidebarPrdStatus): number {
+  const idx = ACTIVE_STATUS_ORDER.indexOf(status);
+  return idx === -1 ? ACTIVE_STATUS_ORDER.length : idx;
+}
+
+function updatedAtDesc(a: SidebarPrd, b: SidebarPrd): number {
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
+/**
+ * Splits PRDs into the active list (ordered review → in_progress → ready →
+ * draft, then `updatedAt desc` within each status group) and an archived list
+ * (`done`/`canceled`, `updatedAt desc`) surfaced under a collapsible section.
+ */
+function partitionPrds(prds: SidebarPrd[]): { active: SidebarPrd[]; archived: SidebarPrd[] } {
+  const active: SidebarPrd[] = [];
+  const archived: SidebarPrd[] = [];
+  for (const prd of prds) {
+    if (ARCHIVED_STATUSES.has(prd.status)) archived.push(prd);
+    else active.push(prd);
+  }
+  active.sort((a, b) => statusRank(a.status) - statusRank(b.status) || updatedAtDesc(a, b));
+  archived.sort(updatedAtDesc);
+  return { active, archived };
 }
 
 /**
@@ -55,21 +93,45 @@ function useActiveProjectId(): string | null {
   return currentWs?.projectId ?? null;
 }
 
-function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
+/**
+ * Project-scope selector for the app shell. The dashboard scopes PRDs by the
+ * project of the selected *workspace* (see GET /api/prds), but the user thinks
+ * in terms of **projects** — a project owns many workspaces (`mails-m365-xx`,
+ * …). Listing workspaces here leaked that implementation detail and made the
+ * picker show workspace folders instead of the 3 real projects (PRD 0021 #3).
+ *
+ * So the picker lists `/api/projects` (`project.name`) and, on selection,
+ * switches the workspace context to a representative workspace of that project
+ * — keeping the existing workspace-based scoping intact while showing projects.
+ */
+function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   const queryClientInstance = useQueryClient();
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
 
   const { data: contextData } = useQuery(contextQuery.options());
   const { data: wsData } = useQuery(workspacesQuery.options());
+  const { data: projectsData } = useQuery(projectsQuery.options());
 
   // Orphan workspaces (folder removed on disk) are filtered out by the
-  // /api/workspaces endpoint by default; this client-side guard mirrors
-  // the same rule so the switcher never offers an orphan even if a
-  // caller (or future opt-in) hands us one with `isOrphan: true`.
+  // /api/workspaces endpoint by default; this client-side guard mirrors the
+  // same rule so we never pick an orphan as a project's representative
+  // workspace even if a caller (or future opt-in) hands us one.
   const workspaces = (wsData?.workspaces ?? []).filter((w) => !w.isOrphan);
-  const currentId = contextData?.workspaceId ?? null;
-  const current = workspaces.find((w) => w.id === currentId);
+
+  // Only offer projects that have a switchable (non-orphan) workspace — the
+  // scope mechanism is workspace-based, so a project with no reachable
+  // workspace can't be made the active scope from here.
+  const firstWorkspaceByProject = new Map<string, Workspace>();
+  for (const ws of workspaces) {
+    if (!firstWorkspaceByProject.has(ws.projectId)) firstWorkspaceByProject.set(ws.projectId, ws);
+  }
+  const projects = (projectsData?.items ?? []).filter((p) => firstWorkspaceByProject.has(p.id));
+
+  const currentWsId = contextData?.workspaceId ?? null;
+  const currentWs = workspaces.find((w) => w.id === currentWsId);
+  const currentProjectId = currentWs?.projectId ?? null;
+  const currentProject = projects.find((p) => p.id === currentProjectId);
 
   const mutation = useMutation({
     mutationFn: switchWorkspace,
@@ -85,25 +147,25 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  if (workspaces.length === 0) return null;
+  if (projects.length === 0) return null;
 
-  // currentId === null means the user explicitly picked "All projects" via
+  // currentWsId === null means the user explicitly picked "All projects" via
   // the dedicated entry below. Distinct from "no workspace" (which would be
   // the initial state when the cwd hint resolves to nothing).
-  const isAllProjects = contextData !== undefined && currentId === null;
-  const label = isAllProjects
-    ? "All projects"
-    : current
-      ? workspaceDisplayName(current)
-      : "No workspace";
-  const projectName = isAllProjects ? "Across every project" : (current?.projectName ?? null);
+  const isAllProjects = contextData !== undefined && currentWsId === null;
+  const label = isAllProjects ? "All projects" : (currentProject?.name ?? "No project");
+  const subLabel = isAllProjects
+    ? "Across every project"
+    : currentProject
+      ? `${currentProject.prdCount} PRD${currentProject.prdCount === 1 ? "" : "s"}`
+      : null;
 
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Switch workspace"
+        aria-label="Switch project"
         title={collapsed ? label : undefined}
         className={cn(
           "flex h-10 w-full items-center gap-2 rounded-lg border border-transparent text-left transition-colors",
@@ -119,8 +181,8 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
               <div className="truncate text-xs font-medium text-sidebar-accent-foreground">
                 {label}
               </div>
-              {projectName && (
-                <div className="truncate text-xs text-sidebar-foreground/65">{projectName}</div>
+              {subLabel && (
+                <div className="truncate text-xs text-sidebar-foreground/65">{subLabel}</div>
               )}
             </div>
             <ChevronsUpDownIcon className="size-3.5 shrink-0 text-sidebar-foreground/50" />
@@ -160,15 +222,17 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
               </div>
             </button>
             <div className="my-1 border-t border-card-border" />
-            {workspaces.map((ws) => {
-              const isSelected = ws.id === currentId;
+            {projects.map((project) => {
+              const isSelected = project.id === currentProjectId;
+              const representativeWs = firstWorkspaceByProject.get(project.id);
               return (
                 <button
-                  key={ws.id}
+                  key={project.id}
                   type="button"
-                  disabled={mutation.isPending}
+                  disabled={mutation.isPending || !representativeWs}
                   onClick={() => {
-                    mutation.mutate(ws.id);
+                    if (!representativeWs) return;
+                    mutation.mutate(representativeWs.id);
                     setOpen(false);
                   }}
                   className={cn(
@@ -182,8 +246,10 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
                     className={cn("size-3 shrink-0", isSelected ? "opacity-100" : "opacity-0")}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-medium">{workspaceDisplayName(ws)}</div>
-                    <div className="truncate text-xs text-muted-foreground">{ws.projectName}</div>
+                    <div className="truncate text-xs font-medium">{project.name}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {project.workspaceCount} workspace{project.workspaceCount === 1 ? "" : "s"}
+                    </div>
                   </div>
                 </button>
               );
@@ -288,13 +354,11 @@ function SidebarPrdLink({ prd, collapsed }: { prd: SidebarPrd; collapsed: boolea
  */
 export function AppSidebar() {
   const [collapsed, setCollapsed] = usePersistedState(COLLAPSED_STORAGE_KEY, false);
+  const [archivesOpen, setArchivesOpen] = usePersistedState(ARCHIVES_STORAGE_KEY, false);
 
   const { data } = useQuery(prdsQuery.list.options());
-  const prds = React.useMemo(
-    () =>
-      [...(data?.prds ?? [])].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-      ),
+  const { active: prds, archived: archivedPrds } = React.useMemo(
+    () => partitionPrds(data?.prds ?? []),
     [data?.prds],
   );
 
@@ -357,7 +421,7 @@ export function AppSidebar() {
       )}
 
       <div className="px-1 pb-3 pt-2">
-        <WorkspaceSwitcher collapsed={collapsed} />
+        <ProjectSwitcher collapsed={collapsed} />
       </div>
 
       <nav className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
@@ -405,6 +469,45 @@ export function AppSidebar() {
                 <SidebarPrdLink key={prd.id} prd={prd} collapsed={collapsed} />
               ))}
             </SidebarSection>
+          ) : null}
+
+          {archivedPrds.length > 0 ? (
+            <section className="space-y-1">
+              <button
+                type="button"
+                onClick={() => setArchivesOpen((v) => !v)}
+                aria-expanded={archivesOpen}
+                aria-label={`Archives (${archivedPrds.length})`}
+                title={collapsed ? `Archives (${archivedPrds.length})` : undefined}
+                className={cn(
+                  "flex h-8 w-full items-center gap-2 rounded-lg border border-transparent text-sm font-medium transition-colors",
+                  collapsed ? "justify-center px-0" : "px-3",
+                  "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                )}
+              >
+                <ArchiveIcon className="size-4 shrink-0" />
+                {!collapsed && (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-left">Archives</span>
+                    <span className="shrink-0 text-xs tabular-nums text-sidebar-foreground/50">
+                      {archivedPrds.length}
+                    </span>
+                    {archivesOpen ? (
+                      <ChevronDownIcon className="size-3.5 shrink-0 text-sidebar-foreground/50" />
+                    ) : (
+                      <ChevronRightIcon className="size-3.5 shrink-0 text-sidebar-foreground/50" />
+                    )}
+                  </>
+                )}
+              </button>
+              {archivesOpen && (
+                <div className="space-y-1">
+                  {archivedPrds.map((prd) => (
+                    <SidebarPrdLink key={prd.id} prd={prd} collapsed={collapsed} />
+                  ))}
+                </div>
+              )}
+            </section>
           ) : null}
         </div>
       </nav>

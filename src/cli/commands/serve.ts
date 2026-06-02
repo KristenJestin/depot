@@ -9,6 +9,26 @@ import { defaultDepotDir } from "#/db/client";
 import fs from "node:fs/promises";
 import api from "#/web/api";
 
+const YELLOW = "\u001b[33m";
+const RESET = "\u001b[0m";
+
+const API_ONLY_BODY =
+  "depot API-only mode.\n" +
+  "The web UI bundle is not built. Available endpoints are under /api/.\n" +
+  "Run 'vp build' to enable the web UI.\n";
+
+function warnApiOnly(webBundlePath: string): void {
+  const line =
+    `[depot serve] web bundle not found at ${webBundlePath}. ` +
+    `Starting in API-only mode (REST endpoints available, static UI disabled). ` +
+    `Run 'vp build' to build the web bundle.`;
+  if (process.stderr.isTTY) {
+    process.stderr.write(`${YELLOW}${line}${RESET}\n`);
+  } else {
+    process.stderr.write(`${line}\n`);
+  }
+}
+
 export const serveCommand = command({
   meta: { name: "serve", description: "Start the Depot web server" },
   args: {
@@ -34,26 +54,29 @@ export const serveCommand = command({
 
     const distWebDir = fileURLToPath(new URL("web", import.meta.url));
 
+    let hasWebBundle = true;
     try {
       await fs.access(distWebDir);
     } catch {
-      output.error(
-        "web_not_built",
-        `Web UI assets not found at '${distWebDir}'. The package may be missing 'dist/web/' — ensure you are on the latest published version.`,
-      );
+      hasWebBundle = false;
     }
 
-    server.use(
-      "/*",
-      serveStatic({
-        root: distWebDir,
-      }),
-    );
+    if (hasWebBundle) {
+      server.use(
+        "/*",
+        serveStatic({
+          root: distWebDir,
+        }),
+      );
 
-    server.get("*", async (c) => {
-      const html = await fs.readFile(resolve(distWebDir, "index.html"), "utf-8");
-      return c.html(html);
-    });
+      server.get("*", async (c) => {
+        const html = await fs.readFile(resolve(distWebDir, "index.html"), "utf-8");
+        return c.html(html);
+      });
+    } else {
+      warnApiOnly(distWebDir);
+      server.get("*", (c) => c.text(API_ONLY_BODY, 200));
+    }
 
     const httpServer = serve({ fetch: server.fetch, port }, () => {
       output.print(`Depot serving at http://localhost:${port}`);

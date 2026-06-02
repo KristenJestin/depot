@@ -1,4 +1,5 @@
 import type { PrdDetailResponse, PrdListResponse } from "#/web/lib/api-types";
+import type { PrdPriority } from "#/shared/validator";
 
 type ListPrd = PrdListResponse["prds"][number];
 type DetailPrd = PrdDetailResponse["prd"];
@@ -30,8 +31,11 @@ export type BoardCard = {
   skippedTasks: number;
   latestReview: ListPrd["latestReview"];
   previewTasks: BoardCardTask[];
+  priority: PrdPriority;
   footerLabel: string;
   animatedLabel: string | null;
+  tags: string[];
+  targetVersion: string | null;
 };
 
 export type BoardColumn = {
@@ -46,6 +50,12 @@ export type StageItem = {
   status: DetailTask["status"] | "stopped";
   effort: DetailTask["effort"];
   severity: DetailTask["severity"];
+  /**
+   * Triage axis of the task (orthogonal to status). Drives the triage badge on
+   * the PRD detail timeline. `null` for synthetic audit markers, which carry no
+   * triage of their own.
+   */
+  triageState: DetailTask["triageState"] | null;
   createdAt: DetailTask["createdAt"];
   startedAt: DetailTask["startedAt"];
   completedAt: DetailTask["completedAt"];
@@ -155,8 +165,11 @@ function buildBoardCard(prd: ListPrd): BoardCard {
     skippedTasks: prd.skippedTasks,
     latestReview: prd.latestReview,
     previewTasks: prd.previewTasks,
+    priority: (prd.priority ?? "normal") as PrdPriority,
     footerLabel: buildBoardFooterLabel(prd),
     animatedLabel: buildAnimatedLabel(prd),
+    tags: prd.tags ?? [],
+    targetVersion: prd.targetVersion ?? null,
   };
 }
 
@@ -315,6 +328,7 @@ export function buildStageCards(data: DetailData): StageCard[] {
             status: agentReviewToTaskStatus(review.status),
             effort: "s",
             severity: null,
+            triageState: null,
             createdAt: review.createdAt,
             startedAt: review.createdAt,
             completedAt: review.doneAt,
@@ -625,6 +639,7 @@ function toStageItem(task: DetailTask, canceled: boolean): StageItem {
       status: "stopped",
       effort: task.effort,
       severity: task.severity,
+      triageState: task.triageState,
       createdAt: task.createdAt,
       startedAt: task.startedAt,
       completedAt: task.completedAt,
@@ -639,6 +654,7 @@ function toStageItem(task: DetailTask, canceled: boolean): StageItem {
     status: task.status,
     effort: task.effort,
     severity: task.severity,
+    triageState: task.triageState,
     createdAt: task.createdAt,
     startedAt: task.startedAt,
     completedAt: task.completedAt,

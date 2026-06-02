@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import * as DomainProjectConfig from "#/modules/projects/config";
 import * as DomainDirectives from "#/modules/projects/directives";
 import * as DomainRepos from "#/modules/projects/repos";
+import * as DomainDocSync from "#/modules/docs/sync";
 import { getRuntime } from "#/services/database";
 import { logActivity } from "#/modules/activity/domain";
 import { KNOWN_PROJECT_CONFIG_KEYS, isKnownProjectConfigKey } from "#/shared/project-config-keys";
@@ -194,6 +195,19 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
     );
     return c.json({ items }, 200);
   })
+  // Drill-in detail (PRD 0021 / T6). Returns the full directive row —
+  // including the long `instruction` and `lastRunOutput` the list view omits —
+  // so the dedicated detail page can render everything without re-deriving it
+  // from the paged list. Scoped to the project so an id from another project
+  // 404s instead of leaking.
+  .get("/projects/:id/directives/:directiveId", async (c) => {
+    const { id, directiveId } = c.req.param();
+    const directive = await getRuntime().runPromise(DomainDirectives.getDirective(directiveId));
+    if (!directive || directive.projectId !== id) {
+      return c.json({ error: "Directive not found" }, 404);
+    }
+    return c.json({ directive }, 200);
+  })
   .post("/projects/:id/directives", async (c) => {
     const { id } = c.req.param();
     type Body = {
@@ -266,6 +280,8 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
       title?: string;
       instruction?: string;
       kind?: DirectiveKind;
+      category?: DirectiveCategory;
+      scope?: DirectiveScope;
       blocking?: boolean;
       position?: number;
       enabled?: boolean;
@@ -273,15 +289,16 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
     };
     const body = (await c.req.json()) as Body;
     try {
+      const before = await getRuntime().runPromise(DomainDirectives.getDirective(directiveId));
       const item = await getRuntime().runPromise(
         DomainDirectives.updateDirective(directiveId, body),
       );
-      const fields = Object.keys(body);
+      const changes = before ? DomainDirectives.diffDirective(before, item) : {};
       await getRuntime().runPromise(
         logActivity({
           projectId: id,
           eventType: "directive_updated",
-          payload: { directiveId: item.id, fields },
+          payload: { directiveId: item.id, changes },
           source: "human",
         }),
       );
@@ -321,4 +338,104 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>()
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
     }
+  })
+  // Doc-profile drill-in (PRD 0021 / T5). The list lives on the docs endpoint;
+  // this returns a single profile with its JSON-encoded columns parsed into
+  // arrays so the detail page can render every metadata field without re-doing
+  // the `JSON.parse` dance client-side. Scoped to the project — a name from
+  // another project 404s.
+  .get("/projects/:id/doc-profiles/:name", async (c) => {
+    const { id, name } = c.req.param();
+    const profile = await getRuntime().runPromise(DomainDocSync.getProfile(id, name));
+    if (!profile) return c.json({ error: "Doc profile not found" }, 404);
+    return c.json({ profile: serializeDocProfile(profile) }, 200);
+  })
+  // Edit wiring for the doc-profile drill-in (PRD 0021 / T5). Mirrors the
+  // `depot doc profile set` CLI surface (`updateProfile`): every field is
+  // optional and only patched when present.
+  .patch("/projects/:id/doc-profiles/:name", async (c) => {
+    const { id, name } = c.req.param();
+    type Body = {
+      targetRoot?: string;
+      targetPattern?: string;
+      language?: string;
+      style?: "narrative" | "reference" | "mixed";
+      audience?: string | null;
+      sources?: DomainDocSync.DocSource[];
+      routingRules?: Array<{ sourcePathGlob: string; targetDocPath: string; when?: string }>;
+      topicsToCover?: string[];
+      topicsToIgnore?: string[];
+      guardrails?: string[];
+      commitPolicy?: "leave-in-working-tree" | "commit-with-message";
+    };
+    const body = (await c.req.json()) as Body;
+    try {
+      const updated = await getRuntime().runPromise(
+        DomainDocSync.updateProfile(id, name, {
+          targetRoot: body.targetRoot,
+          targetPattern: body.targetPattern,
+          language: body.language,
+          style: body.style,
+          audience: body.audience ?? undefined,
+          sources: body.sources,
+          routingRules: body.routingRules,
+          topicsToCover: body.topicsToCover,
+          topicsToIgnore: body.topicsToIgnore,
+          guardrails: body.guardrails,
+          commitPolicy: body.commitPolicy,
+        }),
+      );
+      return c.json({ profile: serializeDocProfile(updated) }, 200);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
+    }
   });
+
+// Parse the JSON-encoded columns of a doc-profile row into structured arrays so
+// the web detail view consumes them directly. Malformed JSON falls back to an
+// empty array rather than throwing — a corrupt row should still render.
+function serializeDocProfile(profile: {
+  id: string;
+  name: string;
+  projectId: string;
+  targetRoot: string;
+  targetPattern: string;
+  sources: string;
+  language: string;
+  style: string;
+  audience: string | null;
+  routingRules: string;
+  topicsToCover: string;
+  topicsToIgnore: string;
+  guardrails: string;
+  commitPolicy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  const parseArray = (raw: string): unknown[] => {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+  return {
+    id: profile.id,
+    name: profile.name,
+    projectId: profile.projectId,
+    targetRoot: profile.targetRoot,
+    targetPattern: profile.targetPattern,
+    language: profile.language,
+    style: profile.style,
+    audience: profile.audience,
+    commitPolicy: profile.commitPolicy,
+    sources: parseArray(profile.sources),
+    routingRules: parseArray(profile.routingRules),
+    topicsToCover: parseArray(profile.topicsToCover) as string[],
+    topicsToIgnore: parseArray(profile.topicsToIgnore) as string[],
+    guardrails: parseArray(profile.guardrails) as string[],
+    createdAt: profile.createdAt,
+    updatedAt: profile.updatedAt,
+  };
+}

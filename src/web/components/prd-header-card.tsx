@@ -2,7 +2,8 @@ import { Clock3Icon } from "lucide-react";
 import { useState } from "react";
 
 import { AgentBars } from "#/web/components/agent-bars";
-import { Markdown } from "#/web/components/markdown";
+import { AnnexBodyMarkdown } from "#/web/components/prd-annexes-widget";
+import { PrdPriorityBadge, PrdPriorityDropdown } from "#/web/components/prd-priority-badge";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
 import { CollapseToggleButton } from "#/web/components/ui/collapse-chevron";
@@ -11,10 +12,19 @@ import { StatusBadge } from "#/web/components/ui/status-badge";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
 import { resolvePrdDisplayStatus, type DetailSummary } from "#/web/lib/prd-view-model";
 import { formatMetaDate } from "#/web/lib/view-format";
+import { type PrdPriority } from "#/shared/validator";
 
 type DetailPrd = PrdDetailResponse["prd"];
 
-export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: DetailSummary }) {
+export function PrdHeaderCard({
+  prd,
+  summary,
+  annexNames,
+}: {
+  prd: DetailPrd;
+  summary: DetailSummary;
+  annexNames?: ReadonlySet<string>;
+}) {
   const isSuperseded = prd.supersededAt !== null;
   const displayStatus = resolvePrdDisplayStatus(prd, summary.activeReview);
   const showReviewFooter = displayStatus === "review";
@@ -34,7 +44,7 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
     <Card className="gap-0 border border-card-border py-0">
       <CollapsibleRoot open={specOpen} onOpenChange={setSpecOpen}>
         <div className="space-y-5 p-4">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="space-y-2">
               <h1
                 className={[
@@ -57,9 +67,14 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <PrdPriorityBadge priority={(prd.priority ?? "normal") as PrdPriority} />
               <StatusBadge status={displayStatus} />
               {isSuperseded && <Badge variant="outline">superseded</Badge>}
+              <PrdPriorityDropdown
+                prdId={prd.id}
+                priority={(prd.priority ?? "normal") as PrdPriority}
+              />
               {hasSpec ? (
                 <CollapseToggleButton ariaLabel={specOpen ? "Collapse spec" : "Expand spec"} />
               ) : null}
@@ -74,6 +89,7 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
                     label="Context"
                     value={prd.context}
                     muted={prd.status === "canceled"}
+                    annexNames={annexNames}
                   />
                 )}
                 {prd.problem && (
@@ -81,6 +97,7 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
                     label="Problem"
                     value={prd.problem}
                     muted={prd.status === "canceled"}
+                    annexNames={annexNames}
                   />
                 )}
                 {prd.solution && (
@@ -88,16 +105,23 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
                     label="Solution"
                     value={prd.solution}
                     muted={prd.status === "canceled"}
+                    annexNames={annexNames}
                   />
                 )}
                 {prd.scope && (
-                  <SpecBlock label="Scope" value={prd.scope} muted={prd.status === "canceled"} />
+                  <SpecBlock
+                    label="Scope"
+                    value={prd.scope}
+                    muted={prd.status === "canceled"}
+                    annexNames={annexNames}
+                  />
                 )}
                 {prd.implementationDecisions && (
                   <SpecBlock
                     label="Implementation decisions"
                     value={prd.implementationDecisions}
                     muted={prd.status === "canceled"}
+                    annexNames={annexNames}
                   />
                 )}
                 {prd.testingDecisions && (
@@ -105,6 +129,7 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
                     label="Testing decisions"
                     value={prd.testingDecisions}
                     muted={prd.status === "canceled"}
+                    annexNames={annexNames}
                   />
                 )}
               </div>
@@ -152,19 +177,33 @@ export function PrdHeaderCard({ prd, summary }: { prd: DetailPrd; summary: Detai
   );
 }
 
-function SpecBlock({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+function SpecBlock({
+  label,
+  value,
+  muted,
+  annexNames,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  annexNames?: ReadonlySet<string>;
+}) {
+  const className = [
+    "text-sm leading-6",
+    muted ? "text-muted-foreground" : "text-secondary-foreground",
+  ].join(" ");
   return (
     <section className="space-y-2 border-t border-card-border pt-4">
       <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         {label}
       </p>
-      <Markdown
+      <AnnexBodyMarkdown
         source={value}
-        className={[
-          "text-sm leading-6",
-          muted ? "text-muted-foreground" : "text-secondary-foreground",
-        ].join(" ")}
+        annexNames={annexNames ?? EMPTY_ANNEX_NAMES}
+        className={className}
       />
     </section>
   );
 }
+
+const EMPTY_ANNEX_NAMES: ReadonlySet<string> = new Set<string>();

@@ -3,6 +3,8 @@ import { e2eScenario } from "../runtime";
 
 /**
  * PRD 0015 / T2 — Lifecycle smoke + `--user-confirmed` anti-regression.
+ * PRD 0022 / T1 — case B adapted: empty/whitespace rejected, short "go"
+ *                 accepted (the length-min check was dropped).
  *
  * Three sub-scenarios, each with its own fresh tmp DB (separate `e2eScenario`
  * call):
@@ -13,8 +15,8 @@ import { e2eScenario } from "../runtime";
  *     on each lifecycle call to actually exercise the flag check.
  *
  *  B. Flag policy : a `prd ready` call is rejected when the flag is missing,
- *     rejected when the value is too short (< 6 chars), and accepted when a
- *     valid quote is provided.
+ *     rejected when the value is empty / whitespace-only, and accepted when
+ *     a non-empty quote is provided — including a short one like "go".
  *
  *  C. Bypass env : with `DEPOT_BYPASS_USER_CONFIRMATION=1` (the runtime
  *     default), the same transition succeeds and the resulting `activity_log`
@@ -99,7 +101,7 @@ describe("e2e lifecycle smoke + --user-confirmed transitions (PRD 0015 / T2)", (
     }, "A. happy path lifecycle");
   });
 
-  it("B. --user-confirmed flag enforcement (missing / too short / valid)", async () => {
+  it("B. --user-confirmed flag enforcement (missing / empty / short valid)", async () => {
     await e2eScenario(async (ctx) => {
       const repo = await ctx.git.initRepo("flag-policy");
       await ctx.agent.run("depot init flag-policy", { cwd: repo });
@@ -124,30 +126,48 @@ describe("e2e lifecycle smoke + --user-confirmed transitions (PRD 0015 / T2)", (
         );
       }
 
-      const tooShort = await ctx.agent.run(`depot prd ready ${prdId} --user-confirmed 'ok'`, {
+      const empty = await ctx.agent.run(`depot prd ready ${prdId} --user-confirmed ''`, {
         cwd: repo,
         env: REQUIRE_FLAG,
         expectExit: "any",
       });
-      if (tooShort.exitCode === 0) {
-        throw new Error(`expected non-zero exit for too-short --user-confirmed, got 0`);
+      if (empty.exitCode === 0) {
+        throw new Error(`expected non-zero exit for empty --user-confirmed, got 0`);
       }
-      ctx.expect.contains(tooShort.stderr, "shorter than");
+      const emptyStderr = empty.stderr.toLowerCase();
+      if (!emptyStderr.includes("empty") && !emptyStderr.includes("rejected")) {
+        throw new Error(
+          `expected stderr to mention "empty" or "rejected" for empty --user-confirmed, got: ${empty.stderr}`,
+        );
+      }
 
       const stillDraft2 = ctx.expect.dbRow<{ status: string }>("prd_revisions", { id: prdId });
       if (stillDraft2.status !== "draft") {
         throw new Error(
-          `expected status=draft after too-short 'prd ready', got '${stillDraft2.status}'`,
+          `expected status=draft after empty 'prd ready', got '${stillDraft2.status}'`,
         );
       }
 
-      await ctx.agent.run(`depot prd ready ${prdId} --user-confirmed 'go ahead'`, {
+      await ctx.agent.run(`depot prd ready ${prdId} --user-confirmed 'go'`, {
         cwd: repo,
         env: REQUIRE_FLAG,
       });
       const readyRow = ctx.expect.dbRow<{ status: string }>("prd_revisions", { id: prdId });
       if (readyRow.status !== "ready") {
-        throw new Error(`expected status=ready after valid 'prd ready', got '${readyRow.status}'`);
+        throw new Error(
+          `expected status=ready after short valid 'prd ready', got '${readyRow.status}'`,
+        );
+      }
+
+      const logRow = ctx.expect.dbRow<{ payload: string }>("activity_log", {
+        prd_revision_id: prdId,
+        event_type: "prd_ready",
+      });
+      const payload = JSON.parse(logRow.payload) as Record<string, unknown>;
+      if (payload["userConfirmation"] !== "go") {
+        throw new Error(
+          `expected activity_log.payload.userConfirmation === "go" after short quote, got: ${JSON.stringify(payload["userConfirmation"])}`,
+        );
       }
     }, "B. flag policy");
   });

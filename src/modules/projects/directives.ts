@@ -59,6 +59,26 @@ const assertSafeInstruction = (kind: DirectiveKind, instruction: string) => {
   }
 };
 
+/**
+ * Reusable safety check for shell commands persisted by the user (directives,
+ * task verification commands). Throws when the command matches a trivially
+ * dangerous pattern. Re-exported here so PRD 0018 (`verifyTask`) can vet a
+ * `tasks.verification_command` with the same rules as directive instructions.
+ *
+ * `label` is interpolated into the error message ("directive", "verification
+ * command", etc.) so callers get a contextual diagnostic without having to
+ * re-implement the pattern list.
+ */
+export const assertSafeShellCommand = (instruction: string, label = "command"): void => {
+  for (const pattern of DANGEROUS_PATTERNS) {
+    if (pattern.test(instruction)) {
+      throw new Error(
+        `Refusing to store ${label}: instruction matches dangerous pattern ${pattern.toString()}.`,
+      );
+    }
+  }
+};
+
 // `category` is typed optional so legacy call sites (CLI/web) still compile
 // while T6 wires the `--category` flag; missing or invalid values are rejected
 // at runtime so the contract is enforced from this PRD on.
@@ -137,6 +157,8 @@ export const updateDirective = (
     title?: string;
     instruction?: string;
     kind?: DirectiveKind;
+    category?: DirectiveCategory;
+    scope?: DirectiveScope;
     blocking?: boolean;
     position?: number;
     enabled?: boolean;
@@ -161,6 +183,28 @@ export const updateDirective = (
         );
       }
     }
+    if (patch.category !== undefined) {
+      if (!(VALID_DIRECTIVE_CATEGORIES as readonly string[]).includes(patch.category)) {
+        return yield* Effect.fail(
+          new ValidationError({
+            reason: `Unknown directive category: '${patch.category}'. One of: ${VALID_DIRECTIVE_CATEGORIES.join(", ")}.`,
+          }),
+        );
+      }
+    }
+    const nextCategory = (patch.category ?? existing.category) as DirectiveCategory | null;
+    const nextScope = (patch.scope ?? existing.scope) as DirectiveScope;
+    // Legacy rows can have a NULL category — only run the (category, scope)
+    // pairing check when one is set. Patching scope alone on a NULL-category
+    // row stays permissive; an explicit `--category` makes the pair strict.
+    if (nextCategory !== null && !isValidCategoryScope(nextCategory, nextScope)) {
+      const allowed = validScopesForCategory(nextCategory).join(", ");
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Invalid (category, scope): (${nextCategory}, ${nextScope}). Allowed scopes for category '${nextCategory}': ${allowed || "none"}.`,
+        }),
+      );
+    }
     const rows = yield* dbQuery(() =>
       db
         .update(projectDirectives)
@@ -168,6 +212,8 @@ export const updateDirective = (
           title: patch.title ?? existing.title,
           instruction: patch.instruction ?? existing.instruction,
           kind: patch.kind ?? existing.kind,
+          category: nextCategory,
+          scope: nextScope,
           repoTarget: patch.repoTarget ?? existing.repoTarget,
           blocking: patch.blocking ?? existing.blocking,
           position: patch.position ?? existing.position,
@@ -178,6 +224,39 @@ export const updateDirective = (
     );
     return rows[0]!;
   });
+
+/**
+ * Compute the per-field diff between two directive rows for the
+ * `directive_updated` activity event payload. Only fields that actually
+ * changed are kept — equal-but-touched fields are skipped so the activity
+ * feed is not flooded with no-op entries.
+ */
+export const DIRECTIVE_DIFFABLE_FIELDS = [
+  "title",
+  "instruction",
+  "kind",
+  "category",
+  "scope",
+  "repoTarget",
+  "blocking",
+  "position",
+  "enabled",
+] as const;
+
+type Directive = { [K in (typeof DIRECTIVE_DIFFABLE_FIELDS)[number]]: unknown };
+
+export const diffDirective = (
+  before: Directive,
+  after: Directive,
+): Record<string, { from: unknown; to: unknown }> => {
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  for (const field of DIRECTIVE_DIFFABLE_FIELDS) {
+    if (before[field] !== after[field]) {
+      changes[field] = { from: before[field], to: after[field] };
+    }
+  }
+  return changes;
+};
 
 export const removeDirective = (id: string) =>
   Effect.gen(function* () {

@@ -26,6 +26,8 @@ import type {
   EventType,
   ReviewType,
   SeverityLevel,
+  TaskKind,
+  TriageState,
 } from "#/shared/validator";
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
@@ -173,9 +175,15 @@ export function createTask(
     effort: Effort;
     dependsOn?: string[];
     phaseNumber?: number;
+    kind?: TaskKind;
+    verificationCommand?: string | null;
   },
 ) {
   return runWithDb(db, DomainTasks.createTask(input));
+}
+
+export function verifyTask(db: Database, id: string, opts: { userConfirmation: string | null }) {
+  return runWithDb(db, DomainTasks.verifyTask(id, opts));
 }
 
 export function updateTask(
@@ -220,6 +228,15 @@ export function skipTask(db: Database, id: string, reason: string) {
   return runWithDb(db, DomainTasks.skipTask(id, reason));
 }
 
+export function triageTask(
+  db: Database,
+  id: string,
+  state: TriageState,
+  options: { reason?: string; source?: "ai" | "human" } = {},
+) {
+  return runWithDb(db, DomainTasks.triageTask(id, state, options));
+}
+
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
 export function logActivity(
@@ -246,6 +263,10 @@ export function listActivity(
 
 export function listActivityForRevision(db: Database, prdRevisionId: string) {
   return runWithDb(db, DomainActivity.listActivityForRevision(prdRevisionId));
+}
+
+export function listActivityForTask(db: Database, taskId: string) {
+  return runWithDb(db, DomainActivity.listActivityForTask(taskId));
 }
 
 // ── Workspace status ──────────────────────────────────────────────────────────

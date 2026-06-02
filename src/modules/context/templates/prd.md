@@ -172,6 +172,49 @@ The doc agent writes the ADR, returns the path, and you reference it in
 `implementationDecisions`. For decisions that fail one of the criteria, document inline in
 `implementationDecisions` only.
 
+### 4d. Annexes — verbatim text artifacts attached to the revision
+
+An **annex** is a named text blob attached to the current PRD revision. It exists for the
+narrow case of an artifact that **loses value when flattened to prose** — the archetype is an
+**HTML prototype** generated during framing (markup the agent can read, but 800 lines you would
+never paste into the Solution section).
+
+**When to create one — the anti-dumping-ground discipline.** The PRD body stays the primary
+spec. Create an annex **only** when the artifact is text the agent must read **verbatim** and
+that genuinely resists summarization (HTML/CSS/JS prototype, a representative data sample, an
+exact expected-output fixture). For anything that should be **summarized into the body** — a
+ticket, a spec PDF, a design discussion — do **not** create an annex; parse it and inline the
+distilled version. If you can usefully paraphrase it in a paragraph, it belongs in the body, not
+in an annex.
+
+**How to create one:**
+
+```
+depot prd annex add <prd-id> --name <name> --kind <html|markdown|code|text> --description "<role>" [--file <path> | --content <text>]
+```
+
+- `--name` is a kebab-case slug, unique per revision — it is the key used in `[annex: <name>]`.
+- `--kind` is a rendering hint (`html` / `markdown` / `code` / `text`).
+- `--description` states the **role / relevance** in plain language ("prototype of the invoice
+  matching screen"). It doubles as the relevance summary a later agent reads before deciding to
+  load the full content, so make it specific.
+- Content comes from `--file`, `--content`, or stdin. Use `--replace` to overwrite an annex of
+  the same name. List with `depot prd annex list <prd-id>`, read with
+  `depot prd annex cat <annex-id>`, remove with `depot prd annex rm <annex-id>`.
+
+**How to reference one inline.** When a section of the body depends on an annex, mention it in
+prose with the `[annex: <name>]` token so a later agent knows to go read it:
+
+```
+The target layout is defined in the prototype [annex: pointage-factures].
+```
+
+The agent sees the `[annex: pointage-factures]` token plus the annex listed in its context
+(name + kind + description) and runs `depot prd annex cat <annex-id>` for that part. Do not use
+`{{...}}` for this — that syntax is reserved for the template renderer; the body is user content.
+A `[annex: <name>]` reference to a non-existent annex is never blocking — `prd show` only emits a
+soft warning — but keep references and annexes in sync.
+
 ### 5. Challenge The Draft
 
 Before marking the PRD ready, explicitly surface:
@@ -255,6 +298,16 @@ context. For manual introspection, run `depot project directive list --category 
 > `depot prd ready/activate/request-review/done/phase-advance/cancel/close`.
 > Pass their formulation via `--user-confirmed "<verbatim quote>"`. The CLI
 > rejects the command without this flag.
+>
+> **Cite verbatim** the user's approval, **even if very short** ("go", "ok",
+> "vas-y", "yes"). Do not reformulate, do not pad, do not complete. Never ask
+> the user to retype a longer formulation — any explicit non-empty confirmation
+> is valid.
+>
+> **"Short" is about _form_, not _scope_.** The confirmation must approve **this
+> specific transition**. A positive remark about something else ("ok pour la
+> préprod", "super", "merci") is NOT an approval to transition — ask for a
+> confirmation that targets the action.
 
 Only when you are confident that a dev orchestrator can hand the work to a coder without major ambiguity:
 

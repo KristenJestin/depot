@@ -49,6 +49,22 @@ The slash command `/depot-doc` passes the user's free-text intent as `$ARGUMENTS
 
 {{hooks scope=pre-doc-sync category=doc}}
 
+### Range when syncing post-merge
+
+When you sync right after a merge, you hold the **squash commit SHA** in hand
+(you just drove the merge). Pass the range **explicitly** so the sync targets the
+feature diff:
+
+```
+depot doc sync <profile> --since <squash>^ --until <squash>
+```
+
+If the project configured `docSyncTicketPattern`, depot derives the squash range
+from the PRD ticket and the explicit range is optional. Otherwise supply it
+yourself. Depot **never falls back to a magic window** (no `HEAD~20`): with
+neither an explicit range nor a configured pattern, `depot doc sync` refuses
+rather than guessing — so always hand it a real range.
+
 Call `depot doc sync <profile> [...]` with the resolved range, then read the impacted files, propose a patch, apply on confirmation.
 
 ### Built-in guardrails (per profile, toggleable)

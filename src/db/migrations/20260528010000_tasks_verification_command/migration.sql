@@ -1,0 +1,14 @@
+-- Human tasks: add `tasks.verification_command` (PRD 0018 / T1).
+--
+-- New column carries the optional shell command that `depot task verify` will
+-- run to check the user actually did the manual action a `kind = "human"`
+-- task describes. Nullable: most tasks never use it, and human tasks without
+-- a verification command degrade to a plain `--user-confirmed` acknowledgment.
+--
+-- The new `kind` value `"human"` is added only to the application-level enum
+-- (`VALID_TASK_KINDS`) — SQLite stores `kind` as free text, so no DDL change
+-- is needed there.
+--
+-- Additive migration: re-running it on a healthy DB is a no-op once the
+-- column exists (the migrator skips already-applied SQL files).
+ALTER TABLE `tasks` ADD COLUMN `verification_command` text;

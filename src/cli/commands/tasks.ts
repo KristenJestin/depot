@@ -7,10 +7,12 @@ import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainPrds from "#/modules/prds/domain";
 import * as DomainReviews from "#/modules/reviews/domain";
 import * as DomainRepos from "#/modules/projects/repos";
-import { effortSchema, taskKindSchema } from "#/shared/schemas";
+import { effortSchema, taskKindSchema, triageStateSchema } from "#/shared/schemas";
+import { VALID_TRIAGE_STATES } from "#/shared/validator";
 import { getTaskDescriptionSections } from "#/modules/tasks/spec";
 import { formatDate } from "#/shared/utils";
 import type { CommandOutput } from "#/cli/command";
+import { requireUserConfirmation, userConfirmedArg } from "#/cli/user-confirmation";
 
 const TASK_SHOW_LABEL_WIDTH = 11;
 
@@ -149,8 +151,14 @@ const addCommand = command({
     },
     kind: {
       schema: taskKindSchema,
-      expected: "one of slice, gate, support",
-      description: "Task kind (slice/gate/support)",
+      expected: "one of slice, gate, support, human",
+      description: "Task kind (slice/gate/support/human)",
+    },
+    verification: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      expected: "a non-empty shell command",
+      description:
+        "Optional shell command run by 'task verify' to confirm a human task is done (only valid with --kind human)",
     },
     depends: {
       schema: Schema.String,
@@ -174,6 +182,12 @@ const addCommand = command({
       return output.error(
         "conflicting_input",
         "A task can be attached to at most one repo. Pass --repo only once; for a cross-repo change, split into separate tasks and link them with --depends.",
+      );
+    }
+    if (args.verification !== undefined && args.kind !== "human") {
+      return output.error(
+        "conflicting_input",
+        "--verification is only valid with --kind human. Drop --verification or set --kind human.",
       );
     }
     const description = await resolveTextInput({
@@ -239,6 +253,7 @@ const addCommand = command({
         dependsOn: dependencyIds,
         phaseNumber: args.phase,
         repoId,
+        verificationCommand: args.verification,
       }),
     );
 
@@ -263,6 +278,11 @@ const listCommand = command({
       schema: Schema.String,
       expected: "comma-separated list of pending|in_progress|blocked|done|skipped",
       description: "Filter by task status (comma-separated)",
+    },
+    triage: {
+      schema: Schema.String,
+      expected: `comma-separated list of ${VALID_TRIAGE_STATES.join("|")}`,
+      description: "Filter by triage state (comma-separated)",
     },
     allPhases: {
       schema: Schema.Boolean,
@@ -339,9 +359,32 @@ const listCommand = command({
       taskList = taskList.filter((t) => wanted.has(t.status));
     }
 
+    if (args.triage) {
+      const wanted = new Set(
+        args.triage
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      );
+      for (const s of wanted) {
+        if (!(VALID_TRIAGE_STATES as readonly string[]).includes(s)) {
+          return output.error(
+            "validation_error",
+            `--triage: '${s}' is not a valid triage state. Expected ${VALID_TRIAGE_STATES.join(", ")}.`,
+          );
+        }
+      }
+      taskList = taskList.filter((t) => wanted.has(t.triageState));
+    }
+
     if (args.hideSkipped) {
       taskList = taskList.filter((t) => t.status !== "skipped");
     }
+
+    // Surface `ready-for-agent` first so the coder picks up actionable tasks
+    // before triage-parked ones (needs-info / ready-for-human / wontfix). The
+    // dependency-order position is preserved within each triage bucket.
+    taskList = sortReadyForAgentFirst(taskList);
 
     if (output.isJson()) {
       output.success({ items: taskList.map(serializeTask) });
@@ -354,10 +397,27 @@ const listCommand = command({
     for (const t of taskList) {
       const deps: string[] = JSON.parse(t.dependsOn);
       const depStr = deps.length > 0 ? ` deps=[${deps.join(",")}]` : "";
-      output.print(`${t.id}  #${t.position}  ${t.title}  [${t.status}]  ${t.effort}${depStr}`);
+      output.print(
+        `${t.id}  #${t.position}  ${t.title}  [${t.status}]  ${t.effort}  triage=${t.triageState}${depStr}`,
+      );
     }
   },
 });
+
+/**
+ * Stable-sort tasks so `ready-for-agent` (and the default `needs-triage` that
+ * legacy rows carry) bubble to the top while every other triage bucket keeps
+ * its dependency-order position. Used by `task list` to mirror what the coder
+ * should pick up next: a `needs-info` / `ready-for-human` / `wontfix` task is
+ * not "to take now".
+ */
+function sortReadyForAgentFirst(taskList: readonly TaskRow[]): TaskRow[] {
+  const rank = (t: TaskRow): number => (t.triageState === "ready-for-agent" ? 0 : 1);
+  return [...taskList]
+    .map((task, index) => ({ task, index }))
+    .sort((a, b) => rank(a.task) - rank(b.task) || a.index - b.index)
+    .map((entry) => entry.task);
+}
 
 const treeCommand = command({
   meta: {
@@ -485,11 +545,13 @@ const showCommand = command({
       ["ID", task.id],
       ["Title", task.title],
       ["Status", task.status],
+      ["Triage", task.triageState],
       ["Position", task.position],
       ["Effort", task.effort],
       ["Kind", task.kind],
       ["Format", task.descriptionFormat],
       ["Depends On", deps.length > 0 ? deps.join(", ") : null],
+      ["Verification", task.verificationCommand],
       ["Blocked", task.blockedReason],
       ["Skipped", task.skipReason],
       ["Created", formatDate(task.createdAt)],
@@ -901,6 +963,103 @@ const reactivateCommand = command({
   },
 });
 
+const verifyCommand = command({
+  meta: {
+    name: "verify",
+    description:
+      "Verify a human task: optionally run its verification command, capture the user's confirmation quote (PRD 0018).",
+  },
+  workspace: true,
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID (full ULID or '#N'/'#last' shorthand)",
+    },
+    userConfirmed: userConfirmedArg,
+  },
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
+    if (task.kind !== "human") {
+      return output.error(
+        "invalid_kind",
+        `Cannot verify task '${task.title}': kind is '${task.kind}'. Only 'human' tasks support 'task verify'; use 'task done' for agent tasks.`,
+      );
+    }
+    const userConfirmation = requireUserConfirmation(args, "depot task verify", output);
+
+    const result = await runEffect(DomainTasks.verifyTask(task.id, { userConfirmation }));
+
+    if (!result.verified) {
+      const exitCode = result.exec?.exitCode ?? 1;
+      const stderr = (result.exec?.stderr ?? "").trim();
+      const hint = stderr.length > 0 ? `\nstderr:\n${stderr}` : "";
+      return output.error(
+        "verification_failed",
+        `Verification command for task '${task.title}' (${task.id}) exited with code ${exitCode}. Task stays 'pending'.${hint}`,
+      );
+    }
+
+    if (output.isJson()) {
+      output.success({
+        item: serializeTask(result.task),
+        verified: true,
+        exec: result.exec,
+      });
+    } else {
+      output.print(`Verified human task '${result.task.title}' (${result.task.id}) [done]`);
+      if (result.exec) {
+        output.print(`Verification command exited 0.`);
+      }
+    }
+  },
+});
+
+const triageCommand = command({
+  meta: {
+    name: "triage",
+    description: "Set the triage state on a PRD task (shortcut for the triage axis)",
+  },
+  workspace: true,
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID (full ULID or '#N'/'#last' shorthand)",
+    },
+    state: {
+      schema: triageStateSchema,
+      required: true,
+      positional: true,
+      expected: `one of ${VALID_TRIAGE_STATES.join(", ")}`,
+      description: "Triage state",
+    },
+    reason: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      alias: "r",
+      description: "Reason for the triage decision (recorded in the activity log)",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const task = await findTaskByRef(args.taskId, ws, output);
+    const updated = await runEffect(
+      DomainTasks.triageTask(task.id, args.state, {
+        reason: args.reason,
+        source: "human",
+      }),
+    );
+    if (output.isJson()) {
+      output.success({ item: serializeTask(updated) });
+    } else {
+      output.print(
+        `Triaged task '${updated.title}' (${updated.id}) → ${args.state}${args.reason ? ` (${args.reason})` : ""}`,
+      );
+    }
+  },
+});
+
 export const taskCommand = command({
   meta: { name: "task", description: "Task management" },
   subCommands: {
@@ -909,8 +1068,10 @@ export const taskCommand = command({
     tree: treeCommand,
     show: showCommand,
     update: updateCommand,
+    triage: triageCommand,
     start: startCommand,
     done: doneCommand,
+    verify: verifyCommand,
     block: blockCommand,
     skip: skipCommand,
     delete: deleteCommand,

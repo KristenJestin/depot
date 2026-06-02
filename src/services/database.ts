@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { openDatabase, defaultDbPath, type Database } from "#/db/client";
+import { DatabaseError } from "#/shared/errors";
 import { log } from "#/shared/logger";
 
 export class Db extends Context.Tag("depot/Db")<Db, Database>() {}
@@ -9,8 +10,12 @@ export const DbLive: Layer.Layer<Db> = Layer.effect(
   Effect.sync(() => {
     const dbPath = defaultDbPath();
     log.debug("Opening database at", dbPath);
-    const { db } = openDatabase(dbPath);
-    return db;
+    try {
+      const { db } = openDatabase(dbPath);
+      return db;
+    } catch (cause) {
+      throw new DatabaseError({ cause, path: dbPath, operation: "open" });
+    }
   }),
 );
 

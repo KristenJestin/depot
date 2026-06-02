@@ -68,6 +68,7 @@ describe("PrdSidebar", () => {
           solution: null,
           implementationDecisions: null,
           testingDecisions: null,
+          priority: "normal",
           status: "in_progress",
           auditCycles: 1,
           currentPhase: 1,

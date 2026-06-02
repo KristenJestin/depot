@@ -19,3 +19,5 @@ export type TaskDetailResponse = InferResponseType<
 export type ContextResponse = InferResponseType<typeof rpc.api.context.$get, 200>;
 export type WorkspacesResponse = InferResponseType<typeof rpc.api.workspaces.$get, 200>;
 export type Workspace = WorkspacesResponse["workspaces"][number];
+export type ProjectsResponse = InferResponseType<typeof rpc.api.projects.$get, 200>;
+export type Project = ProjectsResponse["items"][number];

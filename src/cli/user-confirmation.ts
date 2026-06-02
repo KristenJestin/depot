@@ -7,19 +7,18 @@ import { activityLog } from "#/db/schema";
 import type { CommandOutput } from "#/cli/command";
 import type { EventType } from "#/shared/validator";
 
-export const USER_CONFIRMATION_MIN_LENGTH = 6;
-
 const BYPASS_ENV_VAR = "DEPOT_BYPASS_USER_CONFIRMATION";
 
 /**
  * Reusable schema for the `--user-confirmed` flag. We accept any string here
- * (length validation is performed manually so we can emit a guidance-rich
- * error message) and rely on `resolveUserConfirmation` for the policy checks.
+ * (the non-empty-after-trim check is performed manually so we can emit a
+ * guidance-rich error message) and rely on `resolveUserConfirmation` for the
+ * policy checks.
  */
 export const userConfirmedArg = {
   schema: Schema.String,
   description:
-    "Verbatim user approval quote (string longer than 5 chars). Required unless DEPOT_BYPASS_USER_CONFIRMATION=1 is set.",
+    'Verbatim user approval quote (any non-empty string, even short like "go"). Required unless DEPOT_BYPASS_USER_CONFIRMATION=1 is set.',
 } as const;
 
 type ResolveResult =
@@ -30,21 +29,11 @@ function isBypassActive(): boolean {
   return process.env[BYPASS_ENV_VAR] === "1";
 }
 
-function buildMissingMessage(commandPath: string): string {
+function buildPolicyMessage(commandPath: string): string {
   return (
-    `${commandPath} requires --user-confirmed "<verbatim user quote>" (a string longer than 5 characters). ` +
-    `This transition changes the PRD lifecycle, which is a product decision that belongs to the user. ` +
-    `Ask the user for an explicit, literal approval (e.g. "go ahead and mark it ready"), then re-run the command with ` +
-    `--user-confirmed "<that quote>". ` +
+    `${commandPath} requires --user-confirmed "<quote>" — pass a verbatim quote of the user's approval, ` +
+    `even if short. Empty values are rejected. ` +
     `Tests and admin scripts may set DEPOT_BYPASS_USER_CONFIRMATION=1 to skip this gate.`
-  );
-}
-
-function buildTooShortMessage(commandPath: string): string {
-  return (
-    `${commandPath} received --user-confirmed shorter than ${USER_CONFIRMATION_MIN_LENGTH} characters. ` +
-    `A value like "ok" does not prove explicit user approval. Quote the user's actual approval verbatim ` +
-    `(e.g. "go ahead, mark it ready") and re-run with --user-confirmed "<that quote>".`
   );
 }
 
@@ -52,8 +41,8 @@ function buildTooShortMessage(commandPath: string): string {
  * Apply the `--user-confirmed` policy:
  *
  * - flag absent + bypass env unset → reject with a guidance message.
- * - flag length ≤ 5                → reject with a hint about length.
- * - flag valid                     → resolve to the literal quote.
+ * - flag empty after trim          → reject with the same guidance.
+ * - flag valid (non-empty trim)    → resolve to the literal quote (unmodified).
  * - flag absent + bypass env set   → resolve to `null` (audit log keeps the null).
  */
 export function resolveUserConfirmation(
@@ -67,14 +56,14 @@ export function resolveUserConfirmation(
     return {
       ok: false,
       code: "user_confirmation_required",
-      message: buildMissingMessage(commandPath),
+      message: buildPolicyMessage(commandPath),
     };
   }
-  if (rawValue.length < USER_CONFIRMATION_MIN_LENGTH) {
+  if (rawValue.trim().length === 0) {
     return {
       ok: false,
-      code: "user_confirmation_too_short",
-      message: buildTooShortMessage(commandPath),
+      code: "user_confirmation_empty",
+      message: buildPolicyMessage(commandPath),
     };
   }
   return { ok: true, userConfirmation: rawValue };

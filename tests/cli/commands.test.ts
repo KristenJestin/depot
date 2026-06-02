@@ -2626,7 +2626,7 @@ describe("CLI commands", () => {
             syncCmd as unknown as {
               run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
             }
-          ).run({ args: { name: "p", repo: "api", dryRun: true } });
+          ).run({ args: { name: "p", repo: "api", since: "HEAD~1", dryRun: true } });
         } finally {
           setJsonMode(false);
         }
@@ -2673,7 +2673,7 @@ describe("CLI commands", () => {
             syncCmd as unknown as {
               run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
             }
-          ).run({ args: { name: "p", dryRun: true } });
+          ).run({ args: { name: "p", since: "HEAD~1", dryRun: true } });
         } finally {
           setJsonMode(false);
         }
@@ -2714,7 +2714,7 @@ describe("CLI commands", () => {
             syncCmd as unknown as {
               run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
             }
-          ).run({ args: { name: "p", dryRun: true } });
+          ).run({ args: { name: "p", since: "HEAD~1", dryRun: true } });
         } finally {
           setJsonMode(false);
         }
@@ -2828,7 +2828,7 @@ describe("CLI commands", () => {
             syncCmd as unknown as {
               run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
             }
-          ).run({ args: { name: "p", dryRun: true } });
+          ).run({ args: { name: "p", since: "HEAD~1", dryRun: true } });
         } finally {
           setJsonMode(false);
         }
@@ -2881,7 +2881,7 @@ describe("CLI commands", () => {
             syncCmd as unknown as {
               run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
             }
-          ).run({ args: { name: "p", repo: "api", dryRun: true } });
+          ).run({ args: { name: "p", repo: "api", since: "HEAD~1", dryRun: true } });
         } finally {
           setJsonMode(false);
         }
@@ -2934,7 +2934,7 @@ describe("CLI commands", () => {
             syncCmd as unknown as {
               run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
             }
-          ).run({ args: { name: "p", dryRun: true } });
+          ).run({ args: { name: "p", since: "HEAD~1", dryRun: true } });
         } finally {
           setJsonMode(false);
         }
@@ -2984,7 +2984,7 @@ describe("CLI commands", () => {
             syncCmd as unknown as {
               run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
             }
-          ).run({ args: { name: "p", dryRun: true } });
+          ).run({ args: { name: "p", since: "HEAD~1", dryRun: true } });
         } finally {
           setJsonMode(false);
         }

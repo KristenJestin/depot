@@ -274,6 +274,15 @@ export function summarizeActivityPayload(
       return String(payload.title ?? "");
     case "task_deleted":
       return String(payload.title ?? "");
+    case "task_verified_human": {
+      const exit = payload.verificationExitCode;
+      const quote = payload.userConfirmation;
+      const quoteSummary = typeof quote === "string" && quote.length > 0 ? `"${quote}"` : "(ack)";
+      if (typeof exit === "number") {
+        return `${quoteSummary} — verification exited ${exit}`;
+      }
+      return `${quoteSummary} — ack only`;
+    }
     case "prd_approved": {
       const by = payload.approvedBy ? String(payload.approvedBy) : null;
       const cmt = payload.comment ? String(payload.comment) : null;
@@ -290,6 +299,11 @@ export function summarizeActivityPayload(
       const from = payload.fromPhase;
       const to = payload.toPhase;
       return to !== undefined ? `phase ${from} → ${to}` : `phase ${from} (final)`;
+    }
+    case "prd_phase_initialized": {
+      const to = payload.toPhase;
+      const derived = payload.derivedFromTasks ? " (derived from tasks)" : "";
+      return `currentPhase ← ${to}${derived}`;
     }
     case "error":
       return String(payload.message ?? "");

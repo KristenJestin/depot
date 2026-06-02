@@ -12,10 +12,13 @@ import { Route as rootRouteImport } from "./routes/__root";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as ProjectsIndexRouteImport } from "./routes/projects.index";
 import { Route as PrdsIdRouteImport } from "./routes/prds.$id";
+import { Route as MilestonesVersionRouteImport } from "./routes/milestones.$version";
 import { Route as PrdsIdIndexRouteImport } from "./routes/prds.$id.index";
 import { Route as ProjectsIdSettingsRouteImport } from "./routes/projects.$id.settings";
 import { Route as ProjectsIdDocsRouteImport } from "./routes/projects.$id.docs";
 import { Route as ProjectsIdAdrsIndexRouteImport } from "./routes/projects.$id.adrs.index";
+import { Route as ProjectsIdDocProfilesNameRouteImport } from "./routes/projects.$id.doc-profiles.$name";
+import { Route as ProjectsIdDirectivesDirectiveIdRouteImport } from "./routes/projects.$id.directives.$directiveId";
 import { Route as ProjectsIdAdrsAdrIdRouteImport } from "./routes/projects.$id.adrs.$adrId";
 import { Route as PrdsIdReviewsReviewIdRouteImport } from "./routes/prds.$id.reviews.$reviewId";
 
@@ -32,6 +35,11 @@ const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
 const PrdsIdRoute = PrdsIdRouteImport.update({
   id: "/prds/$id",
   path: "/prds/$id",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const MilestonesVersionRoute = MilestonesVersionRouteImport.update({
+  id: "/milestones/$version",
+  path: "/milestones/$version",
   getParentRoute: () => rootRouteImport,
 } as any);
 const PrdsIdIndexRoute = PrdsIdIndexRouteImport.update({
@@ -54,6 +62,18 @@ const ProjectsIdAdrsIndexRoute = ProjectsIdAdrsIndexRouteImport.update({
   path: "/projects/$id/adrs/",
   getParentRoute: () => rootRouteImport,
 } as any);
+const ProjectsIdDocProfilesNameRoute =
+  ProjectsIdDocProfilesNameRouteImport.update({
+    id: "/projects/$id/doc-profiles/$name",
+    path: "/projects/$id/doc-profiles/$name",
+    getParentRoute: () => rootRouteImport,
+  } as any);
+const ProjectsIdDirectivesDirectiveIdRoute =
+  ProjectsIdDirectivesDirectiveIdRouteImport.update({
+    id: "/projects/$id/directives/$directiveId",
+    path: "/projects/$id/directives/$directiveId",
+    getParentRoute: () => rootRouteImport,
+  } as any);
 const ProjectsIdAdrsAdrIdRoute = ProjectsIdAdrsAdrIdRouteImport.update({
   id: "/projects/$id/adrs/$adrId",
   path: "/projects/$id/adrs/$adrId",
@@ -67,6 +87,7 @@ const PrdsIdReviewsReviewIdRoute = PrdsIdReviewsReviewIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
+  "/milestones/$version": typeof MilestonesVersionRoute;
   "/prds/$id": typeof PrdsIdRouteWithChildren;
   "/projects/": typeof ProjectsIndexRoute;
   "/projects/$id/docs": typeof ProjectsIdDocsRoute;
@@ -74,21 +95,27 @@ export interface FileRoutesByFullPath {
   "/prds/$id/": typeof PrdsIdIndexRoute;
   "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
   "/projects/$id/adrs/$adrId": typeof ProjectsIdAdrsAdrIdRoute;
+  "/projects/$id/directives/$directiveId": typeof ProjectsIdDirectivesDirectiveIdRoute;
+  "/projects/$id/doc-profiles/$name": typeof ProjectsIdDocProfilesNameRoute;
   "/projects/$id/adrs/": typeof ProjectsIdAdrsIndexRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
+  "/milestones/$version": typeof MilestonesVersionRoute;
   "/projects": typeof ProjectsIndexRoute;
   "/projects/$id/docs": typeof ProjectsIdDocsRoute;
   "/projects/$id/settings": typeof ProjectsIdSettingsRoute;
   "/prds/$id": typeof PrdsIdIndexRoute;
   "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
   "/projects/$id/adrs/$adrId": typeof ProjectsIdAdrsAdrIdRoute;
+  "/projects/$id/directives/$directiveId": typeof ProjectsIdDirectivesDirectiveIdRoute;
+  "/projects/$id/doc-profiles/$name": typeof ProjectsIdDocProfilesNameRoute;
   "/projects/$id/adrs": typeof ProjectsIdAdrsIndexRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
+  "/milestones/$version": typeof MilestonesVersionRoute;
   "/prds/$id": typeof PrdsIdRouteWithChildren;
   "/projects/": typeof ProjectsIndexRoute;
   "/projects/$id/docs": typeof ProjectsIdDocsRoute;
@@ -96,12 +123,15 @@ export interface FileRoutesById {
   "/prds/$id/": typeof PrdsIdIndexRoute;
   "/prds/$id/reviews/$reviewId": typeof PrdsIdReviewsReviewIdRoute;
   "/projects/$id/adrs/$adrId": typeof ProjectsIdAdrsAdrIdRoute;
+  "/projects/$id/directives/$directiveId": typeof ProjectsIdDirectivesDirectiveIdRoute;
+  "/projects/$id/doc-profiles/$name": typeof ProjectsIdDocProfilesNameRoute;
   "/projects/$id/adrs/": typeof ProjectsIdAdrsIndexRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
     | "/"
+    | "/milestones/$version"
     | "/prds/$id"
     | "/projects/"
     | "/projects/$id/docs"
@@ -109,20 +139,26 @@ export interface FileRouteTypes {
     | "/prds/$id/"
     | "/prds/$id/reviews/$reviewId"
     | "/projects/$id/adrs/$adrId"
+    | "/projects/$id/directives/$directiveId"
+    | "/projects/$id/doc-profiles/$name"
     | "/projects/$id/adrs/";
   fileRoutesByTo: FileRoutesByTo;
   to:
     | "/"
+    | "/milestones/$version"
     | "/projects"
     | "/projects/$id/docs"
     | "/projects/$id/settings"
     | "/prds/$id"
     | "/prds/$id/reviews/$reviewId"
     | "/projects/$id/adrs/$adrId"
+    | "/projects/$id/directives/$directiveId"
+    | "/projects/$id/doc-profiles/$name"
     | "/projects/$id/adrs";
   id:
     | "__root__"
     | "/"
+    | "/milestones/$version"
     | "/prds/$id"
     | "/projects/"
     | "/projects/$id/docs"
@@ -130,16 +166,21 @@ export interface FileRouteTypes {
     | "/prds/$id/"
     | "/prds/$id/reviews/$reviewId"
     | "/projects/$id/adrs/$adrId"
+    | "/projects/$id/directives/$directiveId"
+    | "/projects/$id/doc-profiles/$name"
     | "/projects/$id/adrs/";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
+  MilestonesVersionRoute: typeof MilestonesVersionRoute;
   PrdsIdRoute: typeof PrdsIdRouteWithChildren;
   ProjectsIndexRoute: typeof ProjectsIndexRoute;
   ProjectsIdDocsRoute: typeof ProjectsIdDocsRoute;
   ProjectsIdSettingsRoute: typeof ProjectsIdSettingsRoute;
   ProjectsIdAdrsAdrIdRoute: typeof ProjectsIdAdrsAdrIdRoute;
+  ProjectsIdDirectivesDirectiveIdRoute: typeof ProjectsIdDirectivesDirectiveIdRoute;
+  ProjectsIdDocProfilesNameRoute: typeof ProjectsIdDocProfilesNameRoute;
   ProjectsIdAdrsIndexRoute: typeof ProjectsIdAdrsIndexRoute;
 }
 
@@ -164,6 +205,13 @@ declare module "@tanstack/react-router" {
       path: "/prds/$id";
       fullPath: "/prds/$id";
       preLoaderRoute: typeof PrdsIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/milestones/$version": {
+      id: "/milestones/$version";
+      path: "/milestones/$version";
+      fullPath: "/milestones/$version";
+      preLoaderRoute: typeof MilestonesVersionRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/prds/$id/": {
@@ -192,6 +240,20 @@ declare module "@tanstack/react-router" {
       path: "/projects/$id/adrs";
       fullPath: "/projects/$id/adrs/";
       preLoaderRoute: typeof ProjectsIdAdrsIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/projects/$id/doc-profiles/$name": {
+      id: "/projects/$id/doc-profiles/$name";
+      path: "/projects/$id/doc-profiles/$name";
+      fullPath: "/projects/$id/doc-profiles/$name";
+      preLoaderRoute: typeof ProjectsIdDocProfilesNameRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/projects/$id/directives/$directiveId": {
+      id: "/projects/$id/directives/$directiveId";
+      path: "/projects/$id/directives/$directiveId";
+      fullPath: "/projects/$id/directives/$directiveId";
+      preLoaderRoute: typeof ProjectsIdDirectivesDirectiveIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/projects/$id/adrs/$adrId": {
@@ -226,11 +288,14 @@ const PrdsIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  MilestonesVersionRoute: MilestonesVersionRoute,
   PrdsIdRoute: PrdsIdRouteWithChildren,
   ProjectsIndexRoute: ProjectsIndexRoute,
   ProjectsIdDocsRoute: ProjectsIdDocsRoute,
   ProjectsIdSettingsRoute: ProjectsIdSettingsRoute,
   ProjectsIdAdrsAdrIdRoute: ProjectsIdAdrsAdrIdRoute,
+  ProjectsIdDirectivesDirectiveIdRoute: ProjectsIdDirectivesDirectiveIdRoute,
+  ProjectsIdDocProfilesNameRoute: ProjectsIdDocProfilesNameRoute,
   ProjectsIdAdrsIndexRoute: ProjectsIdAdrsIndexRoute,
 };
 export const routeTree = rootRouteImport

@@ -4,9 +4,15 @@ import { ListTreeIcon, PanelRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { LiveActivityPanel } from "#/web/components/live-activity-panel";
+import { PrdAnnexesSection } from "#/web/components/prd-annexes-widget";
 import { PrdHeaderCard } from "#/web/components/prd-header-card";
 import { PrdNoticeBanner } from "#/web/components/prd-notice-banner";
 import { PrdReposWidget, type PrdRepoSummary } from "#/web/components/prd-repos-widget";
+import {
+  PrdDependenciesWidget,
+  PrdMilestoneWidget,
+  PrdTagsWidget,
+} from "#/web/components/prd-groupings-widget";
 import {
   PrdActivityWidget,
   PrdInfoWidget,
@@ -52,6 +58,7 @@ function PrdDetailRoute() {
   const summary = buildDetailSummary(data);
   const stages = buildStageCards(data);
   const revisions = buildRevisionEntries(data);
+  const annexNames = new Set(data.annexes.map((annex) => annex.name));
   // In draft / ready the PRD is still being planned — every phase is equally
   // "to come". Expand all timeline cards so the author can review the whole
   // plan at a glance without clicking phase by phase.
@@ -159,6 +166,13 @@ function PrdDetailRoute() {
         right={
           <div className="space-y-4 p-4" onClickCapture={handlePaneClick}>
             <PrdInfoWidget prd={data.prd} workspace={data.workspace} summary={summary} />
+            <PrdTagsWidget prdRevisionId={id} tags={data.tags} />
+            <PrdMilestoneWidget prdRevisionId={id} version={data.targetVersion} />
+            <PrdDependenciesWidget
+              prdRevisionId={id}
+              dependencies={data.dependencies}
+              dependents={data.dependents}
+            />
             <PrdReposSection prdId={id} />
             <PrdReviewsWidget reviews={data.reviews} />
             <PrdActivityWidget activity={data.activity} />
@@ -190,7 +204,8 @@ function PrdDetailRoute() {
                 />
               ) : null}
 
-              <PrdHeaderCard prd={data.prd} summary={summary} />
+              <PrdHeaderCard prd={data.prd} summary={summary} annexNames={annexNames} />
+              <PrdAnnexesSection prdRevisionId={id} annexes={data.annexes} />
               <LiveActivityPanel
                 prdStatus={data.prd.status}
                 activity={data.activity}

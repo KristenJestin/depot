@@ -27,6 +27,11 @@ const badgeVariants = cva(
         severityMajor: "border-severity-major/20 bg-severity-major-soft text-severity-major",
         severityMinor: "border-severity-minor/20 bg-severity-minor-soft text-severity-minor",
         severityInfo: "border-severity-info/20 bg-severity-info-soft text-severity-info",
+        // Triage axis (PRD 0020 / T1). `ready-for-agent` is the actionable
+        // state — give it a distinct positive colour; the parked states reuse
+        // the muted/info palette so they read as "not to take now".
+        triageReady: "border-transparent bg-status-ready-soft text-status-ready-foreground",
+        triageParked: "border-severity-info/20 bg-severity-info-soft text-severity-info",
       },
     },
     defaultVariants: {

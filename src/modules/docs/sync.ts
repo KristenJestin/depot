@@ -4,7 +4,8 @@ import { docProfiles, docSyncRuns } from "#/db/schema";
 import { Db } from "#/services/database";
 import { dbQuery } from "#/shared/db";
 import { generateId } from "#/shared/utils";
-import { ValidationError } from "#/shared/errors";
+import { DatabaseError, ValidationError } from "#/shared/errors";
+import { fetchBase, grepBaseForTicket } from "#/lib/git";
 
 export type DocSource = {
   name: string;
@@ -171,22 +172,120 @@ export const listSyncRuns = (profileId: string, options: { prdId?: string; limit
     );
   });
 
+/**
+ * The single repo a `resolveDiffRange` call resolves a range *for*. doc-sync
+ * iterates source repos itself (scope = `prd_repo`) and resolves one range per
+ * repo, so the resolver only ever sees one repo at a time. `path` is the repo
+ * working tree (where git runs); `baseBranch` is the branch the feature merged
+ * into. Absent → ticket-grep is unavailable and the resolver refuses.
+ */
+export type ResolveRangeRepo = {
+  path: string;
+  baseBranch: string;
+};
+
 export type ResolveRangeInput = {
   profileName: string;
   projectId: string;
   sinceExpr?: string;
   untilExpr?: string;
+  /**
+   * Ticket-grep inputs (PRD 0023 / T2). All three must be present for the
+   * strategy to engage: a configured pattern, a ticket extracted from the PRD,
+   * and the repo to grep. Any missing → fall through to the refusal.
+   */
+  ticketPattern?: string | null;
+  ticket?: string | null;
+  repo?: ResolveRangeRepo;
 };
 
+/**
+ * How a source's diff range was resolved.
+ *
+ * - `"expr"`: the caller passed an explicit `--since` (and optional `--until`),
+ *   so the range is taken verbatim.
+ * - `"ticket-grep"` (PRD 0023 / T2): the range was derived from the feature's
+ *   squash commit(s) by grepping `origin/<base>` for the PRD ticket. `since` is
+ *   `<squash>^` and `until` is `<squash>`; with multiple matching commits the
+ *   union spans the oldest match's parent to the newest match. The matching
+ *   SHA(s) are recorded in `resolvedFrom` for traceability.
+ *
+ * The resolver is an ordered list of strategies (explicit → ticket-grep →
+ * refuse) so a derived mode never reintroduces a silent fallback.
+ */
 export type ResolvedSourceRange = {
   name: string;
   path: string;
   since: string | null;
   until: string | null;
-  mode: "time-window" | "expr";
+  mode: "expr" | "ticket-grep";
+  /** Squash SHA(s) the ticket-grep range was derived from. */
+  resolvedFrom?: string;
 };
 
-export const resolveDiffRange = (input: ResolveRangeInput) =>
+/**
+ * Outcome of resolving a range for one repo.
+ *
+ * - `resolved`: a usable range (explicit or ticket-grep).
+ * - `excluded`: ticket-grep was attempted but the ticket matched no commit in
+ *   this repo — a legitimate per-repo outcome (a feature need not touch every
+ *   repo in scope), so the repo is dropped from the sync rather than failing
+ *   the whole command. The caller surfaces an info line.
+ */
+export type RepoRangeResolution =
+  | { kind: "resolved"; profileId: string; sources: ResolvedSourceRange[] }
+  | { kind: "excluded"; profileId: string; ticket: string; base: string };
+
+/**
+ * Message surfaced when no strategy can determine the feature's commit range.
+ * Refuse-don't-guess: depot never silently invents a range (the old hardcoded
+ * `HEAD~20` fallback). The agent is told exactly how to proceed.
+ */
+export const UNRESOLVED_RANGE_MESSAGE =
+  "doc-sync cannot determine the feature's commit range. " +
+  "Pass --since <ref> [--until <ref>], or configure a docSyncTicketPattern.";
+
+/**
+ * Extract the feature ticket from a PRD using `pattern` (a compilable regex
+ * string, e.g. `TICKET-\\d+`). The body is searched first (durable, explicit),
+ * preferring an explicit `Refs <ticket>` reference and otherwise the first bare
+ * match; the title is the fallback (PRD 0023 / Q2). Returns the matched ticket
+ * string or `null`.
+ *
+ * `suggestedCommitMessage` is deliberately never consulted: it is edited at
+ * merge time and its subject diverges from the real squash subject (PRD 0023).
+ * An invalid `pattern` is treated as no-match rather than throwing — validation
+ * lives at the config layer.
+ */
+export const extractTicket = (
+  prd: { title: string; body: string | null | undefined },
+  pattern: string,
+): string | null => {
+  let ticketRe: RegExp;
+  let refsRe: RegExp;
+  try {
+    ticketRe = new RegExp(pattern);
+    refsRe = new RegExp(`Refs\\s+(${pattern})`, "i");
+  } catch {
+    return null;
+  }
+
+  const body = prd.body ?? "";
+  const refsMatch = refsRe.exec(body);
+  if (refsMatch?.[1]) return refsMatch[1];
+
+  const bodyMatch = ticketRe.exec(body);
+  if (bodyMatch?.[0]) return bodyMatch[0];
+
+  const titleMatch = ticketRe.exec(prd.title);
+  if (titleMatch?.[0]) return titleMatch[0];
+
+  return null;
+};
+
+export const resolveDiffRange = (
+  input: ResolveRangeInput,
+): Effect.Effect<RepoRangeResolution, ValidationError | DatabaseError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const profile = yield* dbQuery(() =>
@@ -201,23 +300,46 @@ export const resolveDiffRange = (input: ResolveRangeInput) =>
     }
 
     const sources = JSON.parse(profile.sources) as DocSource[];
-    const ranges: ResolvedSourceRange[] = sources.map((source) =>
-      input.sinceExpr
-        ? {
-            name: source.name,
-            path: source.path,
-            since: input.sinceExpr,
-            until: input.untilExpr ?? null,
-            mode: "expr",
-          }
-        : {
-            name: source.name,
-            path: source.path,
-            since: "HEAD~20",
-            until: null,
-            mode: "time-window",
-          },
-    );
 
-    return { profileId: profile.id, sources: ranges };
+    // Strategy 1 — explicit `--since` wins; the range is taken verbatim.
+    if (input.sinceExpr) {
+      const ranges: ResolvedSourceRange[] = sources.map((source) => ({
+        name: source.name,
+        path: source.path,
+        since: input.sinceExpr!,
+        until: input.untilExpr ?? null,
+        mode: "expr",
+      }));
+      return { kind: "resolved", profileId: profile.id, sources: ranges };
+    }
+
+    // Strategy 2 — ticket-grep: derive the squash range from the PRD ticket.
+    // Engages only with a configured pattern, an extracted ticket, and a repo
+    // to grep. fetch is best-effort (Q3); a stale base still greps local.
+    if (input.ticketPattern && input.ticket && input.repo) {
+      const ticket = input.ticket;
+      const base = input.repo.baseBranch;
+      yield* fetchBase(input.repo.path, base);
+      const shas = yield* grepBaseForTicket(input.repo.path, base, ticket);
+
+      if (shas.length === 0) {
+        return { kind: "excluded", profileId: profile.id, ticket, base };
+      }
+
+      // `git log` lists newest first; the union spans the oldest match's parent
+      // to the newest match.
+      const newest = shas[0]!;
+      const oldest = shas[shas.length - 1]!;
+      const ranges: ResolvedSourceRange[] = sources.map((source) => ({
+        name: source.name,
+        path: source.path,
+        since: `${oldest}^`,
+        until: newest,
+        mode: "ticket-grep",
+        resolvedFrom: shas.join(","),
+      }));
+      return { kind: "resolved", profileId: profile.id, sources: ranges };
+    }
+
+    return yield* Effect.fail(new ValidationError({ reason: UNRESOLVED_RANGE_MESSAGE }));
   });

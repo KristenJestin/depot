@@ -17,6 +17,7 @@ import {
   recordSyncRun,
   listSyncRuns,
   resolveDiffRange,
+  extractTicket,
 } from "#/modules/docs/sync";
 import { createPrd } from "#/modules/prds/domain";
 import { createProject } from "#/modules/projects/domain";
@@ -201,22 +202,110 @@ describe("doc profiles + sync", () => {
     const range = await run(
       resolveDiffRange({ profileName: "p", projectId, sinceExpr: "15 days ago" }),
     );
+    expect(range.kind).toBe("resolved");
+    if (range.kind !== "resolved") throw new Error("expected resolved");
     expect(range.sources[0]?.mode).toBe("expr");
     expect(range.sources[0]?.since).toBe("15 days ago");
   });
 
-  it("resolveDiffRange falls back to the HEAD~20 time window when no sinceExpr is provided", async () => {
+  it("resolveDiffRange passes --until through alongside --since", async () => {
     await run(
       createProfile({
         projectId,
-        name: "fallback",
+        name: "until",
         targetRoot: "./docs",
         sources: [{ name: "core", path: "./" }],
       }),
     );
-    const range = await run(resolveDiffRange({ profileName: "fallback", projectId }));
-    expect(range.sources[0]?.mode).toBe("time-window");
-    expect(range.sources[0]?.since).toBe("HEAD~20");
-    expect(range.sources[0]?.until).toBeNull();
+    const range = await run(
+      resolveDiffRange({
+        profileName: "until",
+        projectId,
+        sinceExpr: "abc123^",
+        untilExpr: "abc123",
+      }),
+    );
+    expect(range.kind).toBe("resolved");
+    if (range.kind !== "resolved") throw new Error("expected resolved");
+    expect(range.sources[0]?.mode).toBe("expr");
+    expect(range.sources[0]?.since).toBe("abc123^");
+    expect(range.sources[0]?.until).toBe("abc123");
+  });
+
+  it("resolveDiffRange refuses (no HEAD~20 fallback) when no sinceExpr and no strategy", async () => {
+    await run(
+      createProfile({
+        projectId,
+        name: "refuse",
+        targetRoot: "./docs",
+        sources: [{ name: "core", path: "./" }],
+      }),
+    );
+    const promise = run(resolveDiffRange({ profileName: "refuse", projectId }));
+    await expect(promise).rejects.toThrow(/cannot determine the feature's commit range/);
+    await expect(promise).rejects.toThrow(/--since/);
+    await expect(promise).rejects.not.toThrow(/HEAD~20/);
+  });
+
+  it("resolveDiffRange refuses when a pattern is set but no ticket/repo (no silent guess)", async () => {
+    await run(
+      createProfile({
+        projectId,
+        name: "no-ticket",
+        targetRoot: "./docs",
+        sources: [{ name: "core", path: "./" }],
+      }),
+    );
+    // Pattern configured but ticket unresolved (e.g. PRD had no Refs): the
+    // strategy does not engage and we still refuse rather than fall back.
+    const promise = run(
+      resolveDiffRange({
+        profileName: "no-ticket",
+        projectId,
+        ticketPattern: "TICKET-\\d+",
+        ticket: null,
+        repo: { path: process.cwd(), baseBranch: "main" },
+      }),
+    );
+    await expect(promise).rejects.toThrow(/cannot determine the feature's commit range/);
+  });
+});
+
+describe("extractTicket (PRD 0023 / T2)", () => {
+  it("prefers an explicit `Refs <ticket>` in the body", () => {
+    const t = extractTicket(
+      { title: "Some feature TICKET-9999", body: "Background.\n\nRefs TICKET-1234\n\nMore." },
+      "TICKET-\\d+",
+    );
+    expect(t).toBe("TICKET-1234");
+  });
+
+  it("falls back to a bare match in the body when there is no Refs line", () => {
+    const t = extractTicket(
+      { title: "untitled", body: "This implements TICKET-1234 across repos." },
+      "TICKET-\\d+",
+    );
+    expect(t).toBe("TICKET-1234");
+  });
+
+  it("falls back to the title when the body has no match", () => {
+    const t = extractTicket(
+      { title: "TICKET-1234 — multi-repo doc sync", body: "No ticket in the body." },
+      "TICKET-\\d+",
+    );
+    expect(t).toBe("TICKET-1234");
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(extractTicket({ title: "no ticket here", body: "nor here" }, "TICKET-\\d+")).toBeNull();
+  });
+
+  it("never reads suggestedCommitMessage and tolerates a null body", () => {
+    expect(extractTicket({ title: "TICKET-42 fix", body: null }, "TICKET-\\d+")).toBe("TICKET-42");
+    expect(extractTicket({ title: "plain", body: undefined }, "TICKET-\\d+")).toBeNull();
+  });
+
+  it("treats an invalid pattern as no-match instead of throwing", () => {
+    expect(extractTicket({ title: "TICKET-1", body: "x" }, "TICKET-(")).toBeNull();
   });
 });

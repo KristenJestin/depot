@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import path from "node:path";
 import * as DomainDocs from "#/modules/docs/domain";
 import * as DomainDocSync from "#/modules/docs/sync";
+import * as DomainProjectConfig from "#/modules/projects/config";
 import { getRuntime } from "#/services/database";
 import type { DocKind } from "#/shared/validator";
 import type { Variables } from "./types";
@@ -8,6 +10,7 @@ import type { Variables } from "./types";
 export const docsRoutes = new Hono<{ Variables: Variables }>()
   .get("/projects/:id/docs", async (c) => {
     const { id } = c.req.param();
+    const db = c.var.db;
     const kindQuery = c.req.query("kind") as DocKind | undefined;
     const artifacts = await getRuntime().runPromise(
       DomainDocs.listDocArtifacts(id, { kind: kindQuery }),
@@ -19,7 +22,30 @@ export const docsRoutes = new Hono<{ Variables: Variables }>()
       const runs = await getRuntime().runPromise(DomainDocSync.listSyncRuns(p.id, { limit: 5 }));
       lastRunsByProfile[p.id] = runs;
     }
-    return c.json({ artifacts, profiles, lastRunsByProfile }, 200);
+
+    // A doc artifact's `path` is stored relative to its workspace. To let the
+    // web "Open in editor" / "Copy path" actions point at the file on disk we
+    // resolve it against the workspace root here. `workspaceId` is nullable on
+    // older rows, so we fall back to the project's first workspace.
+    const workspaceRows = await db.query.workspaces.findMany({ where: { projectId: id } });
+    const workspacePathById = new Map(workspaceRows.map((w) => [w.id, w.path]));
+    const fallbackWorkspacePath = workspaceRows[0]?.path ?? null;
+    const artifactsWithAbsPath = artifacts.map((a) => {
+      const root =
+        (a.workspaceId ? workspacePathById.get(a.workspaceId) : undefined) ?? fallbackWorkspacePath;
+      const absPath = root ? path.resolve(root, a.path) : null;
+      return { ...a, absPath };
+    });
+
+    const editorConfig = await getRuntime().runPromise(
+      DomainProjectConfig.getConfig(id, "defaultEditor"),
+    );
+    const defaultEditor = editorConfig?.value ?? null;
+
+    return c.json(
+      { artifacts: artifactsWithAbsPath, profiles, lastRunsByProfile, defaultEditor },
+      200,
+    );
   })
   .get("/prds/:id/docs", async (c) => {
     const { id } = c.req.param();

@@ -4,6 +4,7 @@ import { getContextTemplate } from "#/modules/context";
 import { renderTemplate } from "#/modules/context/renderer";
 import { runEffect, resolveCurrentWorkspace } from "#/cli/runtime";
 import { getPrd } from "#/modules/prds/domain";
+import { listAnnexes } from "#/modules/prds/annexes";
 import { resolveRepoShipState, renderRepoShipState } from "#/modules/context/ship-state";
 import { resolveDocState, renderDocState } from "#/modules/context/doc-state";
 import { listProfiles, listSyncRuns } from "#/modules/docs/sync";
@@ -77,6 +78,32 @@ async function renderShipState(prdTarget: string): Promise<string> {
     return lines.join("\n");
   } catch {
     return "Repos   : (per-repo state unavailable — could not resolve the workspace)";
+  }
+}
+
+/**
+ * Resolve and render the "Annexes" list for the PRD embedded in the context
+ * header (PRD 0024 / T1). Lists `name (kind) — description` only, never the
+ * content — the agent runs `depot prd annex cat <id>` on demand to keep the
+ * initial context lean. Best-effort: any resolution failure yields `null` so
+ * the universal contract template still prints.
+ */
+async function renderAnnexesSection(prdTarget: string): Promise<string | null> {
+  if (!prdTarget) return null;
+  try {
+    const prd = await runEffect(getPrd(prdTarget));
+    if (!prd) return null;
+    const annexes = await runEffect(listAnnexes(prd.id));
+    if (annexes.length === 0) return null;
+    const lines = ["Annexes :"];
+    for (const annex of annexes) {
+      const desc = annex.description ? ` — ${annex.description}` : "";
+      lines.push(`  - ${annex.name} (${annex.kind})${desc}  [${annex.id}]`);
+    }
+    lines.push("  (read full content with: depot prd annex cat <annex-id>)");
+    return lines.join("\n");
+  } catch {
+    return null;
   }
 }
 
@@ -186,13 +213,19 @@ export const contextCommand = command({
       lines.push(await renderDocContextState());
     }
 
+    const annexesSection = await renderAnnexesSection(args.prdTarget ?? "");
+    if (annexesSection) {
+      lines.push(annexesSection);
+    }
+
     if (
       currentRepoLine ||
       args.prdTarget ||
       args.review ||
       args.axis ||
       mode === "ship" ||
-      mode === "doc"
+      mode === "doc" ||
+      annexesSection
     ) {
       lines.push("");
     }

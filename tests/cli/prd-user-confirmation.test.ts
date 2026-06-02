@@ -1,12 +1,16 @@
 /**
  * PRD 0012 / T1 — `--user-confirmed` gate on PRD lifecycle CLI commands.
+ * PRD 0022 / T1 — length min dropped; only non-empty-after-trim is required.
  *
  * For each critical command (`ready`, `activate`, `request-review`, `done`,
  * `phase-advance`, `cancel`, `close`) we cover four cases:
  *
  *   (a) flag absent + bypass env unset   → exits ≠ 0 with a guide message.
- *   (b) flag value ≤ 5 chars             → exits ≠ 0 with a length hint.
- *   (c) flag valid                       → transition runs and the activity
+ *   (b) flag empty or whitespace-only    → exits ≠ 0; a short non-empty quote
+ *                                          (e.g. "go") is accepted and the
+ *                                          literal value lands in the activity
+ *                                          log payload.
+ *   (c) flag valid (long quote)          → transition runs and the activity
  *                                          log payload carries the literal
  *                                          quote in `userConfirmation`.
  *   (d) bypass env set + flag absent     → transition runs and the activity
@@ -174,25 +178,40 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects --user-confirmed shorter than 6 characters", async () => {
-      const prd = await createPrd(db, { projectId, title: "Ready PRD" });
+    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const readyCmd = await getSubCommand(prdCommand, "ready");
-      const exit = expectProcessExit();
 
-      const stderr = await captureConsoleError(async () => {
-        await withoutBypass(async () => {
-          await expect(
-            readyCmd.run({ args: { prdId: prd.id, userConfirmed: "ok" } }),
-          ).rejects.toThrow("process.exit:1");
+      const prd = await createPrd(db, { projectId, title: "Ready PRD" });
+
+      for (const empty of ["", "   "]) {
+        const exit = expectProcessExit();
+        const stderr = await captureConsoleError(async () => {
+          await withoutBypass(async () => {
+            await expect(
+              readyCmd.run({ args: { prdId: prd.id, userConfirmed: empty } }),
+            ).rejects.toThrow("process.exit:1");
+          });
         });
+        expect(stderr).toMatch(/empty|rejected/i);
+        expect(stderr).toMatch(/--user-confirmed/);
+
+        const after = await db.query.prdRevisions.findFirst({ where: { id: prd.id } });
+        expect(after!.status).toBe("draft");
+        exit.mockRestore();
+      }
+
+      const out = vi.spyOn(console, "log").mockImplementation(() => {});
+      await withoutBypass(async () => {
+        await readyCmd.run({ args: { prdId: prd.id, userConfirmed: "go" } });
       });
-      expect(stderr).toMatch(/6 characters|too short|length/i);
+      out.mockRestore();
 
-      const after = await db.query.prdRevisions.findFirst({ where: { id: prd.id } });
-      expect(after!.status).toBe("draft");
+      const shortAfter = await db.query.prdRevisions.findFirst({ where: { id: prd.id } });
+      expect(shortAfter!.status).toBe("ready");
 
-      exit.mockRestore();
+      const shortPayload = await findLatestPayload(db, prd.id, "prd_ready");
+      expect(shortPayload!["userConfirmation"]).toBe("go");
     });
 
     it("(c) succeeds with a valid quote and persists it in the activity log payload", async () => {
@@ -261,25 +280,40 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects --user-confirmed shorter than 6 characters", async () => {
-      const id = await setupReady();
+    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const activateCmd = await getSubCommand(prdCommand, "activate");
-      const exit = expectProcessExit();
 
-      const stderr = await captureConsoleError(async () => {
-        await withoutBypass(async () => {
-          await expect(
-            activateCmd.run({ args: { prdId: id, userConfirmed: "go" } }),
-          ).rejects.toThrow("process.exit:1");
+      const id = await setupReady();
+
+      for (const empty of ["", "   "]) {
+        const exit = expectProcessExit();
+        const stderr = await captureConsoleError(async () => {
+          await withoutBypass(async () => {
+            await expect(
+              activateCmd.run({ args: { prdId: id, userConfirmed: empty } }),
+            ).rejects.toThrow("process.exit:1");
+          });
         });
+        expect(stderr).toMatch(/empty|rejected/i);
+        expect(stderr).toMatch(/--user-confirmed/);
+
+        const after = await db.query.prdRevisions.findFirst({ where: { id } });
+        expect(after!.status).toBe("ready");
+        exit.mockRestore();
+      }
+
+      const out = vi.spyOn(console, "log").mockImplementation(() => {});
+      await withoutBypass(async () => {
+        await activateCmd.run({ args: { prdId: id, userConfirmed: "go" } });
       });
-      expect(stderr).toMatch(/6 characters|too short|length/i);
+      out.mockRestore();
 
-      const after = await db.query.prdRevisions.findFirst({ where: { id } });
-      expect(after!.status).toBe("ready");
+      const shortAfter = await db.query.prdRevisions.findFirst({ where: { id } });
+      expect(shortAfter!.status).toBe("in_progress");
 
-      exit.mockRestore();
+      const payload = await findLatestPayload(db, id, "prd_activated");
+      expect(payload!["userConfirmation"]).toBe("go");
     });
 
     it("(c) succeeds with a valid quote and persists it in the activity log payload", async () => {
@@ -343,24 +377,42 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects --user-confirmed shorter than 6 characters", async () => {
-      const id = await setupInProgress();
+    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const cmd = await getSubCommand(prdCommand, "request-review");
-      const exit = expectProcessExit();
 
-      const stderr = await captureConsoleError(async () => {
-        await withoutBypass(async () => {
-          await expect(cmd.run({ args: { prdId: id, userConfirmed: "ok" } })).rejects.toThrow(
-            "process.exit:1",
-          );
+      // Rejection does not mutate state, so a single in_progress PRD can drive
+      // both empty-string variants and then the short-quote success path.
+      const id = await setupInProgress();
+
+      for (const empty of ["", "   "]) {
+        const exit = expectProcessExit();
+        const stderr = await captureConsoleError(async () => {
+          await withoutBypass(async () => {
+            await expect(cmd.run({ args: { prdId: id, userConfirmed: empty } })).rejects.toThrow(
+              "process.exit:1",
+            );
+          });
         });
-      });
-      expect(stderr).toMatch(/6 characters|too short|length/i);
+        expect(stderr).toMatch(/empty|rejected/i);
+        expect(stderr).toMatch(/--user-confirmed/);
 
-      const after = await db.query.prdRevisions.findFirst({ where: { id } });
-      expect(after!.status).toBe("in_progress");
-      exit.mockRestore();
+        const after = await db.query.prdRevisions.findFirst({ where: { id } });
+        expect(after!.status).toBe("in_progress");
+        exit.mockRestore();
+      }
+
+      const out = vi.spyOn(console, "log").mockImplementation(() => {});
+      await withoutBypass(async () => {
+        await cmd.run({ args: { prdId: id, userConfirmed: "go" } });
+      });
+      out.mockRestore();
+
+      const shortAfter = await db.query.prdRevisions.findFirst({ where: { id } });
+      expect(shortAfter!.status).toBe("review");
+
+      const payload = await findLatestPayload(db, id, "prd_review_requested");
+      expect(payload!["userConfirmation"]).toBe("go");
     });
 
     it("(c) succeeds with a valid quote and persists it in the activity log payload", async () => {
@@ -424,24 +476,40 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects --user-confirmed shorter than 6 characters", async () => {
-      const id = await setupReview();
+    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const cmd = await getSubCommand(prdCommand, "done");
-      const exit = expectProcessExit();
 
-      const stderr = await captureConsoleError(async () => {
-        await withoutBypass(async () => {
-          await expect(cmd.run({ args: { prdId: id, userConfirmed: "ok" } })).rejects.toThrow(
-            "process.exit:1",
-          );
+      const id = await setupReview();
+
+      for (const empty of ["", "   "]) {
+        const exit = expectProcessExit();
+        const stderr = await captureConsoleError(async () => {
+          await withoutBypass(async () => {
+            await expect(cmd.run({ args: { prdId: id, userConfirmed: empty } })).rejects.toThrow(
+              "process.exit:1",
+            );
+          });
         });
-      });
-      expect(stderr).toMatch(/6 characters|too short|length/i);
+        expect(stderr).toMatch(/empty|rejected/i);
+        expect(stderr).toMatch(/--user-confirmed/);
 
-      const after = await db.query.prdRevisions.findFirst({ where: { id } });
-      expect(after!.status).toBe("review");
-      exit.mockRestore();
+        const after = await db.query.prdRevisions.findFirst({ where: { id } });
+        expect(after!.status).toBe("review");
+        exit.mockRestore();
+      }
+
+      const out = vi.spyOn(console, "log").mockImplementation(() => {});
+      await withoutBypass(async () => {
+        await cmd.run({ args: { prdId: id, userConfirmed: "go" } });
+      });
+      out.mockRestore();
+
+      const shortAfter = await db.query.prdRevisions.findFirst({ where: { id } });
+      expect(shortAfter!.status).toBe("done");
+
+      const payload = await findLatestPayload(db, id, "prd_done");
+      expect(payload!["userConfirmation"]).toBe("go");
     });
 
     it("(c) succeeds with a valid quote and persists it in the activity log payload", async () => {
@@ -528,24 +596,40 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects --user-confirmed shorter than 6 characters", async () => {
-      const id = await setupPhasedInProgress();
+    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const cmd = await getSubCommand(prdCommand, "phase-advance");
-      const exit = expectProcessExit();
 
-      const stderr = await captureConsoleError(async () => {
-        await withoutBypass(async () => {
-          await expect(cmd.run({ args: { prdId: id, userConfirmed: "ok" } })).rejects.toThrow(
-            "process.exit:1",
-          );
+      const id = await setupPhasedInProgress();
+
+      for (const empty of ["", "   "]) {
+        const exit = expectProcessExit();
+        const stderr = await captureConsoleError(async () => {
+          await withoutBypass(async () => {
+            await expect(cmd.run({ args: { prdId: id, userConfirmed: empty } })).rejects.toThrow(
+              "process.exit:1",
+            );
+          });
         });
-      });
-      expect(stderr).toMatch(/6 characters|too short|length/i);
+        expect(stderr).toMatch(/empty|rejected/i);
+        expect(stderr).toMatch(/--user-confirmed/);
 
-      const after = await db.query.prdRevisions.findFirst({ where: { id } });
-      expect(after!.currentPhase).toBe(1);
-      exit.mockRestore();
+        const after = await db.query.prdRevisions.findFirst({ where: { id } });
+        expect(after!.currentPhase).toBe(1);
+        exit.mockRestore();
+      }
+
+      const out = vi.spyOn(console, "log").mockImplementation(() => {});
+      await withoutBypass(async () => {
+        await cmd.run({ args: { prdId: id, userConfirmed: "go" } });
+      });
+      out.mockRestore();
+
+      const shortAfter = await db.query.prdRevisions.findFirst({ where: { id } });
+      expect(shortAfter!.currentPhase).toBe(2);
+
+      const payload = await findLatestPayload(db, id, "phase_advanced");
+      expect(payload!["userConfirmation"]).toBe("go");
     });
 
     it("(c) succeeds with a valid quote and persists it in the activity log payload", async () => {
@@ -601,24 +685,40 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects --user-confirmed shorter than 6 characters", async () => {
-      const prd = await createPrd(db, { projectId, title: "Cancel PRD" });
+    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const cmd = await getSubCommand(prdCommand, "cancel");
-      const exit = expectProcessExit();
 
-      const stderr = await captureConsoleError(async () => {
-        await withoutBypass(async () => {
-          await expect(cmd.run({ args: { prdId: prd.id, userConfirmed: "ok" } })).rejects.toThrow(
-            "process.exit:1",
-          );
+      const prd = await createPrd(db, { projectId, title: "Cancel PRD" });
+
+      for (const empty of ["", "   "]) {
+        const exit = expectProcessExit();
+        const stderr = await captureConsoleError(async () => {
+          await withoutBypass(async () => {
+            await expect(
+              cmd.run({ args: { prdId: prd.id, userConfirmed: empty } }),
+            ).rejects.toThrow("process.exit:1");
+          });
         });
-      });
-      expect(stderr).toMatch(/6 characters|too short|length/i);
+        expect(stderr).toMatch(/empty|rejected/i);
+        expect(stderr).toMatch(/--user-confirmed/);
 
-      const after = await db.query.prdRevisions.findFirst({ where: { id: prd.id } });
-      expect(after!.status).toBe("draft");
-      exit.mockRestore();
+        const after = await db.query.prdRevisions.findFirst({ where: { id: prd.id } });
+        expect(after!.status).toBe("draft");
+        exit.mockRestore();
+      }
+
+      const out = vi.spyOn(console, "log").mockImplementation(() => {});
+      await withoutBypass(async () => {
+        await cmd.run({ args: { prdId: prd.id, userConfirmed: "go" } });
+      });
+      out.mockRestore();
+
+      const shortAfter = await db.query.prdRevisions.findFirst({ where: { id: prd.id } });
+      expect(shortAfter!.status).toBe("canceled");
+
+      const payload = await findLatestPayload(db, prd.id, "prd_canceled");
+      expect(payload!["userConfirmation"]).toBe("go");
     });
 
     it("(c) succeeds with a valid quote and persists it in the activity log payload", async () => {
@@ -680,24 +780,40 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects --user-confirmed shorter than 6 characters", async () => {
-      const id = await setupReady();
+    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const cmd = await getSubCommand(prdCommand, "close");
-      const exit = expectProcessExit();
 
-      const stderr = await captureConsoleError(async () => {
-        await withoutBypass(async () => {
-          await expect(cmd.run({ args: { prdId: id, userConfirmed: "ok" } })).rejects.toThrow(
-            "process.exit:1",
-          );
+      const id = await setupReady();
+
+      for (const empty of ["", "   "]) {
+        const exit = expectProcessExit();
+        const stderr = await captureConsoleError(async () => {
+          await withoutBypass(async () => {
+            await expect(cmd.run({ args: { prdId: id, userConfirmed: empty } })).rejects.toThrow(
+              "process.exit:1",
+            );
+          });
         });
-      });
-      expect(stderr).toMatch(/6 characters|too short|length/i);
+        expect(stderr).toMatch(/empty|rejected/i);
+        expect(stderr).toMatch(/--user-confirmed/);
 
-      const after = await db.query.prdRevisions.findFirst({ where: { id } });
-      expect(after!.status).toBe("ready");
-      exit.mockRestore();
+        const after = await db.query.prdRevisions.findFirst({ where: { id } });
+        expect(after!.status).toBe("ready");
+        exit.mockRestore();
+      }
+
+      const out = vi.spyOn(console, "log").mockImplementation(() => {});
+      await withoutBypass(async () => {
+        await cmd.run({ args: { prdId: id, userConfirmed: "go" } });
+      });
+      out.mockRestore();
+
+      const shortAfter = await db.query.prdRevisions.findFirst({ where: { id } });
+      expect(shortAfter!.status).toBe("done");
+
+      const done = await findLatestPayload(db, id, "prd_done");
+      expect(done!["userConfirmation"]).toBe("go");
     });
 
     it("(c) propagates a single quote across the three internal transitions", async () => {

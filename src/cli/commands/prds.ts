@@ -4,6 +4,8 @@ import { command } from "#/cli/command";
 import { resolveTextInput } from "#/cli/file-input";
 import { runEffect } from "#/cli/runtime";
 import * as DomainPrds from "#/modules/prds/domain";
+import * as DomainMilestones from "#/modules/prds/milestones";
+import * as DomainPriority from "#/modules/prds/priority";
 import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainReviews from "#/modules/reviews/domain";
 import * as DomainStories from "#/modules/prds/stories";
@@ -11,11 +13,21 @@ import * as DomainOutOfScope from "#/modules/prds/out-of-scope";
 import * as DomainDirectives from "#/modules/projects/directives";
 import * as DomainRepos from "#/modules/projects/repos";
 import * as DomainPrdRepos from "#/modules/prds/repos";
+import * as DomainPrdTags from "#/modules/prds/tags";
+import * as DomainAnnexes from "#/modules/prds/annexes";
+import * as DomainDependencies from "#/modules/prds/dependencies";
 import { logActivity } from "#/modules/activity/domain";
 import { effortSchema } from "#/shared/schemas";
 import { formatDate, formatDateWithRelative } from "#/shared/utils";
 import { parseJsonSchema } from "#/lib/json";
-import { VALID_PRD_STATUSES } from "#/shared/validator";
+import {
+  VALID_PRD_PRIORITIES,
+  VALID_PRD_STATUSES,
+  VALID_ANNEX_KINDS,
+  PRD_PRIORITY_RANK,
+  invalidTagReason,
+  type PrdPriority,
+} from "#/shared/validator";
 import {
   attachUserConfirmationToLatestActivity,
   requireUserConfirmation,
@@ -50,6 +62,11 @@ const createCommand = command({
       schema: Schema.String.pipe(Schema.minLength(1)),
       description: "Read PRD scope from a UTF-8 text file",
     },
+    priority: {
+      schema: Schema.Literal(...VALID_PRD_PRIORITIES),
+      expected: `one of ${VALID_PRD_PRIORITIES.join(", ")}`,
+      description: "Initial product priority (defaults to 'normal')",
+    },
   },
   run: async ({ args, ws, output }) => {
     const context = await resolveTextInput({
@@ -72,6 +89,7 @@ const createCommand = command({
         title: args.title,
         context,
         scope,
+        priority: args.priority,
       }),
     );
     if (output.isJson()) {
@@ -96,13 +114,53 @@ const showCommand = command({
   run: async ({ args, output }) => {
     const prd = await runEffect(DomainPrds.getPrd(args.prdId));
     if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
+    const logical = await runEffect(DomainPrds.getLogicalPrd(prd.prdId));
+    const priority = (logical?.priority ?? "normal") as PrdPriority;
+    const annexes = await runEffect(DomainAnnexes.listAnnexes(prd.id));
+
+    // Broken `[annex: <name>]` mentions in any body section → soft warning,
+    // never blocking (PRD 0024 / T1).
+    const annexNames = new Set(annexes.map((a) => a.name));
+    const referencedBody = [
+      prd.context,
+      prd.scope,
+      prd.problem,
+      prd.solution,
+      prd.implementationDecisions,
+      prd.testingDecisions,
+    ]
+      .filter((s): s is string => typeof s === "string")
+      .join("\n");
+    const brokenRefs = DomainAnnexes.extractAnnexRefs(referencedBody).filter(
+      (name) => !annexNames.has(name),
+    );
+
     if (output.isJson()) {
-      output.success({ item: prd });
+      output.success({
+        item: {
+          ...prd,
+          priority,
+          annexes: annexes.map((a) => ({
+            id: a.id,
+            name: a.name,
+            kind: a.kind,
+            description: a.description,
+          })),
+          brokenAnnexRefs: brokenRefs,
+        },
+      });
     } else {
+      const annexSummary =
+        annexes.length === 0
+          ? "—"
+          : annexes
+              .map((a) => `${a.name} (${a.kind})${a.description ? ` — ${a.description}` : ""}`)
+              .join("\n");
       output.fields([
         ["ID", prd.id],
         ["Title", prd.title],
         ["Status", prd.status],
+        ["Priority", priority],
         ["Revision", prd.revision],
         ["PRD", prd.prdId],
         ["Context", prd.context],
@@ -111,10 +169,19 @@ const showCommand = command({
         ["Solution", prd.solution],
         ["Impl Decisions", prd.implementationDecisions],
         ["Testing Decisions", prd.testingDecisions],
+        ["Annexes", annexSummary],
         ["Created", formatDate(prd.createdAt)],
         ["Ready", formatDate(prd.readyAt)],
         ["Activated", prd.activatedAt ? formatDateWithRelative(prd.activatedAt) : "—"],
       ]);
+      if (annexes.length > 0) {
+        output.print("(read full content with: depot prd annex cat <annex-id>)");
+      }
+      for (const name of brokenRefs) {
+        output.print(
+          `Warning: body references [annex: ${name}] but no annex named '${name}' exists on this revision.`,
+        );
+      }
     }
   },
 });
@@ -232,16 +299,81 @@ const listCommand = command({
       description: "Only PRDs updated within this window (e.g. 1d, 2w, 1m)",
     },
     sort: {
-      schema: Schema.Literal("created", "updated", "status"),
-      expected: "one of created, updated, status",
-      default: "updated",
-      description: "Sort order",
+      schema: Schema.Literal("created", "updated", "status", "priority"),
+      expected: "one of created, updated, status, priority",
+      default: "priority",
+      description:
+        "Sort order (default 'priority' = critical → high → normal → low, then updatedAt desc)",
+    },
+    tag: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "Only show PRDs tagged with this tag (kebab-case)",
+    },
+    dependsOn: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description:
+        "Filter to PRDs that directly depend on the given PRD (accepts either the logical PRD id or a revision id)",
+    },
+    milestone: {
+      schema: Schema.String,
+      expected: "non-empty milestone (target_version)",
+      description: "Only PRDs whose logical PRD targets this milestone (target_version)",
+    },
+    priority: {
+      schema: Schema.Literal(...VALID_PRD_PRIORITIES),
+      expected: `one of ${VALID_PRD_PRIORITIES.join(", ")}`,
+      description: "Only PRDs whose logical PRD carries this priority",
     },
   },
   run: async ({ args, ws, output }) => {
+    if (args.tag !== undefined) {
+      const reason = invalidTagReason(args.tag);
+      if (reason !== null) {
+        return output.error("validation_error", `--tag: ${reason}`);
+      }
+    }
+
     let prdList = await runEffect(
       DomainPrds.listPrds({ projectId: ws.projectId, latestOnly: true }),
     );
+
+    const logicalPrds = await runEffect(DomainPrds.listLogicalPrdsForProject(ws.projectId));
+    const priorityByPrdId = new Map<string, PrdPriority>(
+      logicalPrds.map((p) => [p.id, (p.priority ?? "normal") as PrdPriority]),
+    );
+
+    if (args.priority !== undefined) {
+      const wantedPriority = args.priority;
+      prdList = prdList.filter(
+        (p) => (priorityByPrdId.get(p.prdId) ?? "normal") === wantedPriority,
+      );
+    }
+
+    if (args.tag !== undefined) {
+      const tagged = await runEffect(DomainPrdTags.listPrdsForTag(ws.projectId, args.tag));
+      const allowed = new Set(tagged.map((p) => p.id));
+      prdList = prdList.filter((p) => allowed.has(p.id));
+    }
+
+    if (args.dependsOn) {
+      const resolution = await runEffect(DomainPrds.getPrd(args.dependsOn));
+      const targetLogicalId = resolution?.prdId ?? args.dependsOn;
+      const dependents = await runEffect(DomainDependencies.listDependents(targetLogicalId));
+      const dependentIds = new Set(dependents.map((d) => d.id));
+      prdList = prdList.filter((p) => dependentIds.has(p.prdId));
+    }
+
+    if (args.milestone !== undefined) {
+      const version = args.milestone.trim();
+      if (version.length === 0) {
+        return output.error("validation_error", "--milestone: value must be non-empty.");
+      }
+      const milestonePrds = await runEffect(
+        DomainMilestones.listPrdsByMilestone(ws.projectId, version),
+      );
+      const milestoneIds = new Set(milestonePrds.map((p) => p.id));
+      prdList = prdList.filter((p) => milestoneIds.has(p.id));
+    }
 
     if (args.status) {
       const wanted = new Set(
@@ -275,8 +407,17 @@ const listCommand = command({
       prdList = prdList.filter((p) => p.updatedAt && p.updatedAt.getTime() >= cutoff);
     }
 
-    const sortKey = args.sort ?? "updated";
+    const sortKey = args.sort ?? "priority";
     prdList = [...prdList].sort((a, b) => {
+      if (sortKey === "priority") {
+        const aP = priorityByPrdId.get(a.prdId) ?? "normal";
+        const bP = priorityByPrdId.get(b.prdId) ?? "normal";
+        const rankDelta = PRD_PRIORITY_RANK[bP] - PRD_PRIORITY_RANK[aP];
+        if (rankDelta !== 0) return rankDelta;
+        const aT = a.updatedAt?.getTime() ?? 0;
+        const bT = b.updatedAt?.getTime() ?? 0;
+        return bT - aT;
+      }
       if (sortKey === "status") return a.status.localeCompare(b.status);
       const aT = (sortKey === "created" ? a.createdAt : a.updatedAt)?.getTime() ?? 0;
       const bT = (sortKey === "created" ? b.createdAt : b.updatedAt)?.getTime() ?? 0;
@@ -287,16 +428,21 @@ const listCommand = command({
       prdList = prdList.slice(0, args.limit);
     }
 
+    const decorated = prdList.map((p) => ({
+      ...p,
+      priority: priorityByPrdId.get(p.prdId) ?? "normal",
+    }));
+
     if (output.isJson()) {
-      output.success({ items: prdList });
+      output.success({ items: decorated });
       return;
     }
-    if (prdList.length === 0) {
+    if (decorated.length === 0) {
       output.print("No PRDs found. Run `depot prd create` to create one.");
       return;
     }
-    for (const p of prdList) {
-      output.print(`${p.id}  ${p.title}  [${p.status}]  rev ${p.revision}`);
+    for (const p of decorated) {
+      output.print(`${p.id}  ${p.title}  [${p.status}]  [${p.priority}]  rev ${p.revision}`);
     }
   },
 });
@@ -858,6 +1004,81 @@ const phaseAdvanceCommand = command({
       }
     }
   },
+});
+
+// ── phase sub-tree ────────────────────────────────────────────────────────────
+
+const phaseInitCommand = command({
+  meta: {
+    name: "init",
+    description:
+      "Seed currentPhase on a legacy PRD that was activated before phase auto-seeding shipped",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+    phase: {
+      schema: Schema.Int.pipe(Schema.positive()),
+      coerce: "integer",
+      expected: "a positive integer",
+      description:
+        "Explicit phase number to set; when omitted, derived from the PRD's tasks (min pending phase, fallback to max phase)",
+    },
+    force: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      default: false,
+      description: "Overwrite an existing currentPhase value",
+    },
+    userConfirmed: userConfirmedArg,
+  },
+  run: async ({ args, output }) => {
+    const userConfirmation = requireUserConfirmation(args, "depot prd phase init", output);
+    const result = await runEffect(
+      DomainPrds.initPrdPhase(args.prdId, {
+        phase: args.phase,
+        force: args.force,
+      }).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      if (e._tag === "ValidationError") {
+        return output.error("validation_error", e.message);
+      }
+      throw e;
+    }
+    const updated = result.item;
+    await attachUserConfirmationToLatestActivity(
+      updated.id,
+      "prd_phase_initialized",
+      userConfirmation,
+    );
+    if (output.isJson()) {
+      output.success({ item: updated });
+    } else {
+      output.print(
+        `Initialised PRD '${updated.title}' (${updated.id}) currentPhase = ${updated.currentPhase}`,
+      );
+    }
+  },
+});
+
+const phaseCommand = command({
+  meta: { name: "phase", description: "Phase management subcommands" },
+  subCommands: { init: phaseInitCommand },
 });
 
 // ── validateCommand ───────────────────────────────────────────────────────────
@@ -1734,6 +1955,459 @@ const reposCommand = command({
   },
 });
 
+// ── PRD tags ──────────────────────────────────────────────────────────────────
+//
+// Tags are free-form kebab-case labels attached to a logical PRD. Three
+// subcommands plus the `prd list --tag` filter cover the full surface; tag
+// add/remove emit `prd_tag_added` / `prd_tag_removed` activity events so the
+// audit log captures who tagged what. Source defaults to `human` (the CLI
+// caller is the user) because tags are organisational metadata, not a
+// lifecycle transition that needs `--user-confirmed`.
+
+const tagAddCommand = command({
+  meta: { name: "add", description: "Attach a tag to a PRD (idempotent)" },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+    tag: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Tag to attach (kebab-case, max 50 chars)",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainPrdTags.addTag(args.prdId, args.tag).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      if (e._tag === "ValidationError") {
+        return output.error("validation_error", e.message);
+      }
+      throw e;
+    }
+    const row = result.item;
+    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+    if (prd) {
+      await runEffect(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_tag_added",
+          payload: { prdId: row.prdId, tag: row.tag },
+          source: "human",
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
+      );
+    }
+    if (output.isJson()) {
+      output.success({ item: row });
+    } else {
+      output.print(`Tagged PRD ${args.prdId} with '${row.tag}'`);
+    }
+  },
+});
+
+const tagRemoveCommand = command({
+  meta: { name: "remove", description: "Detach a tag from a PRD (idempotent)" },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID",
+    },
+    tag: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Tag to detach",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainPrdTags.removeTag(args.prdId, args.tag).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      if (e._tag === "ValidationError") {
+        return output.error("validation_error", e.message);
+      }
+      throw e;
+    }
+    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+    if (prd) {
+      await runEffect(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_tag_removed",
+          payload: { prdId: result.item.prdId, tag: args.tag },
+          source: "human",
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
+      );
+    }
+    if (output.isJson()) {
+      output.success({ prdId: result.item.prdId, tag: args.tag });
+    } else {
+      output.print(`Removed tag '${args.tag}' from PRD ${args.prdId}`);
+    }
+  },
+});
+
+const tagListCommand = command({
+  meta: {
+    name: "list",
+    description:
+      "List tags — without an ID, every tag used in the project; with an ID, that PRD's tags",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      positional: true,
+      description: "PRD ID (optional)",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    if (args.prdId) {
+      const result = await runEffect(
+        DomainPrdTags.listTagsForPrd(args.prdId).pipe(
+          Effect.match({
+            onSuccess: (items) => ({ kind: "ok" as const, items }),
+            onFailure: (err) => ({ kind: "err" as const, err }),
+          }),
+        ),
+      );
+      if (result.kind === "err") {
+        const e = result.err;
+        if (e._tag === "PrdNotFoundError") {
+          return output.error("not_found", `PRD not found: ${args.prdId}`);
+        }
+        throw e;
+      }
+      if (output.isJson()) {
+        output.success({ items: result.items });
+        return;
+      }
+      if (result.items.length === 0) {
+        output.print("No tags.");
+        return;
+      }
+      for (const tag of result.items) output.print(tag);
+      return;
+    }
+    const tags = await runEffect(DomainPrdTags.listAllTagsForProject(ws.projectId));
+    if (output.isJson()) {
+      output.success({ items: tags });
+      return;
+    }
+    if (tags.length === 0) {
+      output.print("No tags in this project.");
+      return;
+    }
+    for (const tag of tags) output.print(tag);
+  },
+});
+
+const tagCommand = command({
+  meta: { name: "tag", description: "Manage tags on a PRD" },
+  subCommands: {
+    add: tagAddCommand,
+    remove: tagRemoveCommand,
+    list: tagListCommand,
+  },
+});
+
+// ── PRD annexes ───────────────────────────────────────────────────────────────
+//
+// Annexes are named text artifacts (HTML prototypes, data samples, …) attached
+// to a PRD *revision*. The `add/list/cat/rm` subtree mirrors the `tag` subtree's
+// shape. Source defaults to `human` and there is no `--user-confirmed`: an annex
+// is content, not a lifecycle transition. The content body comes from one of
+// `--file`, `--content`, or stdin (in that precedence).
+
+const annexAddCommand = command({
+  meta: {
+    name: "add",
+    description: "Attach a text annex to a PRD revision (from --file, --content, or stdin)",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID (revision ID)",
+    },
+    name: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      description: "Annex name (kebab-case slug, unique per revision, max 60 chars)",
+    },
+    kind: {
+      schema: Schema.Literal(...VALID_ANNEX_KINDS),
+      required: true,
+      expected: `one of ${VALID_ANNEX_KINDS.join(", ")}`,
+      description: "Render hint (html|markdown|code|text)",
+    },
+    description: {
+      schema: Schema.String,
+      alias: "d",
+      description: "Free-form relevance summary (max 500 chars)",
+    },
+    file: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      alias: "f",
+      description: "Read annex content from a UTF-8 text file",
+    },
+    content: {
+      schema: Schema.String,
+      description: "Inline annex content",
+    },
+    replace: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      default: false,
+      description: "Overwrite an existing annex of the same name instead of failing",
+    },
+  },
+  run: async ({ args, output }) => {
+    if (args.file !== undefined && args.content !== undefined) {
+      return output.error("conflicting_input", "Provide either --file or --content, not both.");
+    }
+
+    let content: string;
+    if (args.file !== undefined) {
+      try {
+        content = await readFile(args.file, "utf-8");
+      } catch (e) {
+        return output.error(
+          "file_read_error",
+          `Cannot read file '${args.file}': ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    } else if (args.content !== undefined) {
+      content = args.content;
+    } else {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) {
+        chunks.push(chunk as Buffer);
+      }
+      content = Buffer.concat(chunks).toString("utf-8");
+    }
+
+    const result = await runEffect(
+      DomainAnnexes.addAnnex(args.prdId, {
+        name: args.name,
+        kind: args.kind,
+        description: args.description,
+        content,
+        replace: args.replace,
+      }).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      if (e._tag === "AnnexExistsError") {
+        return output.error("annex_exists", e.message);
+      }
+      if (e._tag === "ValidationError") {
+        return output.error("validation_error", e.message);
+      }
+      throw e;
+    }
+
+    const row = result.item;
+    const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+    if (prd) {
+      await runEffect(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_annex_added",
+          payload: { annexId: row.id, name: row.name, kind: row.kind },
+          source: "human",
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
+      );
+    }
+
+    if (output.isJson()) {
+      output.success({ item: row });
+    } else {
+      output.print(`Added annex '${row.name}' (${row.kind}) to PRD ${args.prdId} — ${row.id}`);
+    }
+  },
+});
+
+const annexListCommand = command({
+  meta: { name: "list", description: "List a PRD revision's annexes (name, kind, description)" },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD ID (revision ID)",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainAnnexes.listAnnexes(args.prdId).pipe(
+        Effect.match({
+          onSuccess: (items) => ({ kind: "ok" as const, items }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      throw e;
+    }
+    if (output.isJson()) {
+      output.success({ items: result.items });
+      return;
+    }
+    if (result.items.length === 0) {
+      output.print("No annexes on this PRD.");
+      return;
+    }
+    for (const annex of result.items) {
+      const desc = annex.description ? ` — ${annex.description}` : "";
+      output.print(`${annex.id}  ${annex.name} (${annex.kind})${desc}`);
+    }
+  },
+});
+
+const annexCatCommand = command({
+  meta: { name: "cat", description: "Print an annex's full content to stdout" },
+  workspace: true,
+  args: {
+    annexId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Annex ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainAnnexes.getAnnex(args.annexId).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "AnnexNotFoundError") {
+        return output.error("not_found", `Annex not found: ${args.annexId}`);
+      }
+      throw e;
+    }
+    if (output.isJson()) {
+      output.success({ item: result.item });
+      return;
+    }
+    output.print(result.item.content);
+  },
+});
+
+const annexRmCommand = command({
+  meta: { name: "rm", description: "Remove an annex by ID" },
+  workspace: true,
+  args: {
+    annexId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Annex ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainAnnexes.removeAnnex(args.annexId).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "AnnexNotFoundError") {
+        return output.error("not_found", `Annex not found: ${args.annexId}`);
+      }
+      throw e;
+    }
+    const row = result.item;
+    const prd = await runEffect(DomainPrds.getPrd(row.prdRevisionId));
+    if (prd) {
+      await runEffect(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_annex_removed",
+          payload: { annexId: row.id, name: row.name, kind: row.kind },
+          source: "human",
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
+      );
+    }
+    if (output.isJson()) {
+      output.success({ annexId: row.id, name: row.name });
+    } else {
+      output.print(`Removed annex '${row.name}' (${row.id}) from PRD ${row.prdRevisionId}`);
+    }
+  },
+});
+
+const annexCommand = command({
+  meta: { name: "annex", description: "Manage text annexes on a PRD revision" },
+  subCommands: {
+    add: annexAddCommand,
+    list: annexListCommand,
+    cat: annexCatCommand,
+    rm: annexRmCommand,
+  },
+});
+
 // ── Out-of-scope items ────────────────────────────────────────────────────────
 
 const oosAddCommand = command({
@@ -1808,6 +2482,283 @@ const oosRemoveCommand = command({
 const outOfScopeCommand = command({
   meta: { name: "out-of-scope", description: "Out-of-scope items" },
   subCommands: { add: oosAddCommand, list: oosListCommand, remove: oosRemoveCommand },
+});
+
+// ── Priority subcommands (PRD 0019 / T5) ──────────────────────────────────────
+//
+// `depot prd priority set <prd-id> <critical|high|normal|low>` writes the
+// product priority onto the logical PRD; `unset` reverts to the default
+// `normal`. Source defaults to `human` (the CLI caller is the user) because
+// priority is organisational metadata, not a lifecycle transition that needs
+// `--user-confirmed`.
+
+const prioritySetCommand = command({
+  meta: {
+    name: "set",
+    description: "Set the product priority on a PRD (critical|high|normal|low)",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+    priority: {
+      schema: Schema.Literal(...VALID_PRD_PRIORITIES),
+      expected: `one of ${VALID_PRD_PRIORITIES.join(", ")}`,
+      required: true,
+      positional: true,
+      description: "Product priority",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainPriority.setPriority(args.prdId, args.priority).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      if (e._tag === "ValidationError") {
+        return output.error("validation_error", e.message);
+      }
+      throw e;
+    }
+    const { prd, changed, previousPriority, newPriority } = result.item;
+    if (output.isJson()) {
+      output.success({ item: prd, changed, previousPriority, newPriority });
+    } else if (!changed) {
+      output.print(`Priority unchanged for PRD ${args.prdId} (already '${newPriority}').`);
+    } else {
+      output.print(
+        `Updated priority on PRD ${args.prdId}: '${previousPriority}' -> '${newPriority}'`,
+      );
+    }
+  },
+});
+
+const priorityUnsetCommand = command({
+  meta: {
+    name: "unset",
+    description: "Reset the product priority on a PRD back to 'normal'",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainPriority.unsetPriority(args.prdId).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      throw e;
+    }
+    const { prd, changed, previousPriority, newPriority } = result.item;
+    if (output.isJson()) {
+      output.success({ item: prd, changed, previousPriority, newPriority });
+    } else if (!changed) {
+      output.print(`Priority already 'normal' on PRD ${args.prdId}.`);
+    } else {
+      output.print(`Reset priority on PRD ${args.prdId}: '${previousPriority}' -> 'normal'`);
+    }
+  },
+});
+
+const priorityCommand = command({
+  meta: { name: "priority", description: "Product priority management for PRDs" },
+  subCommands: {
+    set: prioritySetCommand,
+    unset: priorityUnsetCommand,
+  },
+});
+
+// ── Milestone (target_version) subcommands ────────────────────────────────────
+
+const milestoneSetCommand = command({
+  meta: {
+    name: "set",
+    description: "Set the milestone / target_version on a PRD (free-form text)",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+    version: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Milestone / target version (e.g. 2.6, 2.7-alpha, agent-polish)",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainMilestones.setMilestone(args.prdId, args.version).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      if (e._tag === "ValidationError") {
+        return output.error("validation_error", e.message);
+      }
+      throw e;
+    }
+    const { prd, changed, previousVersion, newVersion } = result.item;
+    if (output.isJson()) {
+      output.success({ item: prd, changed, previousVersion, newVersion });
+    } else if (!changed) {
+      output.print(`Milestone unchanged for PRD ${args.prdId} (already '${newVersion}').`);
+    } else if (previousVersion === null) {
+      output.print(`Set milestone '${newVersion}' on PRD ${args.prdId}`);
+    } else {
+      output.print(
+        `Updated milestone on PRD ${args.prdId}: '${previousVersion}' -> '${newVersion}'`,
+      );
+    }
+  },
+});
+
+const milestoneUnsetCommand = command({
+  meta: {
+    name: "unset",
+    description: "Clear the milestone / target_version on a PRD",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD revision ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainMilestones.unsetMilestone(args.prdId).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      throw e;
+    }
+    const { prd, changed, previousVersion } = result.item;
+    if (output.isJson()) {
+      output.success({ item: prd, changed, previousVersion });
+    } else if (!changed) {
+      output.print(`Milestone already unset on PRD ${args.prdId}.`);
+    } else {
+      output.print(`Cleared milestone on PRD ${args.prdId} (was '${previousVersion ?? ""}')`);
+    }
+  },
+});
+
+const milestoneListCommand = command({
+  meta: {
+    name: "list",
+    description: "List PRDs in the current project that target the given milestone",
+  },
+  workspace: true,
+  args: {
+    version: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Milestone / target version",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const items = await runEffect(DomainMilestones.listPrdsByMilestone(ws.projectId, args.version));
+    if (output.isJson()) {
+      output.success({ items, version: args.version });
+      return;
+    }
+    if (items.length === 0) {
+      output.print(`No PRDs target milestone '${args.version}'.`);
+      return;
+    }
+    for (const p of items) {
+      output.print(`${p.id}  ${p.title}  [${p.status}]  rev ${p.revision}`);
+    }
+  },
+});
+
+const milestoneSummaryCommand = command({
+  meta: {
+    name: "summary",
+    description: "Summarise PRDs of a milestone by status (count per status)",
+  },
+  workspace: true,
+  args: {
+    version: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Milestone / target version",
+    },
+  },
+  run: async ({ args, ws, output }) => {
+    const summary = await runEffect(
+      DomainMilestones.summaryByMilestone(ws.projectId, args.version),
+    );
+    if (output.isJson()) {
+      output.success(summary);
+      return;
+    }
+    output.print(`Milestone '${summary.version}': ${summary.total} PRD(s)`);
+    const order = ["draft", "ready", "in_progress", "review", "done", "canceled"] as const;
+    for (const status of order) {
+      output.print(`  ${status.padEnd(12)} ${summary.byStatus[status] ?? 0}`);
+    }
+  },
+});
+
+const milestoneCommand = command({
+  meta: { name: "milestone", description: "Milestone / target_version management for PRDs" },
+  subCommands: {
+    set: milestoneSetCommand,
+    unset: milestoneUnsetCommand,
+    list: milestoneListCommand,
+    summary: milestoneSummaryCommand,
+  },
 });
 
 const commitMessageCommand = command({
@@ -1985,6 +2936,279 @@ const prePhaseAdvanceCheckCommand = buildCheckCommand(
   "pre_phase_advance_check",
 );
 
+// ── PRD dependencies (DAG) ────────────────────────────────────────────────────
+//
+// Sub-tree `depot prd depend` (PRD 0019 / T2). Users supply either the logical
+// `prds.id` or any revision id; the CLI resolves to the logical id before
+// calling the domain layer so the stored edge survives forks.
+
+async function resolveLogicalPrdId(
+  id: string,
+): Promise<{ logicalId: string; revision: import("#/db/schema").PrdRevisionRow | null }> {
+  const rev = await runEffect(DomainPrds.getPrd(id));
+  return { logicalId: rev?.prdId ?? id, revision: rev };
+}
+
+const dependAddCommand = command({
+  meta: {
+    name: "add",
+    description: "Declare that <prd-id> depends on <depends-on-prd-id>",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Source PRD id (the one that depends on another)",
+    },
+    dependsOnPrdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Target PRD id (the dependency)",
+    },
+  },
+  run: async ({ args, output }) => {
+    const src = await resolveLogicalPrdId(args.prdId);
+    const dst = await resolveLogicalPrdId(args.dependsOnPrdId);
+
+    const result = await runEffect(
+      DomainDependencies.addDependency(src.logicalId, dst.logicalId).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${e.id}`);
+      }
+      if (e._tag === "ValidationError") {
+        return output.error("validation_error", e.message);
+      }
+      throw e;
+    }
+
+    await runEffect(
+      logActivity({
+        projectId: src.revision?.projectId ?? dst.revision?.projectId ?? "",
+        workspaceId: src.revision?.workspaceId ?? undefined,
+        prdRevisionId: src.revision?.id,
+        eventType: "prd_depend_added",
+        payload: { prdId: src.logicalId, dependsOnPrdId: dst.logicalId },
+      }).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
+    );
+
+    if (output.isJson()) {
+      output.success({ item: result.item });
+    } else {
+      output.print(`Added dependency: ${src.logicalId} → ${dst.logicalId}`);
+    }
+  },
+});
+
+const dependRemoveCommand = command({
+  meta: {
+    name: "remove",
+    description: "Drop the dependency from <prd-id> to <depends-on-prd-id>",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Source PRD id",
+    },
+    dependsOnPrdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Target PRD id (the dependency to drop)",
+    },
+  },
+  run: async ({ args, output }) => {
+    const src = await resolveLogicalPrdId(args.prdId);
+    const dst = await resolveLogicalPrdId(args.dependsOnPrdId);
+
+    await runEffect(DomainDependencies.removeDependency(src.logicalId, dst.logicalId));
+
+    if (src.revision) {
+      await runEffect(
+        logActivity({
+          projectId: src.revision.projectId,
+          workspaceId: src.revision.workspaceId ?? undefined,
+          prdRevisionId: src.revision.id,
+          eventType: "prd_depend_removed",
+          payload: { prdId: src.logicalId, dependsOnPrdId: dst.logicalId },
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
+      );
+    }
+
+    if (output.isJson()) {
+      output.success({ prdId: src.logicalId, dependsOnPrdId: dst.logicalId });
+    } else {
+      output.print(`Removed dependency: ${src.logicalId} → ${dst.logicalId}`);
+    }
+  },
+});
+
+const dependListCommand = command({
+  meta: {
+    name: "list",
+    description: "Show what <prd-id> depends on and what depends on it",
+  },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD id",
+    },
+  },
+  run: async ({ args, output }) => {
+    const rev = await runEffect(DomainPrds.getPrd(args.prdId));
+    const logicalId = rev?.prdId ?? args.prdId;
+    const dependencies = await runEffect(DomainDependencies.listDependencies(logicalId));
+    const dependents = await runEffect(DomainDependencies.listDependents(logicalId));
+
+    const projectPrds = rev
+      ? await runEffect(DomainPrds.listPrds({ projectId: rev.projectId, latestOnly: true }))
+      : [];
+    const headByPrdId = new Map(projectPrds.map((p) => [p.prdId, p]));
+    const decorate = (logical: { id: string }) => {
+      const head = headByPrdId.get(logical.id);
+      return head
+        ? { prdId: logical.id, headRevisionId: head.id, title: head.title, status: head.status }
+        : { prdId: logical.id, headRevisionId: null, title: null, status: null };
+    };
+
+    const out = {
+      prdId: logicalId,
+      dependencies: dependencies.map(decorate),
+      dependents: dependents.map(decorate),
+    };
+
+    if (output.isJson()) {
+      output.success(out);
+      return;
+    }
+
+    output.print(`PRD ${logicalId}`);
+    output.print("");
+    output.print(`Depends on (${out.dependencies.length}):`);
+    if (out.dependencies.length === 0) {
+      output.print("  (none)");
+    } else {
+      for (const d of out.dependencies) {
+        const title = d.title ? ` — ${d.title}` : "";
+        const status = d.status ? ` [${d.status}]` : "";
+        output.print(`  - ${d.prdId}${title}${status}`);
+      }
+    }
+    output.print("");
+    output.print(`Depended on by (${out.dependents.length}):`);
+    if (out.dependents.length === 0) {
+      output.print("  (none)");
+    } else {
+      for (const d of out.dependents) {
+        const title = d.title ? ` — ${d.title}` : "";
+        const status = d.status ? ` [${d.status}]` : "";
+        output.print(`  - ${d.prdId}${title}${status}`);
+      }
+    }
+  },
+});
+
+const dependGraphCommand = command({
+  meta: {
+    name: "graph",
+    description: "Render the project's PRD dependency DAG as ASCII text, grouped by status",
+  },
+  workspace: true,
+  args: {},
+  run: async ({ ws, output }) => {
+    const graph = await runEffect(DomainDependencies.buildDependencyGraph(ws.projectId));
+    const heads = await runEffect(
+      DomainPrds.listPrds({ projectId: ws.projectId, latestOnly: true }),
+    );
+    const headByPrdId = new Map(heads.map((h) => [h.prdId, h]));
+
+    const adj = new Map<string, string[]>();
+    for (const e of graph.edges) {
+      const list = adj.get(e.from) ?? [];
+      list.push(e.to);
+      adj.set(e.from, list);
+    }
+
+    if (output.isJson()) {
+      output.success({
+        nodes: graph.nodes.map((n) => {
+          const head = headByPrdId.get(n.id);
+          return {
+            prdId: n.id,
+            title: head?.title ?? null,
+            status: head?.status ?? null,
+          };
+        }),
+        edges: graph.edges,
+      });
+      return;
+    }
+
+    if (graph.nodes.length === 0) {
+      output.print("No PRDs in this project.");
+      return;
+    }
+
+    const statusOrder = ["in_progress", "review", "ready", "draft", "done", "canceled"];
+    const byStatus = new Map<string, typeof graph.nodes>();
+    for (const node of graph.nodes) {
+      const head = headByPrdId.get(node.id);
+      const status = head?.status ?? "unknown";
+      const list = byStatus.get(status) ?? [];
+      list.push(node);
+      byStatus.set(status, list);
+    }
+
+    const seen = new Set<string>();
+    const sortedStatuses = [
+      ...statusOrder.filter((s) => byStatus.has(s)),
+      ...[...byStatus.keys()].filter((s) => !statusOrder.includes(s)).sort(),
+    ];
+
+    for (const status of sortedStatuses) {
+      const nodes = byStatus.get(status) ?? [];
+      output.print(`[${status}]`);
+      for (const node of nodes) {
+        const head = headByPrdId.get(node.id);
+        const title = head?.title ? ` — ${head.title}` : "";
+        output.print(`  * ${node.id}${title}`);
+        const deps = adj.get(node.id) ?? [];
+        for (const dep of deps) {
+          output.print(`    └─> ${dep}`);
+          seen.add(dep);
+        }
+      }
+      output.print("");
+    }
+  },
+});
+
+const dependCommand = command({
+  meta: { name: "depend", description: "Manage PRD ↔ PRD dependency DAG" },
+  subCommands: {
+    add: dependAddCommand,
+    remove: dependRemoveCommand,
+    list: dependListCommand,
+    graph: dependGraphCommand,
+  },
+});
+
 export const prdCommand = command({
   meta: { name: "prd", description: "PRD management" },
   subCommands: {
@@ -2008,6 +3232,9 @@ export const prdCommand = command({
     status: statusCommand,
     findings: findingsCommand,
     "phase-advance": phaseAdvanceCommand,
+    phase: phaseCommand,
+    milestone: milestoneCommand,
+    priority: priorityCommand,
     "commit-message": commitMessageCommand,
     "pre-review-check": preReviewCheckCommand,
     "pre-ship-check": preShipCheckCommand,
@@ -2018,5 +3245,8 @@ export const prdCommand = command({
     story: storyCommand,
     "out-of-scope": outOfScopeCommand,
     repos: reposCommand,
+    tag: tagCommand,
+    annex: annexCommand,
+    depend: dependCommand,
   },
 });

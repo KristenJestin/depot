@@ -87,6 +87,22 @@ depot prd pre-ship-check <id>
   `/depot-doc <prd-id>` next.
 - The default profile to use: `depot project config get defaultDocProfile`.
 
+#### Doc-sync range — pass it explicitly
+
+You just drove the merge, so you hold the **squash commit SHA** in hand. Pass the
+range explicitly so the doc sync targets the feature diff, not an arbitrary
+window:
+
+```
+depot doc sync <profile> --since <squash>^ --until <squash>
+```
+
+If the project configured `docSyncTicketPattern`, depot derives the squash range
+from the PRD ticket on its own — the explicit range is then optional. Otherwise
+supply it yourself. Depot **never falls back to a magic window** (no `HEAD~20`):
+with neither an explicit range nor a configured pattern, `depot doc sync` refuses
+rather than syncing the wrong commits.
+
 ### 7. Recap
 
 Output a per-repo recap. For **each repo**, one line listing:

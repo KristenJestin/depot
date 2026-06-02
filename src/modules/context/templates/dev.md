@@ -29,6 +29,16 @@ You may not:
 > command now **requires** `--user-confirmed "<verbatim quote>"`. Pass a literal
 > quote of the user's approval — never invent one, never paraphrase. The CLI
 > rejects the command without this flag.
+>
+> **Cite verbatim** the user's approval, **even if very short** ("go", "ok",
+> "vas-y", "yes"). Do not reformulate, do not pad, do not complete. Never ask
+> the user to retype a longer formulation — any explicit non-empty confirmation
+> is valid. The audit log keeps exactly what the user said.
+>
+> **"Short" is about _form_, not _scope_.** The confirmation must approve **this
+> specific transition**. A positive remark about something else ("ok pour la
+> préprod", "super", "merci") is NOT an approval to transition — ask for a
+> confirmation that targets the action.
 
 When you hand control back to the user at `review`, you are at a fork. Two
 branches, two very different reflexes. Pick the right one.
@@ -92,6 +102,48 @@ I have completed [X]. Reply with either:
 Do not pre-decide which branch you are on. Wait for the user's reply, then route
 to Branch A or Branch B above.
 
+## Tâches humaines
+
+Certaines tasks sont marquées `kind=human`. **Tu ne dois PAS les exécuter
+toi-même** — ce sont des actions que seul l'utilisateur peut faire (rotation
+de secret dans un vault, validation manuelle d'un workflow externe, action
+physique, etc.). Le coder agent les refuse également ; quand tu en rencontres
+une dans la phase courante, c'est à toi (le dev orchestrateur) d'orchestrer le
+hand-off.
+
+**Workflow obligatoire (5 étapes) :**
+
+1. Quand tu rencontres une task `kind=human` (visible via `depot task show <id>`
+   ou `depot task list <prd-id>`), affiche le **hand-off script** ci-dessous à
+   l'utilisateur, en remplissant les champs depuis la task.
+2. Attends sa réponse textuelle (« fait », « j'ai un souci », « besoin d'aide
+   sur X », etc.). Ne suppose rien tant qu'il n'a pas répondu.
+3. **Toi (l'agent)** lances la commande `depot task verify <id> --user-confirmed "<citation textuelle de sa réponse>"`. Ne lui demande JAMAIS de taper la commande lui-même — c'est l'agent qui pilote, pas l'utilisateur.
+4. Si exit 0 → la task passe `done` automatiquement, continue le flow (phase
+   suivante, prochaine task, etc.).
+5. Si exit ≠ 0 → rapporte le `stderr` capturé à l'utilisateur, demande
+   clarification ou retry. La task reste `pending` jusqu'à un verify réussi.
+
+**Hand-off script (à afficher tel quel, en remplissant les champs) :**
+
+```
+J'ai besoin que tu fasses l'action suivante avant que je puisse continuer.
+
+  Task : <task.title>
+  Description : <task.description>
+  Critère de fin : <task.doneCriteria>
+  Vérification : <task.verificationCommand ?? "ack textuel">
+
+Dis-moi « fait » (ou pose-moi des questions si problème) quand c'est terminé.
+```
+
+**Rappel `phase-advance` :** la mécanique existante refuse déjà de passer à la
+phase suivante tant qu'une task est `pending`. Une task `kind=human` non
+vérifiée bloque donc automatiquement `phase-advance` — tu n'as pas à le
+vérifier manuellement, le CLI te le dira (« task ... still pending »). C'est
+cette barrière qui garantit que l'agent ne saute pas par-dessus une action
+humaine oubliée.
+
 {{directives scope=always category=dev}}
 
 ## Workspace Constraints
@@ -117,6 +169,8 @@ depot's role is to publish the contracts (contexts), not to run agents.
 - Inspect the targeted PRD with `depot prd show <prd-id>` and `depot prd status <prd-id>`.
 - If it is `ready`, ask the user to confirm activation in their own words, then activate it with `depot prd activate <prd-id> --user-confirmed "<verbatim user quote>"`. `--user-confirmed` is mandatory; pass a verbatim quote of the user's approval, never invent one.
 - If it is already `in_progress`, continue.
+
+A PRD may carry **annexes** — named text artifacts (e.g. an HTML prototype) listed in the context with name + kind + description, not inlined. Read an annex **on demand** with `depot prd annex cat <annex-id>` when the body references `[annex: <name>]` or when its description signals relevance to the work you are delegating. Do not auto-read every annex; the description tells you when it is worth the tokens.
 
 ### 2. Delegate Coding
 

@@ -59,6 +59,59 @@ describe("context template registry", () => {
     expect(content).toContain("do **not** mark the PRD done");
   });
 
+  it("guides the ship agent to pass an explicit doc-sync range post-merge (PRD 0023 / T3)", () => {
+    const content = getContextTemplate("ship");
+    expect(content).toContain("depot doc sync <profile> --since <squash>^ --until <squash>");
+    expect(content).toContain("docSyncTicketPattern");
+    expect(content).toContain("never falls back to a magic window");
+  });
+
+  it("guides the doc agent to pass an explicit doc-sync range post-merge (PRD 0023 / T3)", () => {
+    const content = getContextTemplate("doc");
+    expect(content).toContain("depot doc sync <profile> --since <squash>^ --until <squash>");
+    expect(content).toContain("docSyncTicketPattern");
+    expect(content).toContain("never falls back to a magic window");
+  });
+
+  it("separates approval form from scope in the dev STOP encart", () => {
+    const content = getContextTemplate("dev");
+    expect(content).toContain("is about _form_, not _scope_");
+    expect(content).toContain("NOT an approval to transition");
+    expect(content).toContain("targets the action");
+    // The PRD 0022 "short is valid" clause must remain alongside the scope clause.
+    expect(content).toContain("even if very short");
+    // The PRD 0012 Branch A "no tacit ok merci" guidance must remain.
+    expect(content).toContain('tacit "ok merci"');
+  });
+
+  it("separates approval form from scope in the prd STOP encart", () => {
+    const content = getContextTemplate("prd");
+    expect(content).toContain("is about _form_, not _scope_");
+    expect(content).toContain("NOT an approval to transition");
+    expect(content).toContain("targets the action");
+    expect(content).toContain("even if very short");
+  });
+
+  it("guides the prd agent on annex authoring and inline references (PRD 0024 / T3)", () => {
+    const content = getContextTemplate("prd");
+    expect(content).toContain("loses value when flattened to prose");
+    expect(content).toContain(
+      'depot prd annex add <prd-id> --name <name> --kind <html|markdown|code|text> --description "<role>" [--file <path> | --content <text>]',
+    );
+    expect(content).toContain("[annex: <name>]");
+    expect(content).toContain("depot prd annex cat <annex-id>");
+  });
+
+  it("tells the dev and coder agents to read annexes on demand (PRD 0024 / T3)", () => {
+    for (const mode of ["dev", "coder"]) {
+      const content = getContextTemplate(mode);
+      expect(content).toContain("annexes");
+      expect(content).toContain("depot prd annex cat <annex-id>");
+      expect(content).toContain("on demand");
+      expect(content).toContain("Do not auto-read every annex");
+    }
+  });
+
   it("throws on unknown context mode", () => {
     expect(() => getContextTemplate("unknown")).toThrow(/Unknown context mode/);
   });

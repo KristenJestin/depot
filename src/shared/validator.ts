@@ -65,7 +65,11 @@ export type Effort = (typeof VALID_EFFORTS)[number];
 // `slice`   — a vertical user-facing slice that delivers a user story end-to-end
 // `gate`    — a quality/release gate (audit, security review, doc sync, etc.)
 // `support` — supporting work (refactor, infra, internal helper) without direct UX
-export const VALID_TASK_KINDS = ["slice", "gate", "support"] as const;
+// `human`   — a step the agent cannot perform itself (manual action, secret in a
+//             vault, etc.) — the agent shows a hand-off script to the user, the
+//             user does the action, the agent then runs `depot task verify` with
+//             the user's citation (PRD 0018).
+export const VALID_TASK_KINDS = ["slice", "gate", "support", "human"] as const;
 export type TaskKind = (typeof VALID_TASK_KINDS)[number];
 
 // ── Triage / axis / source ────────────────────────────────────────────────────
@@ -207,6 +211,99 @@ export const VALID_REVIEW_TRANSITIONS: Record<ReviewStatus, ReviewStatus[]> = {
 export const VALID_SEVERITY_LEVELS = ["critical", "major", "minor", "info"] as const;
 export type SeverityLevel = (typeof VALID_SEVERITY_LEVELS)[number];
 
+// ── PRD tags ──────────────────────────────────────────────────────────────────
+// Free-form kebab-case identifiers attached to a logical PRD. Pattern:
+// lowercase letters/digits/dashes, must start with a letter or digit (no
+// leading dash). Length is capped at 50 chars to keep CLI output and the
+// future web filter UI well-behaved.
+
+export const TAG_MAX_LENGTH = 50;
+const TAG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+export const isValidTag = (tag: string): boolean =>
+  tag.length > 0 && tag.length <= TAG_MAX_LENGTH && TAG_PATTERN.test(tag);
+
+/**
+ * Human-readable explanation of why a tag is rejected. Returns `null` when
+ * the tag is valid. The CLI surfaces this verbatim so the user sees the
+ * exact constraint that was violated.
+ */
+export const invalidTagReason = (tag: string): string | null => {
+  if (tag.length === 0) return "tag must not be empty";
+  if (tag.length > TAG_MAX_LENGTH) {
+    return `tag must be at most ${TAG_MAX_LENGTH} characters (got ${tag.length})`;
+  }
+  if (!TAG_PATTERN.test(tag)) {
+    return `tag '${tag}' must match kebab-case pattern ${TAG_PATTERN.source} (lowercase letters/digits/dashes, no leading dash)`;
+  }
+  return null;
+};
+
+// ── PRD annexes (PRD 0024 / T1) ───────────────────────────────────────────────
+//
+// An annex is a named text artifact attached to a PRD *revision* (substance,
+// like body/tasks/reviews — recopied at fork). `kind` is a render hint, the
+// `name` is a kebab-case slug that doubles as the key in `[annex: <name>]`
+// inline mentions. Validation lives here so the domain layer and CLI share a
+// single source of truth.
+
+export const VALID_ANNEX_KINDS = ["html", "markdown", "code", "text"] as const;
+export type AnnexKind = (typeof VALID_ANNEX_KINDS)[number];
+
+export const isValidAnnexKind = (value: unknown): value is AnnexKind =>
+  typeof value === "string" && (VALID_ANNEX_KINDS as readonly string[]).includes(value);
+
+/** Max length of an annex `name`, mirroring the `isValidTag` style with a
+ *  slightly larger budget since annex names are descriptive slugs. */
+export const ANNEX_NAME_MAX_LENGTH = 60;
+const ANNEX_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+export const isValidAnnexName = (name: string): boolean =>
+  name.length > 0 && name.length <= ANNEX_NAME_MAX_LENGTH && ANNEX_NAME_PATTERN.test(name);
+
+/**
+ * Human-readable explanation of why an annex name is rejected. Returns `null`
+ * when the name is valid; the CLI surfaces the reason verbatim.
+ */
+export const invalidAnnexNameReason = (name: string): string | null => {
+  if (name.length === 0) return "annex name must not be empty";
+  if (name.length > ANNEX_NAME_MAX_LENGTH) {
+    return `annex name must be at most ${ANNEX_NAME_MAX_LENGTH} characters (got ${name.length})`;
+  }
+  if (!ANNEX_NAME_PATTERN.test(name)) {
+    return `annex name '${name}' must match kebab-case pattern ${ANNEX_NAME_PATTERN.source} (lowercase letters/digits/dashes, no leading dash)`;
+  }
+  return null;
+};
+
+/** Hard cap on annex `content` (anti-abuse guard, not a v1 config knob). */
+export const ANNEX_CONTENT_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Max length of an annex `description` (free text, optional). */
+export const ANNEX_DESCRIPTION_MAX_LENGTH = 500;
+
+/**
+ * Validate an annex `content` blob. Returns `null` when valid, otherwise a
+ * human-readable reason. Content must be a non-empty string whose UTF-8 byte
+ * length stays under `ANNEX_CONTENT_MAX_BYTES`.
+ */
+export const invalidAnnexContentReason = (content: string): string | null => {
+  if (content.length === 0) return "annex content must not be empty";
+  const bytes = Buffer.byteLength(content, "utf-8");
+  if (bytes > ANNEX_CONTENT_MAX_BYTES) {
+    return `annex content is ${bytes} bytes, exceeding the ${ANNEX_CONTENT_MAX_BYTES}-byte (2 MB) cap`;
+  }
+  return null;
+};
+
+/** Validate an optional annex `description`. Returns `null` when valid. */
+export const invalidAnnexDescriptionReason = (description: string): string | null => {
+  if (description.length > ANNEX_DESCRIPTION_MAX_LENGTH) {
+    return `annex description must be at most ${ANNEX_DESCRIPTION_MAX_LENGTH} characters (got ${description.length})`;
+  }
+  return null;
+};
+
 // ── Event types ──────────────────────────────────────────────────────────────
 
 export const VALID_EVENT_TYPES = [
@@ -227,6 +324,8 @@ export const VALID_EVENT_TYPES = [
   "prd_approved",
   "prd_canceled",
   "prd_forked",
+  "prd_milestone_set",
+  "prd_milestone_unset",
   "review_created",
   "review_updated",
   "review_started",
@@ -235,6 +334,7 @@ export const VALID_EVENT_TYPES = [
   "task_reactivated",
   "task_deleted",
   "phase_advanced",
+  "prd_phase_initialized",
   "coder_progress",
   "note",
   "error",
@@ -252,6 +352,64 @@ export const VALID_EVENT_TYPES = [
   "post_auditor_check",
   "pre_handoff_check",
   "pre_phase_advance_check",
+  "prd_tag_added",
+  "prd_tag_removed",
+  "prd_depend_added",
+  "prd_depend_removed",
+  "prd_priority_changed",
+  "task_verified_human",
+  "prd_annex_added",
+  "prd_annex_removed",
 ] as const;
 
 export type EventType = (typeof VALID_EVENT_TYPES)[number];
+
+// ── PRD priority (PRD 0019 / T5) ──────────────────────────────────────────────
+//
+// Dedicated product-priority enum, layered on top of tags. Tags are free-form
+// thematic groupings; priority is a 4-value Likert scale so the UI can rank
+// PRDs deterministically (badge colour, default sort order) without sliding
+// into kebab-case fragmentation. `normal` is the silent default — newly
+// created PRDs inherit it, legacy rows are backfilled to it by the migration.
+
+export const VALID_PRD_PRIORITIES = ["critical", "high", "normal", "low"] as const;
+export type PrdPriority = (typeof VALID_PRD_PRIORITIES)[number];
+
+/**
+ * Rank values for sorting: higher number = surface earlier. Inverted order so
+ * `[...].sort((a, b) => PRD_PRIORITY_RANK[b] - PRD_PRIORITY_RANK[a])` yields
+ * critical → high → normal → low.
+ */
+export const PRD_PRIORITY_RANK: Record<PrdPriority, number> = {
+  critical: 3,
+  high: 2,
+  normal: 1,
+  low: 0,
+};
+
+export const isValidPrdPriority = (value: unknown): value is PrdPriority =>
+  typeof value === "string" && (VALID_PRD_PRIORITIES as readonly string[]).includes(value);
+
+// ── Milestones (PRD 0019 / T3) ────────────────────────────────────────────────
+
+/**
+ * Maximum allowed length of a PRD milestone / `target_version` value. Free-form
+ * text (semver, dates, codenames) but bounded so a stray paste does not blow
+ * up the column index. 50 chars matches the equivalent tag cap.
+ */
+export const MAX_MILESTONE_LENGTH = 50;
+
+/**
+ * Validate a milestone / `target_version` string. Returns `true` when the
+ * value is a non-empty string at or below `MAX_MILESTONE_LENGTH`. The check
+ * is intentionally permissive: no semver / regex shape is imposed so codenames
+ * like `2.7-alpha`, dates like `2026-Q2`, and themes like `agent-polish` are
+ * all valid.
+ */
+export const isValidMilestone = (version: unknown): boolean => {
+  if (typeof version !== "string") return false;
+  const trimmed = version.trim();
+  if (trimmed.length === 0) return false;
+  if (trimmed.length > MAX_MILESTONE_LENGTH) return false;
+  return true;
+};

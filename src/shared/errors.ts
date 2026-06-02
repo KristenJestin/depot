@@ -113,6 +113,25 @@ export class AdrNotFoundError extends Data.TaggedError("AdrNotFoundError")<{
   }
 }
 
+// ── PRD annexes ───────────────────────────────────────────────────────────────
+
+export class AnnexNotFoundError extends Data.TaggedError("AnnexNotFoundError")<{
+  id: string;
+}> {
+  get message() {
+    return `Annex not found: ${this.id}`;
+  }
+}
+
+export class AnnexExistsError extends Data.TaggedError("AnnexExistsError")<{
+  prdRevisionId: string;
+  name: string;
+}> {
+  get message() {
+    return `An annex named '${this.name}' already exists on revision ${this.prdRevisionId}. Pass --replace to overwrite it.`;
+  }
+}
+
 // ── Shared ────────────────────────────────────────────────────────────────────
 
 export class InvalidTransitionError extends Data.TaggedError("InvalidTransitionError")<{
@@ -144,6 +163,10 @@ export class CrossEntityError extends Data.TaggedError("CrossEntityError")<{
 
 export class DatabaseError extends Data.TaggedError("DatabaseError")<{
   cause: unknown;
+  /** Optional DB file path the operation was targeting, used by the CLI top-level formatter. */
+  path?: string;
+  /** Optional short label of the operation, e.g. `"open"`, `"query"`, `"migrate"`. */
+  operation?: string;
 }> {
   get message() {
     return `Database error: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}`;

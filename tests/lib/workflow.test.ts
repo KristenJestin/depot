@@ -36,9 +36,11 @@ import {
   blockTask,
   skipTask,
   listTasks,
+  verifyTask,
   logActivity,
   listActivity,
   listActivityForRevision,
+  listActivityForTask,
 } from "#/lib/workflow";
 
 let db: Database;
@@ -817,6 +819,197 @@ describe("task lifecycle", () => {
     expect(payload.title).toBe("My Task");
     expect(payload.reason).toBe("No longer needed");
   });
+
+  // ── PRD 0017 / T2 — auto-seed currentPhase via task add --phase ────────────
+  // createTask must flip a single-phase PRD (currentPhase null) into
+  // multi-phase mode (currentPhase = 1) the first time a task is created with
+  // a phaseNumber. The seed is always 1 regardless of the phaseNumber passed,
+  // and never overwrites an already-seeded currentPhase.
+
+  it("leaves currentPhase null when a task is created without phaseNumber", async () => {
+    const before = await getPrd(db, prdRevisionId);
+    expect(before?.currentPhase).toBeNull();
+
+    await createTask(db, {
+      prdRevisionId,
+      title: "Single-phase task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+    });
+
+    const after = await getPrd(db, prdRevisionId);
+    expect(after?.currentPhase).toBeNull();
+  });
+
+  it("seeds currentPhase=1 on the first task created with phaseNumber=1", async () => {
+    const before = await getPrd(db, prdRevisionId);
+    expect(before?.currentPhase).toBeNull();
+
+    await createTask(db, {
+      prdRevisionId,
+      title: "Phase 1 task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+      phaseNumber: 1,
+    });
+
+    const after = await getPrd(db, prdRevisionId);
+    expect(after?.currentPhase).toBe(1);
+  });
+
+  it("seeds currentPhase=1 (not 5) even when the first phased task is phaseNumber=5", async () => {
+    const before = await getPrd(db, prdRevisionId);
+    expect(before?.currentPhase).toBeNull();
+
+    await createTask(db, {
+      prdRevisionId,
+      title: "Phase 5 task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+      phaseNumber: 5,
+    });
+
+    const after = await getPrd(db, prdRevisionId);
+    expect(after?.currentPhase).toBe(1);
+  });
+
+  it("does not overwrite a non-null currentPhase when a later task is added", async () => {
+    await createTask(db, {
+      prdRevisionId,
+      title: "Phase 1 task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+      phaseNumber: 1,
+    });
+    // Simulate the PRD having already advanced to phase 1 explicitly (the
+    // auto-seed above set it; for clarity we leave it at 1 and verify a later
+    // phase-2 task add does not overwrite it).
+    const seeded = await getPrd(db, prdRevisionId);
+    expect(seeded?.currentPhase).toBe(1);
+
+    await createTask(db, {
+      prdRevisionId,
+      title: "Phase 2 task",
+      description: "Desc",
+      doneCriteria: "Done",
+      effort: "s",
+      phaseNumber: 2,
+    });
+
+    const after = await getPrd(db, prdRevisionId);
+    expect(after?.currentPhase).toBe(1);
+  });
+
+  // ── Human tasks + verifyTask (PRD 0018 / T1) ──────────────────────────────
+
+  it("createTask persists kind=human and verificationCommand on the row", async () => {
+    const task = await createTask(db, {
+      prdRevisionId,
+      title: "Rotate vault secret",
+      description: "Rotate the vault secret manually",
+      doneCriteria: "New secret is in use",
+      effort: "s",
+      kind: "human",
+      verificationCommand: "echo ok",
+    });
+    expect(task.kind).toBe("human");
+    expect(task.verificationCommand).toBe("echo ok");
+    expect(task.status).toBe("pending");
+  });
+
+  it("verifyTask without a verification command marks the task done and logs an ack-only event", async () => {
+    const task = await createTask(db, {
+      prdRevisionId,
+      title: "Send DPA",
+      description: "Email the DPA to the customer",
+      doneCriteria: "Customer acknowledges receipt",
+      effort: "s",
+      kind: "human",
+    });
+    const result = await verifyTask(db, task.id, { userConfirmation: "c'est fait" });
+    expect(result.verified).toBe(true);
+    expect(result.task.status).toBe("done");
+    expect(result.task.completedAt).toBeTruthy();
+    expect(result.exec).toBeNull();
+
+    const events = await listActivityForTask(db, task.id);
+    const verified = events.find((e) => e.eventType === "task_verified_human");
+    expect(verified).toBeDefined();
+    const payload = JSON.parse(verified!.payload) as Record<string, unknown>;
+    expect(payload.taskId).toBe(task.id);
+    expect(payload.userConfirmation).toBe("c'est fait");
+    expect(payload.verificationExitCode).toBeUndefined();
+  });
+
+  it("verifyTask with an exit-0 verification command marks the task done and captures stdout", async () => {
+    const task = await createTask(db, {
+      prdRevisionId,
+      title: "Check sentinel",
+      description: "Confirm the helper file exists",
+      doneCriteria: "Sentinel ack",
+      effort: "s",
+      kind: "human",
+      verificationCommand: "echo verified",
+    });
+    const result = await verifyTask(db, task.id, { userConfirmation: "all good" });
+    expect(result.verified).toBe(true);
+    expect(result.task.status).toBe("done");
+    expect(result.exec).not.toBeNull();
+    expect(result.exec!.exitCode).toBe(0);
+    expect(result.exec!.stdout).toContain("verified");
+
+    const events = await listActivityForTask(db, task.id);
+    const verified = events.find((e) => e.eventType === "task_verified_human");
+    expect(verified).toBeDefined();
+    const payload = JSON.parse(verified!.payload) as Record<string, unknown>;
+    expect(payload.verificationExitCode).toBe(0);
+    expect(payload.verificationStdout).toContain("verified");
+  });
+
+  it("verifyTask with a failing verification command keeps the task pending and captures stderr", async () => {
+    const task = await createTask(db, {
+      prdRevisionId,
+      title: "Check sentinel",
+      description: "Confirm the helper file exists",
+      doneCriteria: "Sentinel ack",
+      effort: "s",
+      kind: "human",
+      // Use each platform's native shell syntax: verification commands are
+      // deliberately executed through `sh -c` or Windows `cmd.exe /c`.
+      verificationCommand:
+        process.platform === "win32" ? "echo nope >&2 & exit /b 3" : "echo nope >&2; exit 3",
+    });
+    const result = await verifyTask(db, task.id, { userConfirmation: "tried but failed" });
+    expect(result.verified).toBe(false);
+    expect(result.task.status).toBe("pending");
+    expect(result.exec).not.toBeNull();
+    expect(result.exec!.exitCode).toBe(3);
+    expect(result.exec!.stderr).toContain("nope");
+
+    const events = await listActivityForTask(db, task.id);
+    const verified = events.find((e) => e.eventType === "task_verified_human");
+    expect(verified).toBeDefined();
+    const payload = JSON.parse(verified!.payload) as Record<string, unknown>;
+    expect(payload.verificationExitCode).toBe(3);
+    expect(payload.verificationStderr).toContain("nope");
+  });
+
+  it("verifyTask rejects with a clear message when the task is not a human task", async () => {
+    const task = await createTask(db, {
+      prdRevisionId,
+      title: "Coder task",
+      description: "An ordinary slice",
+      doneCriteria: "Tests pass",
+      effort: "s",
+    });
+    await expect(verifyTask(db, task.id, { userConfirmation: "ok now" })).rejects.toThrow(
+      /Only human tasks can be verified/i,
+    );
+  });
 });
 
 // ── Activity Log ────────────────────────────────────────────────────────────
@@ -1423,6 +1616,105 @@ describe("resolveWorkspace resolution order", () => {
     const resolved = await resolveWorkspace(db, path.join(featureSubRepoDir, "src"));
     expect(resolved).not.toBeNull();
     expect(resolved!.projectId).toBe(featureProject.id);
+  });
+});
+
+// ── activatePrd auto-derive currentPhase (PRD 0017 / T4a) ─────────────────────
+//
+// `activatePrd` must derive `currentPhase` from the PRD's tasks when the
+// caller left it null — covers legacy PRDs whose tasks were grafted with
+// `task add --phase` before the auto-seed shipped (T2). The derivation rule:
+//   - phases present + at least one task not done → min pending phase
+//   - phases present + all tasks done             → max phase
+//   - no phased tasks                             → currentPhase stays null
+// And once `currentPhase` is non-null the value is preserved.
+
+describe("activatePrd auto-derive currentPhase (PRD 0017 / T4a)", () => {
+  let projectId: string;
+  let workspaceId: string;
+
+  beforeEach(async () => {
+    const project = await createProject(db, { name: "derive-phase" });
+    projectId = project.id;
+    const ws = await addWorkspace(db, {
+      projectId,
+      path: "/home/user/derive-phase",
+    });
+    workspaceId = ws.id;
+  });
+
+  async function createReadyPrdWithoutPhase(): Promise<string> {
+    const prd = await createPrd(db, { projectId, title: "Legacy PRD" });
+    await db.update(prdRevisions).set({ status: "ready" }).where(eq(prdRevisions.id, prd.id));
+    return prd.id;
+  }
+
+  async function insertTask(
+    prdRevisionId: string,
+    phaseNumber: number | null,
+    status: "pending" | "done" = "pending",
+  ): Promise<void> {
+    // Insert tasks directly via the schema (rather than `createTask`) so the
+    // auto-seed in `createTask` doesn't flip `currentPhase` before the test
+    // can assert what `activatePrd` derives on its own.
+    const { tasks: tasksTable } = await import("#/db/schema");
+    await db.insert(tasksTable).values({
+      id: `task-${Math.random().toString(36).slice(2, 10)}`,
+      prdRevisionId,
+      position: 1,
+      title: `Task ph=${phaseNumber ?? "null"}`,
+      description: "desc",
+      doneCriteria: "done",
+      effort: "s",
+      phaseNumber,
+      status,
+      dependsOn: "[]",
+      blockedReason: null,
+      skipReason: null,
+      startedAt: null,
+      completedAt: null,
+    });
+  }
+
+  it("(i) activate with 0 phased tasks → currentPhase stays null", async () => {
+    const prdId = await createReadyPrdWithoutPhase();
+    await insertTask(prdId, null);
+
+    const activated = await activatePrd(db, prdId, workspaceId);
+
+    expect(activated.status).toBe("in_progress");
+    expect(activated.currentPhase).toBeNull();
+  });
+
+  it("(ii) activate with phase 1 + phase 2 pending → currentPhase = 1", async () => {
+    const prdId = await createReadyPrdWithoutPhase();
+    await insertTask(prdId, 1, "pending");
+    await insertTask(prdId, 2, "pending");
+
+    const activated = await activatePrd(db, prdId, workspaceId);
+
+    expect(activated.currentPhase).toBe(1);
+  });
+
+  it("(iii) activate with phase 1 done + phase 2 pending → currentPhase = 2", async () => {
+    const prdId = await createReadyPrdWithoutPhase();
+    await insertTask(prdId, 1, "done");
+    await insertTask(prdId, 2, "pending");
+
+    const activated = await activatePrd(db, prdId, workspaceId);
+
+    expect(activated.currentPhase).toBe(2);
+  });
+
+  it("(iv) activate with all phased tasks done → currentPhase = max(phase)", async () => {
+    const prdId = await createReadyPrdWithoutPhase();
+    await insertTask(prdId, 1, "done");
+    await insertTask(prdId, 2, "done");
+    await insertTask(prdId, 3, "done");
+
+    const activated = await activatePrd(db, prdId, workspaceId);
+
+    expect(activated.currentPhase).toBe(3);
   });
 });
 

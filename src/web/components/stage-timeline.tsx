@@ -251,6 +251,9 @@ function TaskRow({ row, groupId }: { row: StageItem; groupId: TaskGroup["id"] })
           <Badge variant="subtle">audit</Badge>
         ) : (
           <>
+            {row.triageState ? (
+              <Badge variant={triageVariant(row.triageState)}>{row.triageState}</Badge>
+            ) : null}
             {row.severity ? (
               <Badge variant={severityVariant(row.severity)}>{row.severity}</Badge>
             ) : null}
@@ -589,4 +592,14 @@ function severityVariant(severity: NonNullable<StageItem["severity"]>) {
   }
 
   return "severityInfo";
+}
+
+function triageVariant(
+  triageState: NonNullable<StageItem["triageState"]>,
+): React.ComponentProps<typeof Badge>["variant"] {
+  // `ready-for-agent` is the actionable state — render it with the distinct
+  // positive variant. Every other triage state (needs-triage / needs-info /
+  // ready-for-human / wontfix) reads as "not to take now" and shares the muted
+  // info variant.
+  return triageState === "ready-for-agent" ? "triageReady" : "triageParked";
 }
