@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "#/web/components/ui/select";
 import { Textarea } from "#/web/components/ui/textarea";
+import { DirectivesTable, type DirectiveRow } from "#/web/components/directives-page";
 import { cn } from "#/web/lib/utils";
 import {
   VALID_DIRECTIVE_CATEGORIES,
@@ -39,21 +40,6 @@ type ConfigItem = {
   currentValue: string | null;
   source: string | null;
   updatedAt: string | null;
-};
-
-type Directive = {
-  id: string;
-  category: DirectiveCategory;
-  scope: string;
-  title: string;
-  instruction: string;
-  kind: "command" | "rule";
-  repoTarget: string;
-  blocking: boolean;
-  position: number;
-  enabled: boolean;
-  lastRunAt: string | null;
-  lastRunStatus: "ok" | "fail" | null;
 };
 
 type Repo = {
@@ -163,7 +149,7 @@ function DirectivesSection({ projectId }: { projectId: string }) {
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/directives`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return (await res.json()) as { items: Directive[] };
+      return (await res.json()) as { items: DirectiveRow[] };
     },
   });
 
@@ -205,127 +191,22 @@ function DirectivesSection({ projectId }: { projectId: string }) {
     },
   });
 
-  const toggleM = useMutation({
-    mutationFn: async (d: Directive) => {
-      const res = await fetch(`/api/projects/${projectId}/directives/${d.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled: !d.enabled }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "directives"] }),
-  });
-
-  const runM = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/projects/${projectId}/directives/${id}/run`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `HTTP ${res.status}`);
-      }
-      return (await res.json()) as { ok: boolean; stderr: string; stdout: string };
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "directives"] }),
-  });
-
-  const removeM = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/projects/${projectId}/directives/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "directives"] }),
-  });
-
   const items = dirsQ.data?.items ?? [];
-  const byScope = new Map<string, Directive[]>();
-  for (const d of items) {
-    const arr = byScope.get(d.scope) ?? [];
-    arr.push(d);
-    byScope.set(d.scope, arr);
-  }
 
   return (
     <section>
       <h2 className="mb-3 text-sm font-semibold">Directives</h2>
       <p className="mb-4 text-xs text-muted-foreground">
         Commands and rules the agents enforce at specific moments in the cycle. Blocking directives
-        abort the transition (e.g. <code>pre-review</code>) when they fail.
+        abort the transition (e.g. <code>pre-review</code>) when they fail. Click a title to open
+        its detail and run / edit it.
       </p>
 
-      {[...byScope.keys()].sort().map((scope) => (
-        <div key={scope} className="mb-5">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {scope}
-          </h3>
-          <ul className="space-y-2">
-            {byScope.get(scope)!.map((d) => (
-              <li key={d.id} className="rounded-md border border-card-border bg-card p-3 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{d.title}</span>
-                  <Badge variant="subtle" className="text-[10px]">
-                    {d.category}
-                  </Badge>
-                  <Badge variant="outline" className="text-[10px]">
-                    {d.kind}
-                  </Badge>
-                  {d.kind === "command" && (
-                    <Badge variant="subtle" className="text-[10px]">
-                      repo: {d.repoTarget}
-                    </Badge>
-                  )}
-                  {d.blocking && (
-                    <Badge variant="outline" className="text-[10px]">
-                      blocking
-                    </Badge>
-                  )}
-                  {!d.enabled && (
-                    <Badge variant="subtle" className="text-[10px]">
-                      disabled
-                    </Badge>
-                  )}
-                  {d.lastRunStatus && (
-                    <Badge
-                      variant={d.lastRunStatus === "ok" ? "statusDone" : "severityCritical"}
-                      className="text-[10px]"
-                    >
-                      {d.lastRunStatus}
-                    </Badge>
-                  )}
-                  <div className="ml-auto flex items-center gap-1">
-                    {d.kind === "command" && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => runM.mutate(d.id)}
-                        disabled={runM.isPending}
-                      >
-                        Run
-                      </Button>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={() => toggleM.mutate(d)}>
-                      {d.enabled ? "Disable" : "Enable"}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => removeM.mutate(d.id)}>
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-                <pre className="mt-2 overflow-auto rounded bg-secondary/40 px-2 py-1 font-mono text-[11px]">
-                  {d.instruction}
-                </pre>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      {dirsQ.isLoading && <p className="mb-4 text-sm text-muted-foreground">Loading…</p>}
+      {dirsQ.error && <SettingsError className="mb-4" message={(dirsQ.error as Error).message} />}
+      <div className="mb-5">
+        <DirectivesTable projectId={projectId} items={items} />
+      </div>
 
       <div className="rounded-md border border-dashed border-card-border bg-card p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -712,18 +593,24 @@ function DocProfilesSection({ projectId }: { projectId: string }) {
           <ul className="space-y-2">
             {profiles.map((p) => (
               <li key={p.id} className="rounded-md border border-card-border bg-card p-3 text-sm">
-                <div className="flex items-baseline gap-2">
-                  <span className="font-medium">{p.name}</span>
-                  <Badge variant="outline" className="text-[10px]">
-                    {p.style}
-                  </Badge>
-                  <Badge variant="subtle" className="text-[10px]">
-                    {p.commitPolicy}
-                  </Badge>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Target: <code>{p.targetRoot}</code> · Language: {p.language}
-                </p>
+                <Link
+                  to="/projects/$id/doc-profiles/$name"
+                  params={{ id: projectId, name: p.name }}
+                  className="block text-current no-underline hover:text-primary"
+                >
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-medium">{p.name}</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {p.style}
+                    </Badge>
+                    <Badge variant="subtle" className="text-[10px]">
+                      {p.commitPolicy}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Target: <code>{p.targetRoot}</code> · Language: {p.language}
+                  </p>
+                </Link>
               </li>
             ))}
           </ul>

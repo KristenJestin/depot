@@ -1,12 +1,19 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ListTreeIcon, PanelRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { LiveActivityPanel } from "#/web/components/live-activity-panel";
+import { PrdAnnexesSection } from "#/web/components/prd-annexes-widget";
+import { PrdSourceIdeasSection } from "#/web/components/prd-source-ideas-widget";
+import { PrdPrototypesWidget } from "#/web/components/prd-prototypes-widget";
 import { PrdHeaderCard } from "#/web/components/prd-header-card";
 import { PrdNoticeBanner } from "#/web/components/prd-notice-banner";
 import { PrdReposWidget, type PrdRepoSummary } from "#/web/components/prd-repos-widget";
+import {
+  PrdDependenciesWidget,
+  PrdMilestoneWidget,
+  PrdTagsWidget,
+} from "#/web/components/prd-groupings-widget";
 import {
   PrdActivityWidget,
   PrdInfoWidget,
@@ -25,7 +32,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "#/web/components/ui/breadcrumb";
-import { Button } from "#/web/components/ui/button";
 import { usePersistedState } from "#/web/lib/use-persisted-state";
 import { prdsQuery } from "#/web/lib/queries";
 import {
@@ -52,6 +58,7 @@ function PrdDetailRoute() {
   const summary = buildDetailSummary(data);
   const stages = buildStageCards(data);
   const revisions = buildRevisionEntries(data);
+  const annexNames = new Set(data.annexes.map((annex) => annex.name));
   // In draft / ready the PRD is still being planned — every phase is equally
   // "to come". Expand all timeline cards so the author can review the whole
   // plan at a glance without clicking phase by phase.
@@ -103,30 +110,7 @@ function PrdDetailRoute() {
 
   return (
     <PageShell>
-      <PageTopBar
-        actions={
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setTasksOpen((o) => !o)}
-              title={tasksOpen ? "Hide tasks" : "Show tasks"}
-            >
-              <ListTreeIcon className="size-3.5" />
-              <span className="ml-1.5">Tasks</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSideOpen((o) => !o)}
-              title={sideOpen ? "Hide activity" : "Show activity"}
-            >
-              <PanelRightIcon className="size-3.5" />
-              <span className="ml-1.5">Activity</span>
-            </Button>
-          </>
-        }
-      >
+      <PageTopBar>
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
@@ -147,6 +131,7 @@ function PrdDetailRoute() {
       <ThreePane
         leftTitle="Tasks"
         leftOpen={tasksOpen}
+        onLeftOpen={() => setTasksOpen(true)}
         onLeftClose={() => setTasksOpen(false)}
         left={
           <div className="p-4" onClickCapture={handlePaneClick}>
@@ -155,10 +140,18 @@ function PrdDetailRoute() {
         }
         rightTitle="Activity"
         rightOpen={sideOpen}
+        onRightOpen={() => setSideOpen(true)}
         onRightClose={() => setSideOpen(false)}
         right={
           <div className="space-y-4 p-4" onClickCapture={handlePaneClick}>
             <PrdInfoWidget prd={data.prd} workspace={data.workspace} summary={summary} />
+            <PrdTagsWidget prdRevisionId={id} tags={data.tags} />
+            <PrdMilestoneWidget prdRevisionId={id} version={data.targetVersion} />
+            <PrdDependenciesWidget
+              prdRevisionId={id}
+              dependencies={data.dependencies}
+              dependents={data.dependents}
+            />
             <PrdReposSection prdId={id} />
             <PrdReviewsWidget reviews={data.reviews} />
             <PrdActivityWidget activity={data.activity} />
@@ -190,7 +183,10 @@ function PrdDetailRoute() {
                 />
               ) : null}
 
-              <PrdHeaderCard prd={data.prd} summary={summary} />
+              <PrdHeaderCard prd={data.prd} summary={summary} annexNames={annexNames} />
+              <PrdPrototypesWidget prdRevisionId={id} />
+              <PrdSourceIdeasSection sourceIdeas={data.sourceIdeas} />
+              <PrdAnnexesSection prdRevisionId={id} annexes={data.annexes} />
               <LiveActivityPanel
                 prdStatus={data.prd.status}
                 activity={data.activity}

@@ -12,7 +12,9 @@ import { docCommand } from "./commands/docs";
 import { pendingCommand } from "./commands/pending";
 import { serveCommand } from "./commands/serve";
 import { adrCommand } from "./commands/adrs";
+import { ideaCommand } from "./commands/idea";
 import { command } from "#/cli/command";
+import { formatError } from "#/cli/error-format";
 import { setDebug, setJsonMode } from "#/shared/logger";
 import { logDbBoot } from "#/cli/log-db-boot";
 import pkg from "../../package.json";
@@ -70,7 +72,55 @@ const main = command({
     pending: pendingCommand,
     serve: serveCommand,
     adr: adrCommand,
+    idea: ideaCommand,
   },
 });
 
-runMain(main);
+runDepotCli();
+
+/**
+ * Wrap citty's `runMain` so the raw `(FiberFailure)` blob it would otherwise
+ * `console.error` is replaced by a single, readable line produced by
+ * {@link formatError}.
+ *
+ * citty's runMain has its own try/catch and calls `process.exit(1)` itself
+ * — it never re-throws — so the only seam we have without forking citty is
+ * its `console.error` call site. We swap `console.error` for the duration of
+ * runMain and route the first error-shaped argument through our formatter.
+ * Errors raised by `CLIError` (citty's own "missing required arg" / "unknown
+ * command" messages) come in as plain strings after a `showUsage` block and
+ * are passed through unchanged.
+ */
+async function runDepotCli(): Promise<void> {
+  const originalConsoleError = console.error;
+
+  console.error = (...args: unknown[]) => {
+    const candidate = args[0];
+    if (candidate instanceof Error && !isCittyUsageError(candidate)) {
+      emitFormattedError(candidate);
+      return;
+    }
+    originalConsoleError(...args);
+  };
+
+  try {
+    await runMain(main);
+  } finally {
+    console.error = originalConsoleError;
+  }
+}
+
+function isCittyUsageError(err: Error): boolean {
+  return err.name === "CLIError";
+}
+
+function emitFormattedError(err: unknown): void {
+  const argv = process.argv.slice(2);
+  const quiet =
+    process.env["DEPOT_QUIET"] === "1" || argv.some((arg) => arg === "--json" || arg === "-j");
+  const { line, debug } = formatError(err, { quiet });
+  process.stderr.write(`${line}\n`);
+  if (process.env["DEPOT_DEBUG"] === "1" && debug) {
+    process.stderr.write(`${debug}\n`);
+  }
+}

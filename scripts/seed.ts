@@ -744,7 +744,7 @@ await db.insert(schema.docProfiles).values([
     name: "product-docs",
     targetRoot: "docs",
     targetPattern: "**/*.md",
-    sources: json(["docs/index.md", "docs/concepts/index.md", ".prds/*.md"]),
+    sources: json(["docs/index.md", "docs/concepts/index.md", ".scratch/**/PRD.md"]),
     language: "fr",
     style: "mixed",
     audience: "maintainers and agent operators",

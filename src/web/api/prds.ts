@@ -1,14 +1,32 @@
 import { Hono } from "hono";
 import { asc, inArray } from "drizzle-orm";
 
-import { reviews, tasks } from "#/db/schema";
+import { prdTags as prdTagsTable, prds as prdsTable, reviews, tasks } from "#/db/schema";
 import { getRuntime } from "#/services/database";
 import * as DomainPrds from "#/modules/prds/domain";
+import * as DomainPriority from "#/modules/prds/priority";
 import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainReviews from "#/modules/reviews/domain";
 import * as DomainActivity from "#/modules/activity/domain";
 import * as DomainPrdRepos from "#/modules/prds/repos";
 import * as DomainProjectRepos from "#/modules/projects/repos";
+import * as DomainTags from "#/modules/prds/tags";
+import * as DomainDependencies from "#/modules/prds/dependencies";
+import * as DomainMilestones from "#/modules/prds/milestones";
+import * as DomainAnnexes from "#/modules/prds/annexes";
+import * as DomainIdeas from "#/modules/ideas/domain";
+import { logActivity } from "#/modules/activity/domain";
+import {
+  invalidTagReason,
+  isValidMilestone,
+  isValidPrdPriority,
+  isValidAnnexKind,
+  MAX_MILESTONE_LENGTH,
+  VALID_ANNEX_KINDS,
+  VALID_PRD_PRIORITIES,
+  type AnnexKind,
+  type PrdPriority,
+} from "#/shared/validator";
 import type { Variables } from "./types";
 
 export const prdsRoutes = new Hono<{ Variables: Variables }>()
@@ -28,10 +46,40 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       });
       projectId = ws?.projectId ?? null;
     }
-    const prdList = await getRuntime().runPromise(
+    let prdList = await getRuntime().runPromise(
       DomainPrds.listPrds(projectId ? { projectId, latestOnly: true } : { latestOnly: true }),
     );
     prdList.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+
+    // Optional filters (PRD 0019 / T4): tag / milestone / dependsOn. They
+    // apply on top of the workspace-scoped list and intersect when combined.
+    const tagFilter = c.req.query("tag");
+    const milestoneFilter = c.req.query("milestone");
+    const dependsOnFilter = c.req.query("dependsOn") ?? c.req.query("depends_on");
+
+    if (tagFilter && projectId) {
+      const tagged = await getRuntime().runPromise(DomainTags.listPrdsForTag(projectId, tagFilter));
+      const allowed = new Set(tagged.map((p) => p.id));
+      prdList = prdList.filter((p) => allowed.has(p.id));
+    }
+
+    if (milestoneFilter && projectId) {
+      const milestonePrds = await getRuntime().runPromise(
+        DomainMilestones.listPrdsByMilestone(projectId, milestoneFilter),
+      );
+      const ids = new Set(milestonePrds.map((p) => p.id));
+      prdList = prdList.filter((p) => ids.has(p.id));
+    }
+
+    if (dependsOnFilter) {
+      const target = await getRuntime().runPromise(DomainPrds.getPrd(dependsOnFilter));
+      const logicalTarget = target?.prdId ?? dependsOnFilter;
+      const dependents = await getRuntime().runPromise(
+        DomainDependencies.listDependents(logicalTarget),
+      );
+      const ids = new Set(dependents.map((d) => d.id));
+      prdList = prdList.filter((p) => ids.has(p.prdId));
+    }
 
     const prdRevisionIds = prdList.map((prd) => prd.id);
     const allTaskRows =
@@ -183,6 +231,38 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       }
     }
 
+    // Tags + target_version + priority per PRD (PRD 0019 T4 + T5). All three
+    // live on the logical `prds` row so we look them up by `prdId`. One batched
+    // query for tags + one for the logical PRDs keeps the list endpoint cheap.
+    const distinctLogicalIds = [...new Set(prdList.map((p) => p.prdId))];
+    const tagsByPrdId = new Map<string, string[]>();
+    const targetVersionByPrdId = new Map<string, string | null>();
+    const priorityByPrdId = new Map<string, PrdPriority>();
+    if (distinctLogicalIds.length > 0) {
+      const tagRows = await db
+        .select({ prdId: prdTagsTable.prdId, tag: prdTagsTable.tag })
+        .from(prdTagsTable)
+        .where(inArray(prdTagsTable.prdId, distinctLogicalIds))
+        .orderBy(asc(prdTagsTable.tag));
+      for (const row of tagRows) {
+        const list = tagsByPrdId.get(row.prdId) ?? [];
+        list.push(row.tag);
+        tagsByPrdId.set(row.prdId, list);
+      }
+      const logicalRows = await db
+        .select({
+          id: prdsTable.id,
+          targetVersion: prdsTable.targetVersion,
+          priority: prdsTable.priority,
+        })
+        .from(prdsTable)
+        .where(inArray(prdsTable.id, distinctLogicalIds));
+      for (const row of logicalRows) {
+        targetVersionByPrdId.set(row.id, row.targetVersion ?? null);
+        priorityByPrdId.set(row.id, (row.priority ?? "normal") as PrdPriority);
+      }
+    }
+
     const prds = prdList.map((p) => {
       const counts = taskCounts.get(p.id) ?? {
         totalTasks: 0,
@@ -231,9 +311,12 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       return {
         ...p,
         projectName: projectNameMap.get(p.projectId) ?? null,
+        priority: priorityByPrdId.get(p.prdId) ?? ("normal" as PrdPriority),
         ...counts,
         latestReview,
         previewTasks,
+        tags: tagsByPrdId.get(p.prdId) ?? [],
+        targetVersion: targetVersionByPrdId.get(p.prdId) ?? null,
       };
     });
 
@@ -244,6 +327,9 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
 
     const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
     if (!prd) return c.json({ error: "Not found" }, 404);
+
+    const logical = await getRuntime().runPromise(DomainPrds.getLogicalPrd(prd.prdId));
+    const priority = (logical?.priority ?? "normal") as PrdPriority;
 
     const tasks = await getRuntime().runPromise(DomainTasks.listTasks(id, { prdTasksOnly: true }));
     const allReviews = await getRuntime().runPromise(DomainReviews.listReviews(id));
@@ -285,7 +371,228 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       createdAt: a.createdAt,
     }));
 
-    return c.json({ prd, tasks, reviews, revisions, activity, workspace }, 200);
+    // Groupings (PRD 0019 / T4): tags, dependencies, dependents, milestone.
+    // All three live on the *logical* PRD so we resolve them via `prd.prdId`.
+    const tags = await getRuntime().runPromise(DomainTags.listTagsForPrd(prd.id));
+    const dependenciesRaw = await getRuntime().runPromise(
+      DomainDependencies.listDependencies(prd.prdId),
+    );
+    const dependentsRaw = await getRuntime().runPromise(
+      DomainDependencies.listDependents(prd.prdId),
+    );
+    const projectPrds = await getRuntime().runPromise(
+      DomainPrds.listPrds({ projectId: prd.projectId, latestOnly: true }),
+    );
+    const headByPrdId = new Map(projectPrds.map((p) => [p.prdId, p]));
+    const decorate = (logical: { id: string }) => {
+      const head = headByPrdId.get(logical.id);
+      return {
+        prdId: logical.id,
+        headRevisionId: head?.id ?? null,
+        title: head?.title ?? null,
+        status: head?.status ?? null,
+      };
+    };
+    const dependencies = dependenciesRaw.map(decorate);
+    const dependents = dependentsRaw.map(decorate);
+    const targetVersion = logical?.targetVersion ?? null;
+
+    // Annexes (PRD 0024 / T2): list name/kind/description only — the full
+    // `content` is fetched on demand via GET /prds/:id/annexes/:annexId so the
+    // detail payload stays small even when a revision carries large HTML
+    // prototypes. `brokenAnnexRefs` mirrors the CLI `prd show` warning so the
+    // UI can render `[annex: <name>]` mentions with no matching annex as a
+    // muted "broken" chip.
+    const annexRows = await getRuntime().runPromise(DomainAnnexes.listAnnexes(prd.id));
+    const annexes = annexRows.map((a) => ({
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      description: a.description,
+      createdAt: a.createdAt,
+    }));
+    const annexNames = new Set(annexRows.map((a) => a.name));
+    const referencedBody = [
+      prd.context,
+      prd.scope,
+      prd.problem,
+      prd.solution,
+      prd.implementationDecisions,
+      prd.testingDecisions,
+    ]
+      .filter((s): s is string => typeof s === "string")
+      .join("\n");
+    const brokenAnnexRefs = DomainAnnexes.extractAnnexRefs(referencedBody).filter(
+      (name) => !annexNames.has(name),
+    );
+
+    // Source ideas (PRD 0027 / T7): the uncommitted ideas that motivated this
+    // PRD, attached to the *logical* PRD so they survive forks (like tags /
+    // dependencies). Surfaced on the detail payload the same way annexes are.
+    // Ideas are short by construction, so the full `body` ships inline.
+    const sourceIdeaRows = await getRuntime().runPromise(DomainIdeas.listPrdIdeas(prd.prdId));
+    const sourceIdeas = sourceIdeaRows.map((idea) => ({
+      id: idea.id,
+      title: idea.title,
+      body: idea.body,
+      tag: idea.tag,
+      status: idea.status,
+      promotedPrdId: idea.promotedPrdId,
+      createdAt: idea.createdAt,
+    }));
+
+    return c.json(
+      {
+        prd: { ...prd, priority },
+        tasks,
+        reviews,
+        revisions,
+        activity,
+        workspace,
+        tags,
+        targetVersion,
+        dependencies,
+        dependents,
+        annexes,
+        brokenAnnexRefs,
+        sourceIdeas,
+      },
+      200,
+    );
+  })
+  .get("/prds/:id/annexes/:annexId", async (c) => {
+    const { id, annexId } = c.req.param();
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    try {
+      const annex = await getRuntime().runPromise(DomainAnnexes.getAnnex(annexId));
+      if (annex.prdRevisionId !== id) return c.json({ error: "Not found" }, 404);
+      return c.json({ annex }, 200);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/not found/i.test(msg)) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 422);
+    }
+  })
+  .post("/prds/:id/annexes", async (c) => {
+    const { id } = c.req.param();
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    type Body = {
+      name?: string;
+      kind?: string;
+      description?: string | null;
+      content?: string;
+      replace?: boolean;
+    };
+    const body = (await c.req.json().catch(() => ({}))) as Body;
+    if (!body.name || typeof body.name !== "string") {
+      return c.json({ error: "name is required" }, 422);
+    }
+    if (!body.kind || !isValidAnnexKind(body.kind)) {
+      return c.json({ error: `kind must be one of ${VALID_ANNEX_KINDS.join(", ")}` }, 422);
+    }
+    if (typeof body.content !== "string" || body.content.length === 0) {
+      return c.json({ error: "content is required" }, 422);
+    }
+    if (body.description != null && typeof body.description !== "string") {
+      return c.json({ error: "description must be a string or null" }, 422);
+    }
+
+    try {
+      const row = await getRuntime().runPromise(
+        DomainAnnexes.addAnnex(prd.id, {
+          name: body.name,
+          kind: body.kind as AnnexKind,
+          description: body.description ?? null,
+          content: body.content,
+          replace: body.replace === true,
+        }),
+      );
+      await getRuntime().runPromise(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_annex_added",
+          payload: { annexId: row.id, name: row.name, kind: row.kind },
+          source: "human",
+        }),
+      );
+      return c.json(
+        {
+          item: {
+            id: row.id,
+            name: row.name,
+            kind: row.kind,
+            description: row.description,
+            createdAt: row.createdAt,
+          },
+        },
+        201,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/already exists/i.test(msg)) return c.json({ error: msg }, 409);
+      return c.json({ error: msg }, 422);
+    }
+  })
+  .delete("/prds/:id/annexes/:annexId", async (c) => {
+    const { id, annexId } = c.req.param();
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    try {
+      const row = await getRuntime().runPromise(DomainAnnexes.getAnnex(annexId));
+      if (row.prdRevisionId !== id) return c.json({ error: "Not found" }, 404);
+      await getRuntime().runPromise(DomainAnnexes.removeAnnex(annexId));
+      await getRuntime().runPromise(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_annex_removed",
+          payload: { annexId: row.id, name: row.name, kind: row.kind },
+          source: "human",
+        }),
+      );
+      return c.json({ prdRevisionId: prd.id, annexId: row.id, name: row.name }, 200);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/not found/i.test(msg)) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 422);
+    }
+  })
+  .patch("/prds/:id/priority", async (c) => {
+    const { id } = c.req.param();
+    type Body = { priority?: string };
+    const body = (await c.req.json().catch(() => ({}))) as Body;
+    if (!body.priority || !isValidPrdPriority(body.priority)) {
+      return c.json(
+        {
+          error: `priority must be one of ${VALID_PRD_PRIORITIES.join(", ")}`,
+        },
+        422,
+      );
+    }
+    try {
+      const result = await getRuntime().runPromise(DomainPriority.setPriority(id, body.priority));
+      return c.json(
+        {
+          item: result.prd,
+          changed: result.changed,
+          previousPriority: result.previousPriority,
+          newPriority: result.newPriority,
+        },
+        200,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/not found/i.test(msg)) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 422);
+    }
   })
   .get("/prds/:id/tasks/:taskId", async (c) => {
     const { id, taskId } = c.req.param();
@@ -436,6 +743,163 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
 
     await getRuntime().runPromise(DomainPrdRepos.removePrdRepo(prd.id, repo.id));
     return c.json({ prdRevisionId: prd.id, repoId: repo.id }, 200);
+  })
+  // ── PRD groupings (PRD 0019 / T4) ────────────────────────────────────────
+  // Tags / dependencies / milestone CRUD. Each surface mirrors the
+  // corresponding CLI command (`depot prd tag|depend|milestone …`) and emits
+  // the same activity_log events. Tags + milestone live on the logical PRD;
+  // dependencies are M:N between logical PRDs. All endpoints take the PRD
+  // *revision* id in the URL and resolve to the logical id internally so the
+  // UI can keep using whatever id it already has.
+  .post("/prds/:id/tags", async (c) => {
+    const { id } = c.req.param();
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    type Body = { tag?: string };
+    const body = (await c.req.json().catch(() => ({}))) as Body;
+    if (!body.tag || typeof body.tag !== "string") {
+      return c.json({ error: "tag is required" }, 422);
+    }
+    const reason = invalidTagReason(body.tag);
+    if (reason !== null) {
+      return c.json({ error: reason }, 422);
+    }
+
+    try {
+      const item = await getRuntime().runPromise(DomainTags.addTag(prd.id, body.tag));
+      await getRuntime().runPromise(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_tag_added",
+          payload: { prdId: item.prdId, tag: item.tag },
+          source: "human",
+        }),
+      );
+      return c.json({ item }, 201);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
+    }
+  })
+  .delete("/prds/:id/tags/:tag", async (c) => {
+    const { id, tag } = c.req.param();
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    try {
+      const result = await getRuntime().runPromise(DomainTags.removeTag(prd.id, tag));
+      await getRuntime().runPromise(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_tag_removed",
+          payload: { prdId: result.prdId, tag },
+          source: "human",
+        }),
+      );
+      return c.json({ prdId: result.prdId, tag }, 200);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
+    }
+  })
+  .post("/prds/:id/dependencies", async (c) => {
+    const { id } = c.req.param();
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    type Body = { dependsOnPrdId?: string };
+    const body = (await c.req.json().catch(() => ({}))) as Body;
+    if (!body.dependsOnPrdId || typeof body.dependsOnPrdId !== "string") {
+      return c.json({ error: "dependsOnPrdId is required" }, 422);
+    }
+    // Accept either a logical PRD id or a revision id so the UI can stay
+    // agnostic — same convenience the CLI offers via `resolveLogicalPrdId`.
+    const targetRev = await getRuntime().runPromise(DomainPrds.getPrd(body.dependsOnPrdId));
+    const dependsOnLogicalId = targetRev?.prdId ?? body.dependsOnPrdId;
+
+    try {
+      const item = await getRuntime().runPromise(
+        DomainDependencies.addDependency(prd.prdId, dependsOnLogicalId),
+      );
+      await getRuntime().runPromise(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_depend_added",
+          payload: { prdId: prd.prdId, dependsOnPrdId: dependsOnLogicalId },
+          source: "human",
+        }),
+      );
+      return c.json({ item }, 201);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
+    }
+  })
+  .delete("/prds/:id/dependencies/:dependsOnPrdId", async (c) => {
+    const { id, dependsOnPrdId } = c.req.param();
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    const targetRev = await getRuntime().runPromise(DomainPrds.getPrd(dependsOnPrdId));
+    const dependsOnLogicalId = targetRev?.prdId ?? dependsOnPrdId;
+
+    try {
+      await getRuntime().runPromise(
+        DomainDependencies.removeDependency(prd.prdId, dependsOnLogicalId),
+      );
+      await getRuntime().runPromise(
+        logActivity({
+          projectId: prd.projectId,
+          workspaceId: prd.workspaceId ?? undefined,
+          prdRevisionId: prd.id,
+          eventType: "prd_depend_removed",
+          payload: { prdId: prd.prdId, dependsOnPrdId: dependsOnLogicalId },
+          source: "human",
+        }),
+      );
+      return c.json({ prdId: prd.prdId, dependsOnPrdId: dependsOnLogicalId }, 200);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
+    }
+  })
+  .patch("/prds/:id/milestone", async (c) => {
+    const { id } = c.req.param();
+    const prd = await getRuntime().runPromise(DomainPrds.getPrd(id));
+    if (!prd) return c.json({ error: "Not found" }, 404);
+
+    type Body = { version?: string | null };
+    const body = (await c.req.json().catch(() => ({}))) as Body;
+    if (body.version === undefined) {
+      return c.json({ error: "version is required (string or null)" }, 422);
+    }
+    if (body.version !== null && typeof body.version !== "string") {
+      return c.json({ error: "version must be a string or null" }, 422);
+    }
+
+    try {
+      if (body.version === null) {
+        const result = await getRuntime().runPromise(DomainMilestones.unsetMilestone(prd.id));
+        return c.json({ item: result.prd, changed: result.changed, version: null }, 200);
+      }
+      if (!isValidMilestone(body.version)) {
+        const trimmedLength = body.version.trim().length;
+        const reason =
+          trimmedLength === 0
+            ? `Milestone must be non-empty.`
+            : `Milestone is longer than the ${MAX_MILESTONE_LENGTH}-character limit (${trimmedLength}).`;
+        return c.json({ error: reason }, 422);
+      }
+      const result = await getRuntime().runPromise(
+        DomainMilestones.setMilestone(prd.id, body.version),
+      );
+      return c.json({ item: result.prd, changed: result.changed, version: result.newVersion }, 200);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 422);
+    }
   });
 
 function compareTaskStatus(statusA: string, statusB: string): number {

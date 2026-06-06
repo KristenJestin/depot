@@ -171,7 +171,7 @@ describe("e2e chaos / edge cases (PRD 0016 / T3)", () => {
       );
       const prdId = created.item.id;
 
-      const result = await ctx.agent.run(`depot prd done ${prdId} --user-confirmed 'try this'`, {
+      const result = await ctx.agent.run(`depot prd done ${prdId} --user-confirmed 'done it'`, {
         cwd: repo,
         expectExit: "any",
       });

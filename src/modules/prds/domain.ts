@@ -1,9 +1,24 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { prds, prdRevisions, prdRepos, tasks } from "#/db/schema";
+import {
+  prds,
+  prdRevisions,
+  prdRepos,
+  prdAnnexes,
+  prdDesignLock,
+  tasks,
+  taskPrototypePages,
+} from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
-import { VALID_PRD_TRANSITIONS, type PrdStatus, type Effort } from "#/shared/validator";
+import {
+  VALID_PRD_TRANSITIONS,
+  VALID_PRD_PRIORITIES,
+  isValidPrdPriority,
+  type PrdStatus,
+  type PrdPriority,
+  type Effort,
+} from "#/shared/validator";
 import { Db } from "#/services/database";
 import {
   PrdNotFoundError,
@@ -40,9 +55,17 @@ export const createPrd = (input: {
   title: string;
   context?: string;
   scope?: string;
+  priority?: PrdPriority;
 }) =>
   Effect.gen(function* () {
     const db = yield* Db;
+    if (input.priority !== undefined && !isValidPrdPriority(input.priority)) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Invalid priority '${input.priority}'. Valid priorities: ${VALID_PRD_PRIORITIES.join(", ")}.`,
+        }),
+      );
+    }
     const prdId = generateId();
     const revId = generateId();
 
@@ -51,6 +74,7 @@ export const createPrd = (input: {
         id: prdId,
         projectId: input.projectId,
         currentRevisionId: revId,
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
       }),
     );
 
@@ -201,6 +225,30 @@ export const activatePrd = (id: string, workspaceId: string) =>
 
     yield* checkPrdTransition(rev.status, "in_progress");
 
+    // Derive `currentPhase` from the PRD's tasks when it was never seeded
+    // (legacy PRDs created before the auto-seed on `task add --phase` shipped,
+    // or whose tasks were grafted directly via SQL). Prefer the first
+    // non-done phase — the one the user is actually about to work on — and
+    // fall back to the max phase when everything is already done so the
+    // PRD lands one phase-advance away from being marked done. Idempotent:
+    // a non-null `currentPhase` is left untouched.
+    let derivedCurrentPhase: number | undefined;
+    if (rev.currentPhase === null) {
+      const tasksWithPhase = yield* dbQuery(() =>
+        db.query.tasks.findMany({
+          where: { prdRevisionId: id, phaseNumber: { isNotNull: true } },
+        }),
+      );
+      if (tasksWithPhase.length > 0) {
+        const phaseNumbers = tasksWithPhase.map((t) => t.phaseNumber!);
+        const pendingPhases = tasksWithPhase
+          .filter((t) => t.status !== "done")
+          .map((t) => t.phaseNumber!);
+        derivedCurrentPhase =
+          pendingPhases.length > 0 ? Math.min(...pendingPhases) : Math.max(...phaseNumbers);
+      }
+    }
+
     const rows = yield* dbQuery(() =>
       db
         .update(prdRevisions)
@@ -208,6 +256,7 @@ export const activatePrd = (id: string, workspaceId: string) =>
           status: "in_progress",
           workspaceId,
           activatedAt: new Date(),
+          ...(derivedCurrentPhase !== undefined ? { currentPhase: derivedCurrentPhase } : {}),
         })
         .where(eq(prdRevisions.id, id))
         .returning(),
@@ -219,6 +268,98 @@ export const activatePrd = (id: string, workspaceId: string) =>
       prdRevisionId: id,
       eventType: "prd_activated",
       payload: { prdRevisionId: id, title: rev.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+
+    return rows[0]!;
+  });
+
+/**
+ * Manual `currentPhase` initialiser for legacy PRDs that were activated
+ * before the `task add --phase` auto-seed (PRD 0017 / T2) and the activate
+ * auto-derive (PRD 0017 / T4a) shipped. Refuses to re-seed an already-phased
+ * PRD unless `force` is set, and refuses to touch terminal PRDs (`done` /
+ * `canceled`). When `phase` is omitted the value is derived from the PRD's
+ * tasks using the same rule as `activatePrd`.
+ */
+export const initPrdPhase = (id: string, options: { phase?: number; force?: boolean } = {}) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id }));
+
+    if (rev.status === "done" || rev.status === "canceled") {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `Cannot initialise phase on PRD ${id}: status is '${rev.status}'. 'phase init' only applies to PRDs that are still in the active lifecycle.`,
+        }),
+      );
+    }
+
+    if (rev.currentPhase !== null && !options.force) {
+      return yield* Effect.fail(
+        new ValidationError({
+          reason: `PRD ${id} already has currentPhase=${rev.currentPhase}. Pass --force to overwrite.`,
+        }),
+      );
+    }
+
+    const tasksWithPhase = yield* dbQuery(() =>
+      db.query.tasks.findMany({
+        where: { prdRevisionId: id, phaseNumber: { isNotNull: true } },
+      }),
+    );
+
+    let toPhase: number;
+    let derivedFromTasks: boolean;
+    if (options.phase !== undefined) {
+      if (options.phase < 1) {
+        return yield* Effect.fail(
+          new ValidationError({ reason: `--phase must be >= 1, got ${options.phase}` }),
+        );
+      }
+      if (tasksWithPhase.length > 0) {
+        const knownPhases = new Set(tasksWithPhase.map((t) => t.phaseNumber!));
+        if (!knownPhases.has(options.phase)) {
+          return yield* Effect.fail(
+            new ValidationError({
+              reason: `--phase ${options.phase} does not match any existing phase on PRD ${id}. Known phases: ${[...knownPhases].sort((a, b) => a - b).join(", ")}.`,
+            }),
+          );
+        }
+      }
+      toPhase = options.phase;
+      derivedFromTasks = false;
+    } else if (tasksWithPhase.length > 0) {
+      const phaseNumbers = tasksWithPhase.map((t) => t.phaseNumber!);
+      const pendingPhases = tasksWithPhase
+        .filter((t) => t.status !== "done")
+        .map((t) => t.phaseNumber!);
+      toPhase = pendingPhases.length > 0 ? Math.min(...pendingPhases) : Math.max(...phaseNumbers);
+      derivedFromTasks = true;
+    } else {
+      toPhase = 1;
+      derivedFromTasks = false;
+    }
+
+    const rows = yield* dbQuery(() =>
+      db
+        .update(prdRevisions)
+        .set({ currentPhase: toPhase, updatedAt: new Date() })
+        .where(eq(prdRevisions.id, id))
+        .returning(),
+    );
+
+    yield* logActivity({
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId: id,
+      eventType: "prd_phase_initialized",
+      payload: {
+        prdRevisionId: id,
+        fromPhase: rev.currentPhase,
+        toPhase,
+        derivedFromTasks,
+      },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
 
     return rows[0]!;
@@ -262,6 +403,44 @@ export const donePrd = (id: string) =>
       prdRevisionId: id,
       eventType: "prd_done",
       payload: { prdRevisionId: id, title: rev.title },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return rows[0]!;
+  });
+
+/**
+ * Distill the chosen prototype design's placement into the PRD (PRD 0028).
+ * Stores the placement spec and stamps `designDistilledAt`, the marker the
+ * `prd ready` design-lock gate requires. Idempotent: re-distilling overwrites
+ * the spec and refreshes the marker.
+ */
+export const distillDesign = (prdRevisionId: string, input: { placementSpec: string }) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(prdRevisionId);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id: prdRevisionId }));
+    if (input.placementSpec.trim().length === 0) {
+      return yield* Effect.fail(
+        new ValidationError({ reason: "placement spec must not be empty" }),
+      );
+    }
+    const trimmed = input.placementSpec.trim();
+    const distilledAt = new Date();
+    const rows = yield* dbQuery(() =>
+      db
+        .insert(prdDesignLock)
+        .values({ prdRevisionId, placementSpec: trimmed, distilledAt })
+        .onConflictDoUpdate({
+          target: prdDesignLock.prdRevisionId,
+          set: { placementSpec: trimmed, distilledAt },
+        })
+        .returning(),
+    );
+    yield* logActivity({
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId,
+      eventType: "prd_design_distilled",
+      payload: { prdRevisionId, length: trimmed.length },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return rows[0]!;
   });
@@ -418,6 +597,25 @@ export const forkPrd = (id: string) =>
       );
     }
 
+    // Copy the parent's annexes onto the new revision so the fork is
+    // self-contained: each annex is duplicated (new id) and from here evolves
+    // independently of the parent's snapshot (PRD 0024 / T1).
+    const sourceAnnexes = yield* dbQuery(() =>
+      db.query.prdAnnexes.findMany({ where: { prdRevisionId: rev.id } }),
+    );
+    for (const annex of sourceAnnexes) {
+      yield* dbQuery(() =>
+        db.insert(prdAnnexes).values({
+          id: generateId(),
+          prdRevisionId: newRevId,
+          name: annex.name,
+          kind: annex.kind,
+          description: annex.description,
+          content: annex.content,
+        }),
+      );
+    }
+
     // Clone PRD tasks into the new revision
     const sourceTasks = yield* dbQuery(() =>
       db.query.tasks.findMany({
@@ -451,6 +649,35 @@ export const forkPrd = (id: string) =>
       );
     }
 
+    // PRD 0025: recopy every prototype + page + version + variant + feedback
+    // onto the new revision so the fork is self-contained, on the same model
+    // as the prd_repo scope above. Lazy import avoids a domain ↔ prototypes
+    // circular import at module init time. The returned map (old → new page id)
+    // lets the task ↔ page links below be rebuilt onto the fork's own pages.
+    const { forkPrototypes } = yield* Effect.promise(() => import("#/modules/prds/prototypes"));
+    const pageIdMap = yield* forkPrototypes(rev.id, newRevId);
+
+    // PRD 0030 / issue 04: carry the `task_prototype_pages` links onto the fork,
+    // remapping both ends — the task via the clone `idMap`, the page via the
+    // prototype fork's `pageIdMap` — so "this task realises these pages"
+    // survives the fork.
+    const sourceTaskIds = sourceTasks.map((t) => t.id);
+    if (sourceTaskIds.length > 0) {
+      const sourceLinks = yield* dbQuery(() =>
+        db.query.taskPrototypePages.findMany({
+          where: { taskId: { in: sourceTaskIds } },
+        }),
+      );
+      for (const link of sourceLinks) {
+        const newTaskId = idMap.get(link.taskId);
+        const newPageId = pageIdMap.get(link.pageId);
+        if (!newTaskId || !newPageId) continue;
+        yield* dbQuery(() =>
+          db.insert(taskPrototypePages).values({ taskId: newTaskId, pageId: newPageId }),
+        );
+      }
+    }
+
     yield* logActivity({
       projectId: rev.projectId,
       prdRevisionId: newRev.id,
@@ -462,6 +689,21 @@ export const forkPrd = (id: string) =>
       },
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     return newRev;
+  });
+
+/** Look up the logical PRD row by id. Returns null when missing. */
+export const getLogicalPrd = (prdId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const row = yield* dbQuery(() => db.query.prds.findFirst({ where: { id: prdId } }));
+    return row ?? null;
+  });
+
+/** List every logical `prds` row scoped to a project. Cheap, no joins. */
+export const listLogicalPrdsForProject = (projectId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    return yield* dbQuery(() => db.query.prds.findMany({ where: { projectId } }));
   });
 
 /** List all revisions for the same logical PRD, ordered by revision number. */
@@ -873,6 +1115,36 @@ export const phaseAdvance = (id: string) =>
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       return { prd: rows[0]!, advanced: false as const };
     }
+  });
+
+/**
+ * Whether `phaseAdvance` on this PRD would CLOSE it (mark it done) rather than
+ * move on to a further phase — i.e. the terminal branch of `phaseAdvance`,
+ * reached when the PRD is in `review` with a current phase and no tasks remain
+ * in the next phase. The CLI uses this to require an explicit close
+ * confirmation only on the advance that actually finishes the PRD; intermediate
+ * advances stay permissive. Returns `false` for any state where advancing is
+ * not (yet) a close — the domain `phaseAdvance` then surfaces its own error.
+ */
+export const phaseAdvanceClosesPrd = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (
+      !rev ||
+      rev.status !== "review" ||
+      rev.currentPhase === null ||
+      rev.currentPhase === undefined
+    ) {
+      return false;
+    }
+    const currentPhase = rev.currentPhase;
+    const nextPhaseTasks = yield* dbQuery(() =>
+      db.query.tasks.findMany({
+        where: { prdRevisionId: id, phaseNumber: currentPhase + 1, reviewId: { isNull: true } },
+      }),
+    );
+    return nextPhaseTasks.length === 0;
   });
 
 export const updateSuggestedCommitMessage = (id: string, message: string | null) =>

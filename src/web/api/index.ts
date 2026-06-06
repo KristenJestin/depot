@@ -11,6 +11,9 @@ import { pendingActionsRoutes } from "./pending-actions";
 import { projectsRoutes } from "./projects";
 import { docsRoutes } from "./docs";
 import { adrsRoutes } from "./adrs";
+import { milestonesRoutes } from "./milestones";
+import { prototypesRoutes } from "./prototypes";
+import { ideasRoutes } from "./ideas";
 
 // Cookie used to remember the user's selected workspace across browser
 // sessions and server restarts. Storing it server-readable lets every
@@ -165,7 +168,10 @@ const app = new Hono<{ Variables: Variables }>()
   .route("/", pendingActionsRoutes)
   .route("/", projectsRoutes)
   .route("/", docsRoutes)
-  .route("/", adrsRoutes);
+  .route("/", adrsRoutes)
+  .route("/", milestonesRoutes)
+  .route("/", prototypesRoutes)
+  .route("/", ideasRoutes);
 
 export type AppType = typeof app;
 export default app;

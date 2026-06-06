@@ -1,10 +1,17 @@
 import { Link } from "@tanstack/react-router";
-import { CalendarIcon, CornerDownRightIcon, FolderIcon } from "lucide-react";
+import {
+  CalendarIcon,
+  CornerDownRightIcon,
+  FolderIcon,
+  MilestoneIcon,
+  TagIcon,
+} from "lucide-react";
 import type * as React from "react";
 
 import { AgentBars } from "#/web/components/agent-bars";
 import { KanbanProgressRing } from "#/web/components/kanban/kanban-progress-ring";
 import { KanbanTaskList } from "#/web/components/kanban/kanban-task-list";
+import { PrdPriorityBadge } from "#/web/components/prd-priority-badge";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
 import { cn } from "#/web/lib/utils";
@@ -30,7 +37,9 @@ export function KanbanPrdCard({
   // and the footer space is better used for the project badge in all-projects mode.
   const showTimestamp = !isTerminal;
   const showTaskList = !isTerminal;
-  const headerHasContent = signalBadges.length > 0 || (showProjectBadge && card.projectName);
+  const showPriorityBadge = card.priority !== "normal";
+  const headerHasContent =
+    signalBadges.length > 0 || showPriorityBadge || (showProjectBadge && card.projectName);
 
   return (
     <Card
@@ -58,8 +67,11 @@ export function KanbanPrdCard({
             ) : (
               <span />
             )}
-            {signalBadges.length > 0 ? (
+            {signalBadges.length > 0 || showPriorityBadge ? (
               <div className="flex flex-wrap justify-end gap-1.5">
+                {showPriorityBadge ? (
+                  <PrdPriorityBadge priority={card.priority} className="bg-card" />
+                ) : null}
                 {signalBadges.map((badge) => (
                   <Badge key={badge.label} variant={badge.variant} className="bg-card">
                     {badge.label}
@@ -83,6 +95,34 @@ export function KanbanPrdCard({
           <CornerDownRightIcon className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
           <p className="truncate text-xs text-muted-foreground">{context}</p>
         </div>
+
+        {card.targetVersion || card.tags.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {card.targetVersion ? (
+              <Badge
+                variant="outline"
+                className="bg-card text-[10px]"
+                data-testid="milestone-badge"
+                title={`Milestone ${card.targetVersion}`}
+              >
+                <MilestoneIcon className="size-3" />
+                {card.targetVersion}
+              </Badge>
+            ) : null}
+            {card.tags.map((tag) => (
+              <Badge
+                key={tag}
+                variant="subtle"
+                className="text-[10px]"
+                data-testid="tag-badge"
+                title={`Tag ${tag}`}
+              >
+                <TagIcon className="size-3" />
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
 
         {showTaskList ? <KanbanTaskList card={card} /> : null}
       </div>

@@ -15,7 +15,7 @@ export function KanbanBoard({
     .reduce((sum, column) => sum + column.cards.length, 0);
 
   return (
-    <div className="flex min-h-full w-full flex-col gap-3 p-3">
+    <div className="flex min-h-0 w-full flex-1 flex-col gap-3 p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">PRDs</h1>
@@ -38,7 +38,7 @@ export function KanbanBoard({
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-x-auto">
-          <div className="flex min-h-full gap-3 p-0.5 pb-1">
+          <div className="flex h-full min-h-0 gap-3 p-0.5 pb-1">
             {columns.map((column) => (
               <KanbanColumn key={column.id} column={column} showProjectBadges={showProjectBadges} />
             ))}

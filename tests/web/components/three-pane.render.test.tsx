@@ -11,22 +11,26 @@ import { ThreePane } from "#/web/components/three-pane";
  */
 describe("ThreePane", () => {
   function renderPane(overrides?: { leftOpen?: boolean; rightOpen?: boolean }) {
+    const onLeftOpen = vi.fn<() => void>();
     const onLeftClose = vi.fn<() => void>();
+    const onRightOpen = vi.fn<() => void>();
     const onRightClose = vi.fn<() => void>();
     render(
       <ThreePane
         leftTitle="Tasks"
         leftOpen={overrides?.leftOpen ?? true}
+        onLeftOpen={onLeftOpen}
         onLeftClose={onLeftClose}
         left={<div data-testid="left-body">left</div>}
         rightTitle="Activity"
         rightOpen={overrides?.rightOpen ?? true}
+        onRightOpen={onRightOpen}
         onRightClose={onRightClose}
         right={<div data-testid="right-body">right</div>}
         center={<div data-testid="center-body">center</div>}
       />,
     );
-    return { onLeftClose, onRightClose };
+    return { onLeftOpen, onLeftClose, onRightOpen, onRightClose };
   }
 
   it("renders all three panes with both rails open", () => {

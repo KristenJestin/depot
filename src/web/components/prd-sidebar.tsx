@@ -3,6 +3,7 @@ import { ArrowRightIcon, CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ActivityTimeline, type TimelineEntry } from "#/web/components/activity-timeline";
+import { PrdPriorityBadgeEditable } from "#/web/components/prd-priority-badge";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
 import { CollapseChevron } from "#/web/components/ui/collapse-chevron";
@@ -20,6 +21,7 @@ import {
   type RevisionEntry,
 } from "#/web/lib/prd-view-model";
 import { formatMetaDate } from "#/web/lib/view-format";
+import { type PrdPriority } from "#/shared/validator";
 
 type DetailPrd = PrdDetailResponse["prd"];
 type DetailReview = PrdDetailResponse["reviews"][number];
@@ -309,6 +311,16 @@ function InfoRows({
   const displayStatus = resolvePrdDisplayStatus(prd, summary.activeReview);
   const rows = [
     ["Status", <StatusBadge key="status" status={displayStatus} />],
+    // Info is the single source of truth for the PRD's metadata: priority is
+    // edited here (the duplicate editable badge was removed from the header).
+    [
+      "Priority",
+      <PrdPriorityBadgeEditable
+        key="priority"
+        prdId={prd.id}
+        priority={(prd.priority ?? "normal") as PrdPriority}
+      />,
+    ],
     ["ID", <CopyId key="id" value={prd.id} />],
     [
       "Revision",

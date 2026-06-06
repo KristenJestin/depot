@@ -94,6 +94,57 @@ describe("project directives", () => {
     expect(updated.title).toBe("Lint (disabled)");
   });
 
+  it("updateDirective patches category and re-validates (category, scope) (PRD 0017 / T5)", async () => {
+    const d = await run(
+      createDirective({
+        projectId,
+        scope: "pre-review",
+        category: "dev",
+        kind: "rule",
+        title: "auditor-bound",
+        instruction: "ok",
+      }),
+    );
+    const updated = await run(updateDirective(d.id, { category: "auditor" }));
+    expect(updated.category).toBe("auditor");
+    expect(updated.scope).toBe("pre-review");
+  });
+
+  it("updateDirective rejects an invalid resulting (category, scope) pair (PRD 0017 / T5)", async () => {
+    const d = await run(
+      createDirective({
+        projectId,
+        scope: "pre-review",
+        category: "dev",
+        kind: "rule",
+        title: "cannot move to doc/pre-review",
+        instruction: "ok",
+      }),
+    );
+    await expect(run(updateDirective(d.id, { category: "doc" }))).rejects.toThrow(
+      /invalid \(category, scope\)/i,
+    );
+    // Validate the table is preserved (no partial write).
+    const after = (await run(listDirectives(projectId))).find((row) => row.id === d.id);
+    expect(after?.category).toBe("dev");
+  });
+
+  it("updateDirective rejects an unknown category value (PRD 0017 / T5)", async () => {
+    const d = await run(
+      createDirective({
+        projectId,
+        scope: "always",
+        category: "dev",
+        kind: "rule",
+        title: "ok",
+        instruction: "ok",
+      }),
+    );
+    await expect(
+      run(updateDirective(d.id, { category: "frontend" as unknown as "dev" })),
+    ).rejects.toThrow(/unknown directive category/i);
+  });
+
   it("removes a directive", async () => {
     const d = await run(
       createDirective({

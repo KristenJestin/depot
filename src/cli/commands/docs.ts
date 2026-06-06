@@ -5,6 +5,8 @@ import * as DomainDocs from "#/modules/docs/domain";
 import * as DomainDocSync from "#/modules/docs/sync";
 import * as DomainRepos from "#/modules/projects/repos";
 import * as DomainDirectives from "#/modules/projects/directives";
+import * as DomainConfig from "#/modules/projects/config";
+import { getPrd } from "#/modules/prds/domain";
 import { logActivity } from "#/modules/activity/domain";
 import { VALID_DOC_KINDS } from "#/shared/validator";
 
@@ -378,38 +380,84 @@ const syncCommand = command({
       targetRepos = [match];
     }
 
+    // Ticket-grep is opt-in: it engages only when `docSyncTicketPattern` is
+    // configured, no explicit `--since` was passed, and a ticket can be
+    // extracted from the `--prd`. Anything missing → resolveDiffRange falls
+    // through to the explicit-`--since`-or-refuse path unchanged.
+    const ticketPattern = args.since
+      ? null
+      : ((await runEffect(DomainConfig.getConfig(ws.projectId, "docSyncTicketPattern")))?.value ??
+        null);
+    let ticket: string | null = null;
+    if (ticketPattern && args.prd) {
+      const prd = await runEffect(getPrd(args.prd));
+      if (prd) {
+        const body = [
+          prd.context,
+          prd.problem,
+          prd.solution,
+          prd.scope,
+          prd.implementationDecisions,
+          prd.testingDecisions,
+        ]
+          .filter((part): part is string => typeof part === "string" && part.length > 0)
+          .join("\n\n");
+        ticket = DomainDocSync.extractTicket({ title: prd.title, body }, ticketPattern);
+      }
+    }
+
     const perRepo: Array<{
       repo: { id: string | null; name: string; path: string; implicit: boolean };
       profileId: string;
       sources: DomainDocSync.ResolvedSourceRange[];
     }> = [];
+    const excluded: Array<{ name: string; ticket: string; base: string }> = [];
 
     for (const repo of targetRepos) {
-      const resolved = await runEffect(
+      const resolution = await runEffect(
         DomainDocSync.resolveDiffRange({
           profileName: args.name,
           projectId: ws.projectId,
           sinceExpr: args.since,
           untilExpr: args.until,
+          ticketPattern,
+          ticket,
+          repo: { path: repo.path, baseBranch: repo.baseBranch },
         }),
       );
+
+      if (resolution.kind === "excluded") {
+        excluded.push({ name: repo.name, ticket: resolution.ticket, base: resolution.base });
+        continue;
+      }
 
       if (!args.dryRun) {
         await runEffect(
           DomainDocSync.recordSyncRun({
-            profileId: resolved.profileId,
+            profileId: resolution.profileId,
             triggeredByPrdId: args.prd,
-            sinceRef: args.since ?? resolved.sources[0]?.since ?? undefined,
-            untilRef: args.until ?? undefined,
+            sinceRef: args.since ?? resolution.sources[0]?.since ?? undefined,
+            untilRef: args.until ?? resolution.sources[0]?.until ?? undefined,
           }),
         );
       }
 
       perRepo.push({
         repo: { id: repo.id, name: repo.name, path: repo.path, implicit: repo.implicit },
-        profileId: resolved.profileId,
-        sources: resolved.sources,
+        profileId: resolution.profileId,
+        sources: resolution.sources,
       });
+    }
+
+    // Every repo in scope was excluded (ticket matched nothing anywhere): there
+    // is no range to sync. Refuse rather than emit an empty success, mirroring
+    // the resolver's refuse-don't-guess contract.
+    if (perRepo.length === 0 && excluded.length > 0) {
+      return output.error(
+        "doc_sync_no_match",
+        `Ticket '${excluded[0]!.ticket}' matched no commit on any source repo's base branch. ` +
+          `Pass --since <ref> [--until <ref>] explicitly, or check the PRD's ticket reference.`,
+      );
     }
 
     // Mono-repo without --repo keeps the legacy flat shape (no `repos` wrapper)
@@ -422,21 +470,29 @@ const syncCommand = command({
         output.success({ profileId: only.profileId, sources: only.sources, dryRun: args.dryRun });
         return;
       }
-      output.success({ repos: perRepo, dryRun: args.dryRun });
+      output.success({ repos: perRepo, excluded, dryRun: args.dryRun });
       return;
     }
     output.print(`Profile: ${args.name}${args.dryRun ? "  (dry run)" : ""}`);
+    const printSource = (s: DomainDocSync.ResolvedSourceRange): void => {
+      const from = s.resolvedFrom ? `  from=${s.resolvedFrom}` : "";
+      output.print(
+        `  ${s.name} @ ${s.path}  since=${s.since}  until=${s.until}  [${s.mode}]${from}`,
+      );
+    };
     if (useFlatShape) {
-      for (const s of perRepo[0]!.sources) {
-        output.print(`  ${s.name} @ ${s.path}  since=${s.since}  until=${s.until}  [${s.mode}]`);
+      for (const s of perRepo[0]!.sources) printSource(s);
+      for (const ex of excluded) {
+        output.print(`  (excluded) ticket '${ex.ticket}' not found on ${ex.base}`);
       }
       return;
     }
     for (const entry of perRepo) {
       output.print(`Repo: ${entry.repo.name}  @ ${entry.repo.path}`);
-      for (const s of entry.sources) {
-        output.print(`  ${s.name} @ ${s.path}  since=${s.since}  until=${s.until}  [${s.mode}]`);
-      }
+      for (const s of entry.sources) printSource(s);
+    }
+    for (const ex of excluded) {
+      output.print(`Repo: ${ex.name}  (excluded) ticket '${ex.ticket}' not found on ${ex.base}`);
     }
   },
 });

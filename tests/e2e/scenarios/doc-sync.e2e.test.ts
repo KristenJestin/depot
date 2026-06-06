@@ -5,10 +5,12 @@ import { e2eScenario } from "../runtime";
  * PRD 0016 / T1 — Doc sync end-to-end.
  *
  * Three sub-cases, each a fresh DB:
- *  A. After a commit lands in `src/`, `depot doc sync <profile> --no-dryRun`
+ *  A. After a commit lands in `src/`, `depot doc sync <profile> --since … --no-dryRun`
  *     succeeds and writes a `doc_sync_runs` row with the resolved diff range
- *     (`since_ref` is populated; we accept either the auto-resolved `HEAD~N`
- *     fallback or any since-expression the sync chooses).
+ *     (`since_ref` is populated from the explicit `--since`). PRD 0023 / T1
+ *     removed the silent `HEAD~20` fallback, so range-less syncs now refuse;
+ *     the row-writing concern this case targets is exercised with an explicit
+ *     ref. The refusal path itself is covered by `doc-sync-range.e2e.test.ts`.
  *  B. A blocking `pre-doc-sync` directive that succeeds (`echo OK`) keeps the
  *     sync green. `depot doc pre-sync-check` returns exit 0 and the activity
  *     log records the `pre_doc_sync_check` event with `ok=true`.
@@ -56,7 +58,9 @@ describe("e2e doc sync end-to-end (PRD 0016 / T1)", () => {
 
       await ctx.git.commit(repo, { "src/feature.ts": "export const x = 1;\n" }, "add feature");
 
-      const result = await ctx.agent.run("depot doc sync p1 --no-dryRun", { cwd: repo });
+      const result = await ctx.agent.run("depot doc sync p1 --since HEAD~1 --no-dryRun", {
+        cwd: repo,
+      });
       ctx.expect.exitCode(result, 0);
 
       const run = ctx.expect.dbRow<SyncRunRow>("doc_sync_runs", { profile_id: profile.item.id });
@@ -101,7 +105,9 @@ describe("e2e doc sync end-to-end (PRD 0016 / T1)", () => {
       }
 
       // The doc sync itself remains usable after a passing pre-check.
-      const sync = await ctx.agent.run("depot doc sync p1 --no-dryRun", { cwd: repo });
+      const sync = await ctx.agent.run("depot doc sync p1 --since HEAD~1 --no-dryRun", {
+        cwd: repo,
+      });
       ctx.expect.exitCode(sync, 0);
     }, "doc-sync B — passing pre-sync-check directive is honoured");
   });

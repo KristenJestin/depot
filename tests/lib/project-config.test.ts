@@ -49,8 +49,19 @@ describe("project config", () => {
   it("isKnownKey covers the published keys", () => {
     expect(isKnownKey("baseBranch")).toBe(true);
     expect(isKnownKey("defaultDocProfile")).toBe(true);
+    expect(isKnownKey("docSyncTicketPattern")).toBe(true);
     expect(isKnownKey("branchNamingConvention")).toBe(false);
     expect(isKnownKey("randomMadeUpKey")).toBe(false);
+  });
+
+  it("docSyncTicketPattern accepts a compilable regex and refuses an invalid one", () => {
+    const key = KNOWN_PROJECT_CONFIG_KEYS.docSyncTicketPattern!;
+    expect(key.default).toBeNull();
+    expect(key.validate("TICKET-\\d+").ok).toBe(true);
+    expect(key.validate("[A-Z]+-[0-9]+").ok).toBe(true);
+    const bad = key.validate("TICKET-(");
+    expect(bad.ok).toBe(false);
+    expect(isKnownProjectConfigKey("docSyncTicketPattern")).toBe(true);
   });
 
   it("KNOWN_PROJECT_CONFIG_KEYS validators reject bad values", () => {

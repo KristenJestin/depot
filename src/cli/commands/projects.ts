@@ -12,6 +12,7 @@ import { dbQuery } from "#/shared/db";
 import * as DomainProjectConfig from "#/modules/projects/config";
 import * as DomainDirectives from "#/modules/projects/directives";
 import * as DomainRepos from "#/modules/projects/repos";
+import { logActivity } from "#/modules/activity/domain";
 import { existsSync } from "node:fs";
 import {
   VALID_DIRECTIVE_CATEGORIES,
@@ -588,6 +589,167 @@ function requireDirectiveCategory(
   return category;
 }
 
+const directiveUpdateCommand = command({
+  meta: {
+    name: "update",
+    description: "Update editable fields on a directive (including category/scope)",
+  },
+  args: {
+    id: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Directive ID",
+    },
+    category: {
+      schema: Schema.Literal(...VALID_DIRECTIVE_CATEGORIES),
+      description: `New directive category (${VALID_DIRECTIVE_CATEGORIES.join("|")})`,
+    },
+    scope: {
+      schema: Schema.Literal(...VALID_DIRECTIVE_SCOPES),
+      description: `New directive scope (${VALID_DIRECTIVE_SCOPES.join("|")})`,
+    },
+    title: { schema: Schema.String.pipe(Schema.minLength(1)), description: "New title" },
+    instruction: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "New instruction",
+    },
+    kind: {
+      schema: Schema.Literal(...VALID_DIRECTIVE_KINDS),
+      description: "New directive kind (command|rule)",
+    },
+    blocking: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      description: "Mark the directive as blocking",
+    },
+    nonBlocking: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      description: "Mark the directive as non-blocking",
+    },
+    repoTarget: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      description: "New repo target (auto|all|workspace|<repo-name>)",
+    },
+    position: {
+      schema: Schema.Int,
+      coerce: "integer",
+      description: "New position within its scope",
+    },
+    enabled: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      description: "Enable the directive",
+    },
+    disabled: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      description: "Disable the directive",
+    },
+  },
+  run: async ({ args, output }) => {
+    const existing = await runEffect(DomainDirectives.getDirective(args.id));
+    if (!existing) return output.error("not_found", `Directive not found: ${args.id}`);
+
+    // `--blocking` and `--non-blocking` are mutually exclusive; same for
+    // `--enabled` / `--disabled`. Reject the contradictory case before the
+    // domain call so the user gets a precise message.
+    if (args.blocking === true && args.nonBlocking === true) {
+      return output.error(
+        "invalid_flags",
+        "Cannot combine --blocking and --non-blocking on the same call.",
+      );
+    }
+    if (args.enabled === true && args.disabled === true) {
+      return output.error(
+        "invalid_flags",
+        "Cannot combine --enabled and --disabled on the same call.",
+      );
+    }
+
+    const blockingPatch =
+      args.blocking === true ? true : args.nonBlocking === true ? false : undefined;
+    const enabledPatch = args.enabled === true ? true : args.disabled === true ? false : undefined;
+
+    const patch = {
+      title: args.title,
+      instruction: args.instruction,
+      kind: args.kind,
+      category: args.category,
+      scope: args.scope,
+      blocking: blockingPatch,
+      position: args.position,
+      enabled: enabledPatch,
+      repoTarget: args.repoTarget,
+    };
+
+    const hasAnyChange = Object.values(patch).some((v) => v !== undefined);
+    if (!hasAnyChange) {
+      return output.error(
+        "nothing_to_update",
+        "Nothing to update. Provide at least one of --title, --instruction, --kind, " +
+          "--category, --scope, --blocking|--non-blocking, --position, --enabled|--disabled, " +
+          "or --repo-target.",
+      );
+    }
+
+    // Validate (category, scope) before the domain call so the error mirrors
+    // the wording of `directive add` (PRD 0013 Q3). The domain layer
+    // re-validates as a defense-in-depth check.
+    if (args.category !== undefined || args.scope !== undefined) {
+      const nextCategory = (args.category ?? existing.category) as DirectiveCategory | null;
+      const nextScope = (args.scope ?? existing.scope) as DirectiveScope;
+      if (nextCategory === null) {
+        return output.error(
+          "category_required",
+          "Cannot patch --scope on a legacy directive with no category. Pass --category as well.",
+        );
+      }
+      if (!isValidCategoryScope(nextCategory, nextScope)) {
+        const validScopes = validScopesForCategory(nextCategory);
+        const scopeList = validScopes.length > 0 ? validScopes.join(", ") : "(none)";
+        return output.error(
+          "category_scope_invalid",
+          `Invalid (category, scope) combination: (${nextCategory}, ${nextScope}). ` +
+            `Valid scopes for category '${nextCategory}': ${scopeList}. ` +
+            `See docs/concepts/index.md for the full compatibility table.`,
+        );
+      }
+    }
+
+    const item = await runEffect(DomainDirectives.updateDirective(args.id, patch));
+    const changes = DomainDirectives.diffDirective(existing, item);
+
+    // Best-effort: a logActivity failure must not mask the successful update.
+    // We surface it on stderr instead of failing the command.
+    try {
+      await runEffect(
+        logActivity({
+          projectId: existing.projectId,
+          eventType: "directive_updated",
+          payload: { directiveId: item.id, changes },
+          source: "human",
+        }),
+      );
+    } catch (e) {
+      console.error(
+        `Warning: directive updated but activity log failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    if (output.isJson()) output.success({ item, changes });
+    else {
+      const fields = Object.keys(changes);
+      if (fields.length === 0) {
+        output.print(`Updated directive ${item.id} (no field changed)`);
+      } else {
+        output.print(`Updated directive ${item.id} — changed: ${fields.join(", ")}`);
+      }
+    }
+  },
+});
+
 const directiveListCommand = command({
   meta: { name: "list", description: "List project directives" },
   workspace: true,
@@ -773,6 +935,7 @@ const directiveCommand = command({
   meta: { name: "directive", description: "Project directive management" },
   subCommands: {
     add: directiveAddCommand,
+    update: directiveUpdateCommand,
     list: directiveListCommand,
     show: directiveShowCommand,
     run: directiveRunCommand,

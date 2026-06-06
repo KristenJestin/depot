@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -53,47 +54,51 @@ describe("PrdSidebar", () => {
       },
     ];
 
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-      <PrdSidebar
-        prd={{
-          id: "rev-1",
-          prdId: "prd-1",
-          projectId: "proj-1",
-          workspaceId: "ws-1",
-          revision: 1,
-          title: "Sidebar PRD",
-          context: null,
-          scope: null,
-          problem: null,
-          solution: null,
-          implementationDecisions: null,
-          testingDecisions: null,
-          status: "in_progress",
-          auditCycles: 1,
-          currentPhase: 1,
-          supersededAt: null,
-          createdAt: now,
-          updatedAt: now,
-          readyAt: now,
-          activatedAt: now,
-          suggestedCommitMessage: null,
-        }}
-        workspace={{ id: "ws-1", path: "D:/Projects/depot", label: "depot" }}
-        revisions={revisions}
-        reviews={[]}
-        activity={[
-          {
-            id: "activity-1",
-            taskId: null,
-            repoName: null,
-            eventType: "prd_activated",
-            payload: {},
-            source: "ai",
+      <QueryClientProvider client={queryClient}>
+        <PrdSidebar
+          prd={{
+            id: "rev-1",
+            prdId: "prd-1",
+            projectId: "proj-1",
+            workspaceId: "ws-1",
+            revision: 1,
+            title: "Sidebar PRD",
+            context: null,
+            scope: null,
+            problem: null,
+            solution: null,
+            implementationDecisions: null,
+            testingDecisions: null,
+            priority: "normal",
+            status: "in_progress",
+            auditCycles: 1,
+            currentPhase: 1,
+            supersededAt: null,
             createdAt: now,
-          },
-        ]}
-        summary={summary}
-      />,
+            updatedAt: now,
+            readyAt: now,
+            activatedAt: now,
+            suggestedCommitMessage: null,
+          }}
+          workspace={{ id: "ws-1", path: "D:/Projects/depot", label: "depot" }}
+          revisions={revisions}
+          reviews={[]}
+          activity={[
+            {
+              id: "activity-1",
+              taskId: null,
+              repoName: null,
+              eventType: "prd_activated",
+              payload: {},
+              source: "ai",
+              createdAt: now,
+            },
+          ]}
+          summary={summary}
+        />
+      </QueryClientProvider>,
     );
 
     expect(screen.queryByRole("heading", { name: "Reviews" })).not.toBeInTheDocument();

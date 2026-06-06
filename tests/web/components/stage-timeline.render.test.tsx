@@ -25,6 +25,7 @@ function makePrd(status: DetailPrd["status"], currentPhase: DetailPrd["currentPh
     solution: null,
     implementationDecisions: null,
     testingDecisions: null,
+    priority: "normal",
     status,
     auditCycles: 0,
     currentPhase,
@@ -37,7 +38,11 @@ function makePrd(status: DetailPrd["status"], currentPhase: DetailPrd["currentPh
   };
 }
 
-function makeTask(phase: number, status: DetailTask["status"] = "pending"): DetailTask {
+function makeTask(
+  phase: number,
+  status: DetailTask["status"] = "pending",
+  triageState: DetailTask["triageState"] = "ready-for-agent",
+): DetailTask {
   return {
     id: `phase-${phase}-task`,
     prdRevisionId: "rev-1",
@@ -55,13 +60,14 @@ function makeTask(phase: number, status: DetailTask["status"] = "pending"): Deta
     severity: null,
     axis: null,
     repoId: null,
-    triageState: "ready-for-agent",
+    triageState,
     linkedFilePath: null,
     linkedStartLine: null,
     linkedEndLine: null,
     linkedDiffSha: null,
     blockedReason: null,
     skipReason: null,
+    verificationCommand: null,
     createdAt: NOW,
     startedAt: status === "pending" ? null : NOW,
     completedAt: status === "done" ? NOW : null,
@@ -122,6 +128,20 @@ describe("StageTimeline", () => {
     for (const trigger of triggers) {
       expect(trigger).toHaveAttribute("aria-expanded", "true");
     }
+  });
+
+  it("renders a triage badge on each task row (PRD 0020 / T1)", () => {
+    const data = makeData("draft", null, [
+      makeTask(1, "pending", "ready-for-agent"),
+      makeTask(2, "pending", "needs-info"),
+    ]);
+    const cards = buildStageCards(data);
+
+    render(<StageTimeline cards={cards} expandAll />);
+
+    // Both triage states surface as their own badge text on the task rows.
+    expect(screen.getByText("ready-for-agent")).toBeInTheDocument();
+    expect(screen.getByText("needs-info")).toBeInTheDocument();
   });
 
   it("in_progress + 3 phases + expandAll=false: 'Future phases' section present, only the current phase card is expanded", () => {

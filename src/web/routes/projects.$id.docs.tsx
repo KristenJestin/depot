@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import * as React from "react";
 
 import { PageContent, PageShell, PageTopBar } from "#/web/components/page-shell";
 import {
@@ -10,12 +11,15 @@ import {
   BreadcrumbSeparator,
 } from "#/web/components/ui/breadcrumb";
 import { Badge } from "#/web/components/ui/badge";
+import { Button, buttonVariants } from "#/web/components/ui/button";
 import { EmptyState } from "#/web/components/ui/empty-state";
+import { cn } from "#/web/lib/utils";
 
 type Artifact = {
   id: string;
   kind: string;
   path: string;
+  absPath: string | null;
   number: number | null;
   title: string;
   status: string | null;
@@ -45,6 +49,29 @@ type SyncRun = {
   filesChanged: string;
 };
 
+/**
+ * Fallback editor URL scheme when no `defaultEditor` config is set. Resolves to
+ * VS Code's `vscode://file/<abs-path>` handler, which Cursor and other VS Code
+ * forks also register.
+ */
+const DEFAULT_EDITOR_SCHEME = "vscode://file/";
+
+/**
+ * Build the editor deep-link for a resolved absolute path. `defaultEditor` is a
+ * URL-scheme prefix (e.g. `vscode://file/` or `cursor://file/`); the absolute
+ * path is appended verbatim. Returns null when the path could not be resolved
+ * (e.g. the workspace is unknown), so callers can hide the action.
+ */
+export function buildEditorUrl(
+  absPath: string | null,
+  defaultEditor: string | null,
+): string | null {
+  if (!absPath) return null;
+  const scheme =
+    defaultEditor && defaultEditor.trim().length > 0 ? defaultEditor : DEFAULT_EDITOR_SCHEME;
+  return `${scheme}${absPath}`;
+}
+
 export const Route = createFileRoute("/projects/$id/docs")({
   component: DocsRoute,
 });
@@ -60,6 +87,7 @@ function DocsRoute() {
         artifacts: Artifact[];
         profiles: DocProfile[];
         lastRunsByProfile: Record<string, SyncRun[]>;
+        defaultEditor: string | null;
       };
     },
   });
@@ -69,6 +97,7 @@ function DocsRoute() {
   const contexts = data?.artifacts.filter((a) => a.kind === "context") ?? [];
   const glossaries = data?.artifacts.filter((a) => a.kind === "glossary") ?? [];
   const freeforms = data?.artifacts.filter((a) => a.kind === "freeform") ?? [];
+  const defaultEditor = data?.defaultEditor ?? null;
 
   return (
     <PageShell>
@@ -103,7 +132,11 @@ function DocsRoute() {
             <ArtifactSection title="Architecture Decision Records (ADR)" items={adrs} />
             <ArtifactSection title="CONTEXT" items={contexts} />
             <ArtifactSection title="Glossary" items={glossaries} />
-            <ArtifactSection title="Freeform docs" items={freeforms} />
+            <ArtifactSection
+              title="Freeform docs"
+              items={freeforms}
+              defaultEditor={defaultEditor}
+            />
 
             <section>
               <h2 className="mb-3 text-sm font-semibold">Doc profiles</h2>
@@ -147,7 +180,15 @@ function DocsRoute() {
   );
 }
 
-function ArtifactSection({ title, items }: { title: string; items: Artifact[] }) {
+function ArtifactSection({
+  title,
+  items,
+  defaultEditor = null,
+}: {
+  title: string;
+  items: Artifact[];
+  defaultEditor?: string | null;
+}) {
   if (items.length === 0) return null;
   return (
     <section>
@@ -188,10 +229,68 @@ function ArtifactSection({ title, items }: { title: string; items: Artifact[] })
                 </Link>
               </p>
             )}
+            {a.kind === "freeform" && (
+              <FreeformDocActions artifact={a} defaultEditor={defaultEditor} />
+            )}
           </li>
         ))}
       </ul>
     </section>
+  );
+}
+
+/**
+ * Open-in-editor + copy-path actions for a freeform doc row (PRD 0021 / T4).
+ *
+ * "Open in editor" is a real anchor pointing at the configured editor's
+ * `<scheme><abs-path>` URL (default `vscode://file/`), so the browser hands the
+ * file off to the desktop editor. "Copy path" writes the resolved absolute path
+ * to the clipboard. Both are hidden when the absolute path could not be
+ * resolved (e.g. the workspace folder is gone).
+ */
+export function FreeformDocActions({
+  artifact,
+  defaultEditor = null,
+}: {
+  artifact: Pick<Artifact, "absPath">;
+  defaultEditor?: string | null;
+}) {
+  const [copied, setCopied] = React.useState(false);
+  const absPath = artifact.absPath;
+  const editorUrl = buildEditorUrl(absPath, defaultEditor);
+
+  const onCopy = React.useCallback(() => {
+    if (!absPath) return;
+    void navigator.clipboard
+      .writeText(absPath)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
+      })
+      .catch(() => setCopied(false));
+  }, [absPath]);
+
+  if (!absPath || !editorUrl) {
+    return (
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        File path could not be resolved (no workspace on disk).
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <a
+        href={editorUrl}
+        title={`Open ${absPath} in editor`}
+        className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+      >
+        Open in editor
+      </a>
+      <Button variant="ghost" size="sm" onClick={onCopy} title={absPath}>
+        {copied ? "Copied!" : "Copy path"}
+      </Button>
+    </div>
   );
 }
 

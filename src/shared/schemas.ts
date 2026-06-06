@@ -2,7 +2,10 @@ import { Schema } from "effect";
 import {
   VALID_EFFORTS,
   VALID_EVENT_TYPES,
+  VALID_PRD_PRIORITIES,
   VALID_TASK_KINDS,
+  VALID_TRIAGE_STATES,
+  VALID_ANNEX_KINDS,
   type EventType,
 } from "#/shared/validator";
 
@@ -175,6 +178,7 @@ export function parseJsonLike(val: string): Record<string, unknown> {
 // Single source of truth: enum values come from validator.ts constants.
 export const effortSchema = Schema.Literal(...VALID_EFFORTS);
 export const taskKindSchema = Schema.Literal(...VALID_TASK_KINDS);
+export const triageStateSchema = Schema.Literal(...VALID_TRIAGE_STATES);
 export const eventTypeSchema = Schema.Literal(...VALID_EVENT_TYPES);
 
 // ── Activity payload schemas ──────────────────────────────────────────────────
@@ -263,6 +267,16 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     newPrdRevisionId: Schema.String,
     revision: Schema.Number,
   }),
+  prd_milestone_set: Schema.Struct({
+    prdId: Schema.String,
+    previousVersion: Schema.NullOr(Schema.String),
+    newVersion: Schema.String,
+  }),
+  prd_milestone_unset: Schema.Struct({
+    prdId: Schema.String,
+    previousVersion: Schema.NullOr(Schema.String),
+    newVersion: Schema.Null,
+  }),
   review_created: Schema.Struct({
     reviewId: Schema.String,
     prdRevisionId: Schema.optional(Schema.String),
@@ -301,6 +315,13 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     sha: Schema.optional(Schema.String),
     userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
   }),
+  prd_phase_initialized: Schema.Struct({
+    prdRevisionId: Schema.String,
+    fromPhase: Schema.NullOr(Schema.Number),
+    toPhase: Schema.Number,
+    derivedFromTasks: Schema.Boolean,
+    userConfirmation: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
   coder_progress: Schema.Struct({
     stage: Schema.Literal("start", "edit", "verify", "tool", "note", "error"),
     message: Schema.String,
@@ -332,7 +353,19 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
   directive_added: Schema.Struct({ directiveId: Schema.String, title: Schema.String }),
   directive_updated: Schema.Struct({
     directiveId: Schema.String,
-    fields: Schema.Array(Schema.String),
+    /**
+     * Per-field diff captured at update time (PRD 0017 / T5). Keys are the
+     * patched field names; values record the previous and new value so the
+     * activity feed can render meaningful entries instead of a bare list of
+     * field names.
+     */
+    changes: Schema.Record({
+      key: Schema.String,
+      value: Schema.Struct({
+        from: Schema.Unknown,
+        to: Schema.Unknown,
+      }),
+    }),
   }),
   directive_removed: Schema.Struct({ directiveId: Schema.String }),
   directive_run: Schema.Struct({
@@ -397,5 +430,181 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     prdRevisionId: Schema.optional(Schema.String),
     ok: Schema.Boolean,
     failingDirectiveId: Schema.optional(Schema.String),
+  }),
+  prd_tag_added: Schema.Struct({
+    prdId: Schema.String,
+    tag: Schema.String,
+  }),
+  prd_tag_removed: Schema.Struct({
+    prdId: Schema.String,
+    tag: Schema.String,
+  }),
+  prd_depend_added: Schema.Struct({
+    prdId: Schema.String,
+    dependsOnPrdId: Schema.String,
+  }),
+  prd_depend_removed: Schema.Struct({
+    prdId: Schema.String,
+    dependsOnPrdId: Schema.String,
+  }),
+  prd_priority_changed: Schema.Struct({
+    prdId: Schema.String,
+    previousPriority: Schema.Literal(...VALID_PRD_PRIORITIES),
+    newPriority: Schema.Literal(...VALID_PRD_PRIORITIES),
+  }),
+  // PRD 0024: annex add/remove on a PRD revision. Not a lifecycle transition,
+  // so no `--user-confirmed` quote — the payload carries enough to render the
+  // activity feed without re-reading the annex row.
+  prd_annex_added: Schema.Struct({
+    annexId: Schema.String,
+    name: Schema.String,
+    kind: Schema.Literal(...VALID_ANNEX_KINDS),
+  }),
+  prd_annex_removed: Schema.Struct({
+    annexId: Schema.String,
+    name: Schema.String,
+    kind: Schema.Literal(...VALID_ANNEX_KINDS),
+  }),
+  // PRD 0018: emitted by `verifyTask` on every verify attempt — success or
+  // failure. `verificationExitCode/Stdout/Stderr` are present when the task
+  // carried a `verificationCommand`; they are omitted for an ack-only verify.
+  task_verified_human: Schema.Struct({
+    taskId: Schema.String,
+    userConfirmation: Schema.NullOr(Schema.String),
+    verificationExitCode: Schema.optional(Schema.Number),
+    verificationStdout: Schema.optional(Schema.String),
+    verificationStderr: Schema.optional(Schema.String),
+  }),
+  prototype_created: Schema.Struct({
+    prototypeId: Schema.String,
+    prdRevisionId: Schema.String,
+    slug: Schema.String,
+  }),
+  prototype_archived: Schema.Struct({
+    prototypeId: Schema.String,
+  }),
+  prototype_page_added: Schema.Struct({
+    prototypeId: Schema.String,
+    pageId: Schema.String,
+    slug: Schema.String,
+    title: Schema.String,
+  }),
+  prototype_page_removed: Schema.Struct({
+    prototypeId: Schema.String,
+    pageId: Schema.String,
+    slug: Schema.String,
+  }),
+  prototype_version_added: Schema.Struct({
+    pageId: Schema.String,
+    versionId: Schema.String,
+    label: Schema.String,
+  }),
+  prototype_version_archived: Schema.Struct({
+    pageId: Schema.String,
+    versionId: Schema.String,
+    label: Schema.String,
+  }),
+  prototype_version_restored: Schema.Struct({
+    pageId: Schema.String,
+    versionId: Schema.String,
+    label: Schema.String,
+  }),
+  prototype_variant_added: Schema.Struct({
+    pageVersionId: Schema.String,
+    variantId: Schema.String,
+    label: Schema.String,
+    isMain: Schema.Boolean,
+  }),
+  prototype_variant_removed: Schema.Struct({
+    pageVersionId: Schema.String,
+    variantId: Schema.String,
+    label: Schema.String,
+  }),
+  prototype_variant_main_changed: Schema.Struct({
+    pageVersionId: Schema.String,
+    previousMainVariantId: Schema.NullOr(Schema.String),
+    newMainVariantId: Schema.String,
+  }),
+  prototype_variant_elected: Schema.Struct({
+    pageId: Schema.String,
+    variantId: Schema.String,
+    rationale: Schema.String,
+    decidedBy: Schema.NullOr(Schema.String),
+  }),
+  prototype_variant_unelected: Schema.Struct({
+    pageId: Schema.String,
+  }),
+  // PRD 0029: round lifecycle on a prototype. Logging is emitted at the CLI
+  // layer (the domain stays log-free); the schemas live here so the event-type
+  // Record stays exhaustive and the payload contract is fixed up front.
+  prototype_round_created: Schema.Struct({
+    prototypeId: Schema.String,
+    roundId: Schema.String,
+    label: Schema.String,
+    fromRoundId: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  prototype_round_page_pinned: Schema.Struct({
+    roundId: Schema.String,
+    pageId: Schema.String,
+    pageVersionId: Schema.String,
+  }),
+  prototype_round_page_dropped: Schema.Struct({
+    roundId: Schema.String,
+    pageId: Schema.String,
+  }),
+  prd_design_distilled: Schema.Struct({
+    prdRevisionId: Schema.String,
+    length: Schema.Number,
+  }),
+  prototype_page_placement_distilled: Schema.Struct({
+    roundId: Schema.String,
+    pageId: Schema.String,
+    slug: Schema.String,
+    length: Schema.Number,
+  }),
+  prototype_feedback_added: Schema.Struct({
+    feedbackId: Schema.String,
+    variantId: Schema.String,
+    hasPin: Schema.Boolean,
+  }),
+  prototype_feedback_resolved: Schema.Struct({
+    feedbackId: Schema.String,
+    variantId: Schema.String,
+    viaVariantId: Schema.optional(Schema.NullOr(Schema.String)),
+    hasNote: Schema.Boolean,
+  }),
+  prototype_feedback_ignored: Schema.Struct({
+    feedbackId: Schema.String,
+    variantId: Schema.String,
+    reason: Schema.String,
+  }),
+  prototype_feedback_deleted: Schema.Struct({
+    feedbackId: Schema.String,
+    variantId: Schema.String,
+    hasPin: Schema.Boolean,
+  }),
+  // PRD 0027: idea capture lifecycle. Logging is emitted at the CLI layer (the
+  // domain stays log-free, on the prototype model); the schemas live here so
+  // the event-type Record stays exhaustive and the contract is fixed up front.
+  idea_created: Schema.Struct({
+    ideaId: Schema.String,
+    title: Schema.String,
+    tag: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  idea_updated: Schema.Struct({
+    ideaId: Schema.String,
+    title: Schema.String,
+    fields: Schema.Array(Schema.String),
+  }),
+  idea_promoted: Schema.Struct({
+    ideaId: Schema.String,
+    promotedPrdId: Schema.String,
+  }),
+  idea_dropped: Schema.Struct({
+    ideaId: Schema.String,
+    reason: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  idea_reopened: Schema.Struct({
+    ideaId: Schema.String,
   }),
 };

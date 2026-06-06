@@ -1,44 +1,26 @@
 import { describe, it } from "vite-plus/test";
-import { mkdir, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import path from "node:path";
 import { e2eScenario } from "../runtime";
-import { getRepoRoot } from "../runtime";
 
 /**
- * PRD 0016 / T2 — `depot serve` + HTTP probes.
+ * PRD 0016 / T2 + PRD 0017 / T3 — `depot serve` + HTTP probes.
  *
- * Spawn `depot serve --port <port>` in the background via the runtime's new
- * `agent.spawn` helper, wait for the TCP port, then exercise two endpoints
+ * Spawn `depot serve --port <port>` in the background via the runtime's
+ * `agent.spawn` helper, wait for the TCP port, then exercise three endpoints
  * through real `fetch` calls: `GET /api/projects` (must list the project we
- * just created) and `POST /api/projects/:id/directives` (must accept a
- * valid payload and persist it). The child is auto-killed by the scenario's
- * cleanup hook on body exit, success or throw.
+ * just created), `POST /api/projects/:id/directives` (must accept a valid
+ * payload and persist it), and `GET /` (must return the API-only message
+ * since the E2E pipeline does not build the web bundle). The child is
+ * auto-killed by the scenario's cleanup hook on body exit, success or throw.
  *
- * `depot serve` aborts at startup if `dist/web/` is missing (it expects the
- * web UI bundle alongside the CLI binary). The repo's build pipeline only
- * produces `dist/web/` when `vp build` runs, which the E2E pipeline does
- * not invoke. We therefore materialize a minimal placeholder
- * `dist/web/index.html` once per process if absent — enough to satisfy the
- * `fs.access` probe, without affecting the API surface we test.
+ * PRD 0017 / T3 made `depot serve` degrade gracefully when `dist/web/` is
+ * absent: it logs a warning on stderr and starts in API-only mode instead of
+ * aborting. The stub workaround that previously materialised a placeholder
+ * `dist/web/index.html` is no longer needed.
  */
 
 type CreatedProject = { id: string; name: string };
 type ListProjects = { items: ReadonlyArray<CreatedProject> };
 type CreatedDirective = { item: { id: string } };
-
-async function ensureDistWebStub(): Promise<void> {
-  const distWebDir = path.join(getRepoRoot(), "dist", "web");
-  if (existsSync(path.join(distWebDir, "index.html"))) {
-    return;
-  }
-  await mkdir(distWebDir, { recursive: true });
-  await writeFile(
-    path.join(distWebDir, "index.html"),
-    "<!doctype html><title>depot e2e stub</title>",
-    "utf-8",
-  );
-}
 
 function pickHighPort(): number {
   // 47000–47999 is a deliberately high range used by no IANA service. Tests
@@ -48,9 +30,8 @@ function pickHighPort(): number {
   return 47000 + Math.floor(Math.random() * 1000);
 }
 
-describe("e2e: depot serve + HTTP probes (PRD 0016 / T2)", () => {
-  it("spawns serve, probes /api/projects + POST /directives, then kills the child", async () => {
-    await ensureDistWebStub();
+describe("e2e: depot serve + HTTP probes (PRD 0016 / T2, PRD 0017 / T3)", () => {
+  it("spawns serve, probes /api/projects + POST /directives + / (API-only), then kills the child", async () => {
     await e2eScenario(async (ctx) => {
       const repo = await ctx.git.initRepo("serve-app");
       await ctx.agent.run("depot init serve-app", { cwd: repo });
@@ -114,6 +95,27 @@ describe("e2e: depot serve + HTTP probes (PRD 0016 / T2)", () => {
         project_id: project.id,
         title: "Serve probe rule",
       });
+
+      // PRD 0017 / T3: without `dist/web/`, `/` must return the API-only
+      // explanatory text (HTTP 200, text/plain) rather than crashing the
+      // server at startup.
+      const rootRes = await fetch(`http://127.0.0.1:${port}/`);
+      if (rootRes.status !== 200) {
+        throw new Error(
+          `GET /: expected status 200 (API-only mode), got ${rootRes.status} — body: ${await rootRes.text()}`,
+        );
+      }
+      // `/` serves the SPA shell when the web bundle (dist/web) is present, or a
+      // plain "API-only mode" notice otherwise — both are valid HTTP 200
+      // responses. Assert the server answered `/` in either mode rather than
+      // pinning to one (the bundle's presence depends on whether `vp build` ran).
+      const rootBody = await rootRes.text();
+      const servesShell = /<!doctype html/i.test(rootBody);
+      if (!servesShell && !rootBody.includes("API-only mode")) {
+        throw new Error(
+          `GET /: expected the SPA shell or the API-only notice, got: ${rootBody.slice(0, 200)}`,
+        );
+      }
 
       handle.kill();
     }, "serve http probes");

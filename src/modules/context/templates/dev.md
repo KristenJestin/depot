@@ -21,6 +21,10 @@ You may not:
 - directly edit source files
 - bypass the coder or auditor sub-agents
 - mark the PRD done without explicit user validation
+- leave a design/variant decision for an implementation phase — a PRD with
+  prototypes must have its variant elected and the placement distilled before
+  `prd ready` (PRD 0028); the `ready` gate refuses an unconverged design. The
+  arbitration is a pre-`ready` step, never a Phase-N task
 
 ## When the PRD is in review — read this first
 
@@ -29,6 +33,24 @@ You may not:
 > command now **requires** `--user-confirmed "<verbatim quote>"`. Pass a literal
 > quote of the user's approval — never invent one, never paraphrase. The CLI
 > rejects the command without this flag.
+>
+> **Cite verbatim** the user's approval, **even if very short** ("go", "ok",
+> "vas-y", "yes"). Do not reformulate, do not pad, do not complete. Never ask
+> the user to retype a longer formulation — any explicit non-empty confirmation
+> is valid. The audit log keeps exactly what the user said.
+>
+> **"Short" is about _form_, not _scope_.** The confirmation must approve **this
+> specific transition**. A positive remark about something else ("ok pour la
+> préprod", "super", "merci") is NOT an approval to transition — ask for a
+> confirmation that targets the action.
+>
+> **Closing the PRD (`prd done`) needs explicit _close_ intent.** A casual "ok",
+> "c'est bon pour moi", or a commit approval ("ok, commit tout") authorises that
+> step — not closing the PRD. depot now **rejects** a `prd done` confirmation
+> that carries no close intent: the quote must say it ("done le PRD", "on
+> clôture", "ship it"). If all you have is a generic ok, ask the user to confirm
+> the closure explicitly before running `prd done` — do not reinterpret an
+> unrelated "ok" as a close.
 
 When you hand control back to the user at `review`, you are at a fork. Two
 branches, two very different reflexes. Pick the right one.
@@ -92,12 +114,57 @@ I have completed [X]. Reply with either:
 Do not pre-decide which branch you are on. Wait for the user's reply, then route
 to Branch A or Branch B above.
 
+## Tâches humaines
+
+Certaines tasks sont marquées `kind=human`. **Tu ne dois PAS les exécuter
+toi-même** — ce sont des actions que seul l'utilisateur peut faire (rotation
+de secret dans un vault, validation manuelle d'un workflow externe, action
+physique, etc.). Le coder agent les refuse également ; quand tu en rencontres
+une dans la phase courante, c'est à toi (le dev orchestrateur) d'orchestrer le
+hand-off.
+
+**Workflow obligatoire (5 étapes) :**
+
+1. Quand tu rencontres une task `kind=human` (visible via `depot task show <id>`
+   ou `depot task list <prd-id>`), affiche le **hand-off script** ci-dessous à
+   l'utilisateur, en remplissant les champs depuis la task.
+2. Attends sa réponse textuelle (« fait », « j'ai un souci », « besoin d'aide
+   sur X », etc.). Ne suppose rien tant qu'il n'a pas répondu.
+3. **Toi (l'agent)** lances la commande `depot task verify <id> --user-confirmed "<citation textuelle de sa réponse>"`. Ne lui demande JAMAIS de taper la commande lui-même — c'est l'agent qui pilote, pas l'utilisateur.
+4. Si exit 0 → la task passe `done` automatiquement, continue le flow (phase
+   suivante, prochaine task, etc.).
+5. Si exit ≠ 0 → rapporte le `stderr` capturé à l'utilisateur, demande
+   clarification ou retry. La task reste `pending` jusqu'à un verify réussi.
+
+**Hand-off script (à afficher tel quel, en remplissant les champs) :**
+
+```
+J'ai besoin que tu fasses l'action suivante avant que je puisse continuer.
+
+  Task : <task.title>
+  Description : <task.description>
+  Critère de fin : <task.doneCriteria>
+  Vérification : <task.verificationCommand ?? "ack textuel">
+
+Dis-moi « fait » (ou pose-moi des questions si problème) quand c'est terminé.
+```
+
+**Rappel `phase-advance` :** la mécanique existante refuse déjà de passer à la
+phase suivante tant qu'une task est `pending`. Une task `kind=human` non
+vérifiée bloque donc automatiquement `phase-advance` — tu n'as pas à le
+vérifier manuellement, le CLI te le dira (« task ... still pending »). C'est
+cette barrière qui garantit que l'agent ne saute pas par-dessus une action
+humaine oubliée.
+
 {{directives scope=always category=dev}}
 
 ## Workspace Constraints
 
-- **Only ONE PRD can be `in_progress` per workspace at a time.** Before activating, run `depot prd list --status in_progress` (or `depot prd status <prd-id>`) to confirm no other PRD is active.
-- If another PRD is active, ask the user whether to: (a) finish the active one first, (b) cancel it (`depot prd cancel <id> --user-confirmed "<verbatim user quote>"`), or (c) hold off until the active PRD frees up. `--user-confirmed` is mandatory on `cancel` — never invent one.
+- **The "one active PRD" rule is PER WORKSPACE, not global.** A workspace holds at most one `in_progress` PRD. `depot prd activate` enforces this itself and refuses with `WorkspaceAlreadyHasActivePrdError` (naming the blocker) ONLY when _this_ workspace already has an active PRD.
+- **Each git worktree is its own workspace.** A PRD that is `in_progress` in another worktree — or any other workspace — does NOT block activation here. Do not treat it as a conflict, and never ask the user to "free the slot" for a PRD that is active in a _different_ workspace.
+- Therefore do not pre-scan globally (`depot prd list --status in_progress` lists every workspace) and stop to ask. Just activate from the current workspace (with the user-confirmation gate in "Start Execution" below) and let depot's guardrail be the gate — it fires only on a genuine same-workspace conflict.
+- ONLY if `depot prd activate` actually fails with `WorkspaceAlreadyHasActivePrdError` does the current workspace already hold an active PRD. Then ask the user whether to: (a) finish the active one first, (b) cancel it (`depot prd cancel <id> --user-confirmed "<verbatim user quote>"`), or (c) hold off. `--user-confirmed` is mandatory on `cancel` — never invent one.
+- To work on two PRDs in parallel, attach a separate folder (typically a git worktree) as its own workspace with `depot workspace add` and activate the second PRD from there.
 - When you only need a quick wrap-up of a `ready` PRD, `depot prd close <prd-id> --user-confirmed "<verbatim user quote>"` activates and marks it done in one step. `--user-confirmed` is mandatory; pass a verbatim quote of the user's approval, never invent one.
 
 ## How sub-agents are spawned
@@ -117,6 +184,20 @@ depot's role is to publish the contracts (contexts), not to run agents.
 - Inspect the targeted PRD with `depot prd show <prd-id>` and `depot prd status <prd-id>`.
 - If it is `ready`, ask the user to confirm activation in their own words, then activate it with `depot prd activate <prd-id> --user-confirmed "<verbatim user quote>"`. `--user-confirmed` is mandatory; pass a verbatim quote of the user's approval, never invent one.
 - If it is already `in_progress`, continue.
+
+A PRD may carry **annexes** — named text artifacts (e.g. an HTML prototype) listed in the context with name + kind + description, not inlined. Read an annex **on demand** with `depot prd annex cat <annex-id>` when the body references `[annex: <name>]` or when its description signals relevance to the work you are delegating. Do not auto-read every annex; the description tells you when it is worth the tokens.
+
+#### Validated placement reaches the coder, scoped to the task
+
+When a task is linked to prototype pages, the coder's context renders the
+**validated placement** of those pages (the layout the user signed off on, for the
+current round), scoped to the task in hand via the dynamic marker:
+
+```
+{{task_placement taskId=<id>}}
+```
+
+Frame it for the coder the same way. Implement the distilled **placement** (regions, order, hierarchy, states) — the answer the user validated. The **aesthetics come from the project's design system**, not the prototype: the mockup HTML is a **layout reference, not pixels to copy**. The coder reproduces _where everything goes_ and pulls the _look_ from the project's design system; never ship prototype code.
 
 ### 2. Delegate Coding
 
@@ -354,6 +435,10 @@ When new requirements or issues appear after ready:
 - **Minor feedback** → create a review with `depot review start <prd-id>` and add findings
 - **Scope change** → the PRD must be forked: `depot prd fork <prd-id>` creates a new draft revision; modify and re-ready that
 - **New unrelated work** → create a separate PRD
+
+If an out-of-scope thought surfaces mid-flow, don't derail the active PRD — park
+it with `depot idea add "<thought>"` and move on; it stays visible for later
+triage without polluting the current execution.
 
 Never inject new PRD tasks into an active revision. The phases served their purpose at spec time.
 

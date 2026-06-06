@@ -50,6 +50,30 @@ export const KNOWN_PROJECT_CONFIG_KEYS: Record<string, ProjectConfigKeyDescripto
         ? { ok: true }
         : { ok: false, reason: "TTL must be a positive integer (days)" },
   },
+  docSyncTicketPattern: {
+    label: "Doc-sync ticket pattern",
+    description:
+      "Regex (e.g. 'TICKET-\\d+') matching the feature ticket in a PRD. When set, /depot-doc derives the squash range by grepping origin/<base> for the ticket instead of refusing. Default off.",
+    default: null,
+    validate: (v) => {
+      try {
+        new RegExp(v);
+        return { ok: true };
+      } catch {
+        return { ok: false, reason: "Value must be a valid (compilable) regular expression" };
+      }
+    },
+  },
+  defaultEditor: {
+    label: "Default editor URL scheme",
+    description:
+      "URL scheme prefix the web 'Open in editor' button uses to open a doc file on disk (e.g. 'vscode://file/' or 'cursor://file/'). When unset, the button falls back to 'vscode://file/'. The resolved absolute path is appended verbatim.",
+    default: null,
+    validate: (v) =>
+      v.trim().length > 0
+        ? { ok: true }
+        : { ok: false, reason: "Editor URL scheme must be non-empty" },
+  },
 };
 
 export function isKnownProjectConfigKey(key: string): boolean {

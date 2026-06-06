@@ -120,3 +120,65 @@ export const resolveWorktreeForBranch = (
     const match = entries.slice(1).find((entry) => entry.branch === branch);
     return match ? match.path : null;
   });
+
+/**
+ * Best-effort `git fetch origin <base>` in `repoPath`. Returns `true` on
+ * success, `false` on any failure (no remote, offline, git missing). Never
+ * throws: doc-sync ticket-grep tolerates a stale base rather than blocking on a
+ * network hiccup (PRD 0023 / Q3).
+ */
+export const fetchBase = (repoPath: string, base: string): Effect.Effect<boolean, never> =>
+  Effect.tryPromise({
+    try: async () => {
+      await execFileAsync("git", ["-C", repoPath, "fetch", "origin", base, "--quiet"]);
+      return true;
+    },
+    catch: () => false,
+  }).pipe(Effect.catchAll(() => Effect.succeed(false)));
+
+/**
+ * Grep a base branch's history for commits whose message contains `ticket`,
+ * returning the matching commit SHAs (newest first). Used by doc-sync's
+ * ticket-grep strategy to locate the feature's squash commit on the base
+ * branch (PRD 0023 / T2).
+ *
+ * The remote-tracking ref `origin/<base>` is preferred (it reflects the just-
+ * fetched server state). When it does not exist — fetch failed, no remote, or a
+ * fresh local-only base — the local `<base>` branch is grepped instead, so the
+ * strategy still works offline and in test fixtures. `--fixed-strings` keeps the
+ * ticket (e.g. `TICKET-1234`) a literal, not a regex. Returns an empty array on any
+ * git error or when nothing matches; never throws.
+ */
+export const grepBaseForTicket = (
+  repoPath: string,
+  base: string,
+  ticket: string,
+): Effect.Effect<string[], never> =>
+  Effect.tryPromise({
+    try: async () => {
+      const refExists = async (ref: string): Promise<boolean> => {
+        try {
+          await execFileAsync("git", ["-C", repoPath, "rev-parse", "--verify", "--quiet", ref]);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const remoteRef = `origin/${base}`;
+      const ref = (await refExists(remoteRef)) ? remoteRef : base;
+      const { stdout } = await execFileAsync("git", [
+        "-C",
+        repoPath,
+        "log",
+        ref,
+        "--fixed-strings",
+        `--grep=${ticket}`,
+        "--format=%H",
+      ]);
+      return stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    },
+    catch: () => [] as string[],
+  }).pipe(Effect.catchAll(() => Effect.succeed([] as string[])));

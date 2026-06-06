@@ -54,9 +54,9 @@
   --destructive-foreground: oklch(0.98 0 0);
   --destructive-soft: oklch(0.95 0.03 24);
 
-  --info: var(--primary);
-  --info-foreground: var(--primary-foreground);
-  --info-soft: var(--primary-soft);
+  --info: oklch(0.58 0.18 240);
+  --info-foreground: oklch(0.99 0 0);
+  --info-soft: oklch(0.95 0.04 240);
 
   --status-draft: oklch(0.6 0.01 286);
   --status-draft-foreground: oklch(0.42 0.012 286);
@@ -158,6 +158,10 @@
   --severity-major-soft: oklch(0.28 0.03 18);
   --severity-minor: oklch(0.72 0.01 260);
   --severity-minor-soft: oklch(0.22 0.004 260);
+
+  --info: oklch(0.7 0.16 240);
+  --info-foreground: oklch(0.99 0 0);
+  --info-soft: oklch(0.28 0.05 240);
 
   --timeline-line: oklch(0.28 0.006 260);
   --timeline-dot: oklch(0.88 0.004 260);

@@ -20,6 +20,15 @@ You may not:
 
 {{directives scope=always category=coder}}
 
+## Tâches humaines — STOP
+
+Si tu rencontres une task `kind=human` parmi tes tasks, **stop**. Cette task
+n'est pas de ton ressort — elle décrit une action que seul l'utilisateur peut
+réaliser (rotation de secret, validation manuelle, etc.). N'essaie pas de
+l'exécuter, ne la marque pas `done`, ne la `skip` pas. Remonte au dev
+orchestrateur, qui orchestrera le hand-off à l'utilisateur via
+`depot task verify`. Continue avec les autres tasks indépendantes si possible.
+
 ## Session Start
 
 Load live workflow state before starting:
@@ -37,6 +46,29 @@ depot review show <review-id> --json       # Full review (metadata + findings)
 depot review task list <review-id>         # Just the finding tasks
 depot review task list <review-id> --json
 ```
+
+A PRD may carry **annexes** — named text artifacts (e.g. an HTML prototype) listed in the context with name + kind + description, not inlined. Read an annex **on demand** with `depot prd annex cat <annex-id>` when the body references `[annex: <name>]` or when its description signals relevance to the task you are implementing. Do not auto-read every annex; let the body reference and the description tell you when it is worth loading.
+
+## Validated placement (the layout you implement)
+
+When a task is linked to one or more prototype pages, the **validated placement**
+of those pages — the layout the user signed off on, for the current round — is
+rendered below, scoped to the task in hand. Each page block carries the distilled
+markdown (Regions / Order / Hierarchy / States / Interactions). A page shown as
+"not distilled yet" has no placement for the current round; if it is in scope,
+flag it rather than inventing a layout.
+
+```
+{{task_placement taskId=<id>}}
+```
+
+**Placement, not aesthetics.** Implement the distilled **placement** (regions,
+order, hierarchy, states) exactly as written — that is the answer the user
+validated. The **aesthetics come from the project's design system**, not from the
+prototype: the mockup HTML is a **layout reference, not pixels to copy**. Do not
+ship prototype code or lift its colors/spacing/markup — reproduce the _where
+everything goes_, pull the _look_ from the project's design system, and rewrite
+properly against the real codebase.
 
 ## Live Task State
 
