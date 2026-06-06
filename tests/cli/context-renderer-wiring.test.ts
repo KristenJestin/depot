@@ -27,6 +27,8 @@ import type { Database } from "#/db/client";
 import { Db } from "#/services/database";
 import { addWorkspace, createProject } from "#/lib/workflow";
 import { createDirective } from "#/modules/projects/directives";
+import { createIdea, linkIdeaToPrd } from "#/modules/ideas/domain";
+import { createPrd } from "#/modules/prds/domain";
 import { setJsonMode } from "#/shared/logger";
 
 const resolveCurrentWorkspace =
@@ -46,7 +48,7 @@ vi.mock("#/cli/runtime", async (importOriginal) => {
   };
 });
 
-type ContextMode = "prd" | "dev" | "coder" | "auditor" | "doc" | "ship";
+type ContextMode = "prd" | "dev" | "coder" | "auditor" | "doc" | "ship" | "idea";
 
 interface RunContextArgs {
   mode: ContextMode;
@@ -234,6 +236,133 @@ describe("depot context X — template renderer wiring (PRD 0013 / T3)", () => {
       // Stderr: the one-line warning announces the fallback, with the reason.
       expect(stderrText).toContain("Warning: renderer failed, emitting raw template");
       expect(stderrText).toContain("no_workspace");
+    });
+  });
+});
+
+// ── PRD 0027: idea capture context + recall ──────────────────────────────────
+
+describe("depot context — idea capture + recall (PRD 0027 / T5)", () => {
+  let db: Database;
+  let projectId: string;
+
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    setJsonMode(false);
+    ({ db } = createTestDb());
+    currentTestDb = db;
+    const project = await createProject(db, { name: "ideas-ctx" });
+    projectId = project.id;
+    const workspace = await addWorkspace(db, { projectId, path: "/workspace/ideas-ctx" });
+    resolveCurrentWorkspace.mockResolvedValue({ db, ws: workspace });
+    getDb.mockResolvedValue(db);
+  });
+
+  afterEach(() => {
+    setJsonMode(false);
+  });
+
+  const provide = <A, E>(effect: Effect.Effect<A, E, Db>): Promise<A> =>
+    Effect.runPromise(Effect.provideService(effect, Db, db));
+
+  describe("context idea — capture/triage template", () => {
+    it("emits the capture/librarian template (NOT the PRD grilling posture)", async () => {
+      const out = await runContextCommand({ mode: "idea" });
+      expect(out).toContain("=== DEPOT CONTEXT — IDEA ===");
+      expect(out).toContain("# Context: Idea Sub-Agent");
+      expect(out).toContain("You are NOT the PRD agent");
+      expect(out).toContain("depot idea add");
+      expect(out).toContain("depot idea promote");
+      expect(out).toContain("## Current open ideas");
+    });
+
+    it("resolves {{idea_state}} to the open-idea list (no unresolved markers)", async () => {
+      const tagged = await provide(
+        createIdea({ projectId, title: "Plugin marketplace", tag: "plugins" }),
+      );
+      const plain = await provide(createIdea({ projectId, title: "Faster startup" }));
+      const out = await runContextCommand({ mode: "idea" });
+      expect(out).toContain(`${plain.id}  Faster startup`);
+      expect(out).toContain(`${tagged.id}  Plugin marketplace  [plugins]`);
+      // No unresolved markers anywhere outside fenced blocks.
+      const nonFenced = stripFencedBlocks(out);
+      expect(nonFenced).not.toMatch(/\{\{[^}]*\}\}/);
+    });
+
+    it("renders the empty placeholder when no open ideas exist", async () => {
+      const out = await runContextCommand({ mode: "idea" });
+      expect(out).toContain("_No open ideas._");
+      const nonFenced = stripFencedBlocks(out);
+      expect(nonFenced).not.toMatch(/\{\{[^}]*\}\}/);
+    });
+  });
+
+  describe("context prd — recall count + source ideas", () => {
+    it("shows `Ideas   : N open` and the Source ideas section with full bodies", async () => {
+      const prd = await provide(createPrd({ projectId, title: "Plugin system" }));
+      const idea = await provide(
+        createIdea({
+          projectId,
+          title: "Plugin marketplace",
+          body: "We should let third parties publish plugins.",
+        }),
+      );
+      // A second open idea that is NOT linked, to prove the count counts all open.
+      await provide(createIdea({ projectId, title: "Unrelated thought" }));
+      await provide(linkIdeaToPrd(prd.id, idea.id));
+
+      const out = await runContextCommand({ mode: "prd", prdTarget: prd.id });
+      expect(out).toContain("Ideas   : 2 open");
+      expect(out).toContain("## Source ideas");
+      expect(out).toContain("Plugin marketplace");
+      expect(out).toContain("We should let third parties publish plugins.");
+      // Unlinked idea must NOT appear in Source ideas (only linked ideas render).
+      expect(out).not.toContain("Unrelated thought");
+    });
+
+    it("omits the count row entirely when there are zero open ideas", async () => {
+      const prd = await provide(createPrd({ projectId, title: "No ideas PRD" }));
+      const out = await runContextCommand({ mode: "prd", prdTarget: prd.id });
+      expect(out).not.toMatch(/^Ideas\s+: \d+ open$/m);
+    });
+
+    it("renders no Source ideas section when the PRD has no linked ideas", async () => {
+      const prd = await provide(createPrd({ projectId, title: "Unlinked PRD" }));
+      await provide(createIdea({ projectId, title: "Floating idea" }));
+      const out = await runContextCommand({ mode: "prd", prdTarget: prd.id });
+      // The rendered section carries this lead line; the prd.md prose mentions
+      // the `## Source ideas` heading too, so assert on the lead instead.
+      expect(out).not.toContain("The raw, uncommitted needs that motivated this PRD.");
+      // The count row still shows because an open idea exists project-wide.
+      expect(out).toContain("Ideas   : 1 open");
+    });
+  });
+
+  describe("context dev/coder/auditor — ideas must NOT leak", () => {
+    it("dev mode renders neither the count nor source ideas", async () => {
+      const prd = await provide(createPrd({ projectId, title: "Dev PRD" }));
+      const idea = await provide(
+        createIdea({ projectId, title: "Leaky idea", body: "secret body" }),
+      );
+      await provide(linkIdeaToPrd(prd.id, idea.id));
+      const out = await runContextCommand({ mode: "dev", prdTarget: prd.id });
+      expect(out).not.toContain("Ideas   :");
+      expect(out).not.toContain("## Source ideas");
+      expect(out).not.toContain("Leaky idea");
+      expect(out).not.toContain("secret body");
+    });
+
+    it("auditor mode renders neither the count nor source ideas", async () => {
+      const prd = await provide(createPrd({ projectId, title: "Audit PRD" }));
+      const idea = await provide(
+        createIdea({ projectId, title: "Leaky idea", body: "secret body" }),
+      );
+      await provide(linkIdeaToPrd(prd.id, idea.id));
+      const out = await runContextCommand({ mode: "auditor", prdTarget: prd.id, axis: "spec" });
+      expect(out).not.toContain("Ideas   :");
+      expect(out).not.toContain("## Source ideas");
+      expect(out).not.toContain("Leaky idea");
+      expect(out).not.toContain("secret body");
     });
   });
 });

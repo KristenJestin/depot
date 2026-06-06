@@ -147,6 +147,46 @@ Forking is explicit. `depot prd fork <prd-id>` creates a new `draft` revision fr
 
 The JSON format uses `dependsOn` as zero-based task indexes inside the same document. Only backward references are allowed, so task 4 may depend on task 1, but task 1 may not depend on task 4.
 
+## Ideas
+
+An idea is the lightweight, project-scoped capture point that sits _before_ a PRD.
+
+A PRD is a commitment: creating one — even a `draft` — already means the work is going to be built. An idea is the opposite. It is a thought you want to keep so you don't forget it, that you may never build. Modeling it as a separate entity keeps the invariant that **every PRD row is a commitment to build** intact, instead of polluting `prd list` with drafts that never aim at `ready`.
+
+An idea is deliberately thin: a title, an optional markdown body, and an optional single kebab-case tag for grouping. There is no priority, effort, or assignee — wanting any of those _is_ the signal to promote.
+
+Its lifecycle is a triage machine, not a commitment machine:
+
+- `open`
+- `promoted`
+- `dropped`
+
+The allowed transitions are:
+
+- `open -> promoted` (became a draft PRD; the moment of commitment)
+- `open -> dropped` (decided against or no longer relevant)
+- `dropped -> open` (undo a drop)
+
+`promoted` is terminal. Dropping needs no reason — ideas are _meant_ to die — though one can be recorded.
+
+Key behaviors:
+
+- `depot idea add <title>` captures an idea (the only required field is the title; `--body` / `--body-file -` add a rationale, `--tag` groups it).
+- `depot idea list` shows open ideas newest-first with their age, and prints an open-count footer so parked thoughts resurface.
+- `depot idea show`, `depot idea edit`, `depot idea drop`, and `depot idea reopen` round out triage.
+- `depot idea promote <id>` is the single bridge into the committed world. It mints a `draft` PRD seeded from the idea (title plus body as context, carrying the idea's tag), flips the idea to `promoted`, and records `promotedPrdId`.
+
+### Two relations between ideas and PRDs
+
+Ideas and PRDs are connected by two distinct, non-collapsible relations:
+
+- `idea.promotedPrdId` answers _"which PRD did this idea become?"_ It is idea-centric, set once by `promote`, and at most one per idea.
+- the `prd_ideas` join answers _"which ideas motivated this PRD?"_ It is PRD-centric source material, an M:N relation attached to the **logical** PRD (like tags and dependencies) so it survives forks. Referencing an idea does **not** change its status: a parked `open` idea can inform a PRD without being consumed.
+
+`promote` does both at once — it marks the idea `promoted` and inserts a `prd_ideas` row so the new PRD lists its originating idea.
+
+`depot prd idea add`, `depot prd idea remove`, and `depot prd idea list` manage the reference join directly. `depot context prd` surfaces linked source ideas inline (title plus full body) so the PRD agent reads the raw, uncommitted need before framing, and it shows an open-idea recall count. The `dev`, `coder`, and `auditor` contexts deliberately do not render ideas.
+
 ## Tasks
 
 Tasks belong to a PRD and represent concrete execution units.
@@ -225,6 +265,180 @@ Important behaviors:
 
 The schema also includes a `userFeedback` field for human context, but the CLI does not yet expose a direct write path for it.
 
+## Prototypes And The Design Lock
+
+A PRD revision can carry **prototypes** — iterative UI exploration in the
+hierarchy `Prototype → Page → Version → Variant`. Variants are deliberately
+divergent ("radically different" layouts); each `(page, version)` flags one
+`is_main` as a _within-tree primacy hint_ (what the viewer shows by default).
+
+`is_main` is a hint, not a decision. The **decision** is a separate, first-class
+concept introduced by the design lock, and it is scoped to a `(round, page)` (see
+_The round is the unit_ below):
+
+- **Election** — `depot prd prototype variant elect <variantId> --rationale "…"`
+  records, per `(round, page)`, the single variant chosen for implementation,
+  together with the arbitration (`rationale` / `decidedBy` / `decidedAt`).
+  Distinct from `is_main`; cleared automatically if the elected variant is
+  removed. Election is the **user's** decision; the agent only recommends.
+- **Distillation** — `depot prd prototype distill <pageId> [--round …] --spec "…"`
+  writes that page's **placement spec** ("where everything goes, in what order")
+  into a `prd_round_page_design` row for the `(round, page)`. This is the contract
+  the dev/coder agent reads — never the raw mockup.
+
+These converge the exploration before the PRD enters the commitment lifecycle.
+`depot prd ready` runs a **design-lock gate**: when the revision has prototypes,
+it refuses while any page decided in the current round still lacks a placement.
+The gate is soft and shuntable with `--skip-design-lock`, mirroring the
+`prd done` ship-readiness gate at the other end of the lifecycle. The intent is
+that **the variant arbitration and the placement happen before `ready`, never as
+a task left for an implementation phase**.
+
+### Versions vs. Rounds
+
+Two axes hide behind the word "version", and `depot` separates them:
+
+- A **version** is an iteration of **one page**. Each page has its own unbounded
+  timeline ("v1", "v2", "v3-feedback-round-1"); a version is never re-created for
+  a page that did not change.
+- A **round** is a round of the **whole design** — the user's "v1"/"v2". It is
+  a named **manifest** that pins exactly one existing version per page it
+  includes. A round is a horizontal cut across the per-page timelines: home can
+  be on its 3rd iteration while settings is still on its 1st, and the round
+  records which iteration of each ships together.
+
+Keeping the words straight matters: when someone says "v1 / v2" they mean a
+round, not a page version. The labels "v1"/"v2" belong to rounds.
+
+### The round is the unit
+
+The **round is the unit** the user sees and iterates — never the page version.
+A round is the whole design at one instant: the group of pages validated
+together. The user navigates rounds (`v1 / v2 / v3…`) and reasons about the
+design as a group; the per-page **version is a hidden mechanism**, present only
+so unchanged pages can carry forward between rounds.
+
+**Feedback ⇒ a new round.** Any feedback — on one page or several — opens a new
+round rather than mutating the one on screen. Changed pages take a new version;
+unchanged pages are **reused as-is by pointer**, so a fresh round is cheap: the
+manifest is pins, never copied HTML. Reasoning "about the whole group" is
+therefore free. One round ≈ one feedback / validation pass.
+
+Compositional feedback — "the header from B with the sidebar from C" — is just
+feedback: the agent **synthesises** the requested layout and opens a **new
+round** carrying it. There is no notion of "one variant locked in a block" the
+user has to live with; the **variant** is divergent exploration _within_ a round
+(the user elects one per page, or a single-variant page is **retained by
+default**), and convergence is always expressed as the next round.
+
+This **amends the mutable current round of the rounds model**: where iterating a
+page used to advance the current round's pin in place, a round is now treated as
+a **frozen snapshot** and each feedback pass opens a new one. The data bricks are
+unchanged — a round still clones as pointers and a changed page still takes a new
+version — so the shift is a **workflow convention and agent protocol**
+("feedback ⇒ new round, never mutate the current one"), with the web UI showing
+only rounds.
+
+### Round membership and the dropped page
+
+**Membership is row presence.** A round manifest holds one row per included
+page; a page with no row is **dropped** for that round. Nothing is deleted —
+the page and its full version history remain, the page simply does not ship in
+that round. This is what gives a round the property the model exists for:
+dropping a page from a later round without losing it, and browsing an earlier
+round ("v1 = 10 pages") as a coherent set after moving on ("v2 = 8 pages").
+
+Opening a new round clones the previous round's manifest (the pins, never the
+HTML — no version is duplicated), then adjusts membership: **drop** pages this
+round won't ship, or **include** pages explicitly. There is no `freeze` step;
+**earlier rounds are frozen by construction**, because their pins never change
+once a newer round exists. Each round keeps pointing at its own row of every
+page's timeline. A page that was dropped is not silently re-included by a later
+round; re-inclusion is an explicit act.
+
+The data layer still allows advancing the current round's pin in place, but the
+**convention is feedback ⇒ a new round** (see _The round is the unit_): the
+current round is treated as a frozen snapshot, and a new iteration of a page is
+carried by a new round rather than by mutating the one the user just validated.
+
+### Round-relative resolution
+
+Resolving an inter-page link (`data-depot-page="settings"`) is **round-relative**.
+It resolves against a round — the current one by default — by looking up that
+round's manifest entry for the page and showing the pinned version's elected or
+main variant. A page that is not in the resolved round's manifest yields a
+defined **`dropped` outcome** ("removed in this round"), not an error: the drop
+is an intentional state, not a broken link. (Only a slug that never existed is an
+error.) Because resolution is now round-relative, the manifest pin is what
+decides which iteration is shown — archiving the pinned version no longer falls
+back to an earlier active version.
+
+### Election and placement live on the `(round, page)`
+
+Both the **election** (chosen variant + rationale) and the **distilled
+placement** belong to the `(round, page)`, not the page. Each round carries its
+own decisions, so cloning a round never drags a stale choice across:
+
+- Election sits on the round's manifest entry (`prd_prototype_round_pages`), read
+  cheaply on every render.
+- The placement sits in its own `prd_round_page_design` table, keyed by
+  `(round_id, page_id)`. The potentially large markdown stays off the manifest
+  hot path and is loaded only when distilling or rendering the coder context.
+
+**Inherit, then reset on advance.** Opening a new round **inherits** each page's
+election and placement. The moment a page's pinned version **advances** (a new
+iteration in the new round), that page's election and placement **reset** — the
+decision was about the old variant, so a stale placement never lingers. Pages
+whose pin is unchanged carry their validated decision forward for free. This is
+automatic, keyed off the pin, with no per-page prompt.
+
+### Distill on the fly; the `ready` gate is a fallback
+
+The placement is distilled **per page, on the fly, the moment that page's variant
+is decided in the current round** — at page creation for a single-variant page
+(retained by default), or at election for a multi-variant one. There is no big
+convergence pass: the agent authors one page's placement as soon as it is
+decided.
+
+`depot prd ready` no longer _triggers_ distillation; it is the **safety net**. It
+evaluates only the pages in the current round's manifest and refuses if a page
+decided in that round has no placement, pointing at what is missing. A page
+dropped from the current round does not block.
+
+The placement is **one markdown field, structured by convention**, not a set of
+rigid columns: `## Regions` (the zones and how they are arranged), `## Order`
+(component sequence within each region), `## Hierarchy` (what dominates),
+`## States` (empty / loading / error / success…), and `## Interactions` (what
+happens on click or input). A simple page fills two sections, a rich one six;
+`distill` lightly requires at least `## Regions` and `## Order`. An LLM both
+authors and reproduces a sectioned markdown far better than it would a fixed
+schema.
+
+### Pages, tasks, and the scoped handoff to the coder
+
+A page links to the tasks that build it through `task_prototype_pages`, a plain
+M:N join modeled on `task_user_stories`: "this task realises these pages." The
+link is set during task authoring (`depot task page add/remove/list`) and
+survives a PRD fork.
+
+That link is what carries the validated layout to the implementer. The `coder`
+and `dev` contexts render a dynamic **`{{task_placement taskId=…}}`** marker that
+lists, for the task in hand, the pages it is linked to and **their placement in
+the current round — and nothing else**. A 30-page PRD does not drown every coder
+in everything: each task sees only the placement of the pages it builds. This is
+the missing final link of the design lock — the validated layout reaches the
+people who build it, scoped, instead of being captured at distill time and lost.
+
+### Placement vs. aesthetics
+
+The placement is the **answer** the user signed off on: where everything goes, in
+what order, what dominates, what the states are. The implementer **reproduces
+that layout** — and pulls the **look** from the project's design system. The
+mockup HTML is a **layout reference, not pixels to copy**; prototype code is
+throwaway and is rewritten properly when folded in. Aesthetics are explicitly not
+the prototype's job. The `dev` and `coder` contexts state this framing plainly so
+a coder reproduces the structure without shipping the mockup's styling.
+
 ## Activity Log
 
 The activity log stores structured events tied to the current project and, optionally, a workspace, PRD, or task.
@@ -245,10 +459,18 @@ Current event types are:
 - `prd_done`
 - `prd_canceled`
 - `prd_forked`
+- `idea_created`
+- `idea_updated`
+- `idea_promoted`
+- `idea_dropped`
+- `idea_reopened`
 - `review_created`
 - `review_updated`
 - `review_started`
 - `review_done`
+- `prototype_round_created`
+- `prototype_round_page_pinned`
+- `prototype_round_page_dropped`
 - `note`
 - `error`
 
@@ -264,6 +486,7 @@ The available modes are:
 - `dev`
 - `coder`
 - `auditor`
+- `idea`
 
 Without a mode, `depot context` prints an index with a short usage line, dynamic status, and the exact command to load each detailed mode.
 
@@ -273,6 +496,7 @@ Modes:
 - `dev` packages orchestrator state for the active or targeted PRD
 - `coder <prd-id> [--review <review-id>]` packages implementation work for a coder agent
 - `auditor <prd-id>` packages completed work and prior review state for an auditor agent
+- `idea` packages the open-idea backlog and the capture/triage agent instructions, the mirror opposite of the PRD agent: it captures fast and recommends promote/keep/drop rather than grilling toward a commitment
 
 These contexts are rendered views. They summarize and package state, but they do not themselves advance task or PRD lifecycle steps.
 

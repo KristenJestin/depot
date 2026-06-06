@@ -1,31 +1,27 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowRightIcon,
-  CheckIcon,
-  MilestoneIcon,
-  PencilIcon,
-  PlusIcon,
-  TagIcon,
-  XIcon,
-} from "lucide-react";
+import { ArrowRightIcon, MilestoneIcon, PencilIcon, TagIcon } from "lucide-react";
 import * as React from "react";
 
-import { Badge } from "#/web/components/ui/badge";
 import { Button } from "#/web/components/ui/button";
 import { Card } from "#/web/components/ui/card";
-import { Input } from "#/web/components/ui/input";
+import { SidebarAddForm } from "#/web/components/ui/sidebar-add-form";
+import { SidebarItemList } from "#/web/components/ui/sidebar-item-list";
 import { StatusBadge } from "#/web/components/ui/status-badge";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
 
 /**
- * Side-pane sections that expose PRD-level groupings (PRD 0019 / T4).
+ * Side-pane sections that expose PRD-level groupings (PRD 0019 / T4,
+ * uniformised in PRD 0026 / S3).
  *
- * Each widget is stateful only for its own draft input; data + mutations
- * flow through React Query so the parent detail page does not need to
- * forward callbacks. The three components share a small visual style
- * (`SidebarSection`) to stay consistent with the existing sidebar widgets
- * in `prd-sidebar.tsx` without coupling to its internal helpers.
+ * The three widgets (Tags, Milestone, Dependencies) are now thin wrappers
+ * around two shared deep modules — `SidebarItemList` and `SidebarAddForm` —
+ * so they share the exact same icon position, hover colour, remove button
+ * size and add-form shape. Each widget's own logic stays focused on:
+ *
+ *   1. fetching data through React Query,
+ *   2. firing the right mutation on add / remove,
+ *   3. mapping the data to the render props (icon, label, key).
  */
 
 type DepEntry = PrdDetailResponse["dependencies"][number];
@@ -51,7 +47,6 @@ function SidebarSection({
 
 export function PrdTagsWidget({ prdRevisionId, tags }: { prdRevisionId: string; tags: string[] }) {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
 
   const invalidate = () => {
@@ -72,10 +67,7 @@ export function PrdTagsWidget({ prdRevisionId, tags }: { prdRevisionId: string; 
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
     },
-    onSuccess: () => {
-      setDraft("");
-      invalidate();
-    },
+    onSuccess: invalidate,
     onError: (e) => setError((e as Error).message),
   });
 
@@ -99,54 +91,22 @@ export function PrdTagsWidget({ prdRevisionId, tags }: { prdRevisionId: string; 
   return (
     <SidebarSection title="Tags" testId="prd-tags-section">
       <div className="space-y-3">
-        {tags.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No tags yet.</p>
-        ) : (
-          <ul className="flex flex-wrap gap-1.5" aria-label="PRD tags">
-            {tags.map((tag) => (
-              <li key={tag}>
-                <Badge variant="subtle" className="gap-1 pr-1">
-                  <TagIcon className="size-3" />
-                  {tag}
-                  <button
-                    type="button"
-                    aria-label={`Remove tag ${tag}`}
-                    onClick={() => removeMutation.mutate(tag)}
-                    disabled={pending}
-                    className="inline-flex size-4 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <XIcon className="size-2.5" />
-                  </button>
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const tag = draft.trim();
-            if (tag.length === 0) return;
-            addMutation.mutate(tag);
-          }}
-        >
-          <label htmlFor="prd-tags-add" className="sr-only">
-            New tag
-          </label>
-          <Input
-            id="prd-tags-add"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="kebab-case"
-            aria-label="Add tag"
-            className="h-7 flex-1 text-xs"
-          />
-          <Button type="submit" size="sm" disabled={pending || draft.trim().length === 0}>
-            <PlusIcon className="size-3" />
-            Add
-          </Button>
-        </form>
+        <SidebarItemList<string>
+          items={tags}
+          emptyLabel="No tags yet."
+          layout="pills"
+          renderIcon={() => <TagIcon className="size-3" />}
+          renderLabel={(tag) => <span>{tag}</span>}
+          getKey={(tag) => tag}
+          onRemove={(tag) => removeMutation.mutate(tag)}
+          pending={pending}
+        />
+        <SidebarAddForm
+          placeholder="kebab-case"
+          ariaLabel="Add tag"
+          onAdd={(value) => addMutation.mutate(value)}
+          pending={pending}
+        />
         {error ? (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
             {error}
@@ -166,10 +126,7 @@ export function PrdMilestoneWidget({
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState(version ?? "");
   const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => setDraft(version ?? ""), [version]);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["prds"] });
@@ -197,87 +154,67 @@ export function PrdMilestoneWidget({
     onError: (e) => setError((e as Error).message),
   });
 
+  const items = version ? [version] : [];
+
   return (
     <SidebarSection title="Milestone" testId="prd-milestone-section">
       <div className="space-y-3">
         {editing ? (
-          <form
-            className="flex items-center gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const next = draft.trim();
-              mutation.mutate(next.length === 0 ? null : next);
-            }}
-          >
-            <label htmlFor="prd-milestone-input" className="sr-only">
-              Milestone version
-            </label>
-            <Input
-              id="prd-milestone-input"
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="e.g. 2.6.1"
-              aria-label="Milestone version"
-              className="h-7 flex-1 text-xs"
-              autoFocus
-            />
-            <Button type="submit" size="sm" disabled={mutation.isPending}>
-              <CheckIcon className="size-3" />
-            </Button>
+          <SidebarAddForm
+            placeholder="e.g. 2.6.1"
+            ariaLabel="Milestone version"
+            buttonLabel="Save"
+            onAdd={(value) => mutation.mutate(value)}
+            pending={mutation.isPending}
+          />
+        ) : (
+          <SidebarItemList<string>
+            items={items}
+            emptyLabel="No milestone set."
+            layout="pills"
+            renderIcon={() => <MilestoneIcon className="size-3.5" />}
+            renderLabel={(v) => (
+              <Link
+                to="/milestones/$version"
+                params={{ version: v }}
+                className="font-medium text-primary hover:underline"
+                aria-label={`Open milestone ${v}`}
+              >
+                {v}
+              </Link>
+            )}
+            getKey={(v) => v}
+            onRemove={() => mutation.mutate(null)}
+            pending={mutation.isPending}
+          />
+        )}
+        <div className="flex items-center justify-end gap-1.5">
+          {editing ? (
             <Button
               type="button"
               size="sm"
               variant="ghost"
               onClick={() => {
-                setDraft(version ?? "");
                 setEditing(false);
                 setError(null);
               }}
               disabled={mutation.isPending}
             >
-              <XIcon className="size-3" />
+              Cancel
             </Button>
-          </form>
-        ) : version ? (
-          <div className="flex items-center justify-between gap-2">
-            <Link
-              to="/milestones/$version"
-              params={{ version }}
-              className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-              aria-label={`Open milestone ${version}`}
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              aria-label={version ? "Edit milestone" : "Set milestone"}
+              onClick={() => setEditing(true)}
             >
-              <MilestoneIcon className="size-3.5" />
-              {version}
-            </Link>
-            <div className="flex items-center gap-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-label="Edit milestone"
-                onClick={() => setEditing(true)}
-              >
-                <PencilIcon className="size-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-label="Clear milestone"
-                onClick={() => mutation.mutate(null)}
-                disabled={mutation.isPending}
-              >
-                <XIcon className="size-3" />
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">No milestone set.</p>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-              <PlusIcon className="size-3" />
-              Set
+              <PencilIcon className="size-3" />
+              {version ? "Edit" : "Set"}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
         {error ? (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
             {error}
@@ -298,7 +235,6 @@ export function PrdDependenciesWidget({
   dependents: DepEntry[];
 }) {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
 
   const invalidate = () => {
@@ -319,10 +255,7 @@ export function PrdDependenciesWidget({
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
     },
-    onSuccess: () => {
-      setDraft("");
-      invalidate();
-    },
+    onSuccess: invalidate,
     onError: (e) => setError((e as Error).message),
   });
 
@@ -344,6 +277,22 @@ export function PrdDependenciesWidget({
 
   const pending = addMutation.isPending || removeMutation.isPending;
 
+  const renderDepLabel = (entry: DepEntry) =>
+    entry.headRevisionId ? (
+      <Link
+        to="/prds/$id"
+        params={{ id: entry.headRevisionId }}
+        className="truncate font-medium text-foreground hover:underline"
+        title={entry.prdId}
+      >
+        {entry.title ?? entry.prdId}
+      </Link>
+    ) : (
+      <span className="truncate font-mono text-muted-foreground" title={entry.prdId}>
+        {entry.prdId}
+      </span>
+    );
+
   return (
     <SidebarSection title="Dependencies" testId="prd-deps-section">
       <div className="space-y-4">
@@ -351,10 +300,19 @@ export function PrdDependenciesWidget({
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Depends on
           </h3>
-          <DepList
-            entries={dependencies}
+          <SidebarItemList<DepEntry>
+            items={dependencies}
             emptyLabel="No dependencies."
-            onRemove={(prdId) => removeMutation.mutate(prdId)}
+            layout="rows"
+            renderIcon={() => <ArrowRightIcon className="size-3" />}
+            renderLabel={(entry) => (
+              <span className="inline-flex min-w-0 items-center gap-2">
+                {renderDepLabel(entry)}
+                {entry.status ? <StatusBadge status={entry.status} /> : null}
+              </span>
+            )}
+            getKey={(entry) => entry.prdId}
+            onRemove={(entry) => removeMutation.mutate(entry.prdId)}
             pending={pending}
           />
         </div>
@@ -362,38 +320,29 @@ export function PrdDependenciesWidget({
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Depended on by
           </h3>
-          <DepList
-            entries={dependents}
+          <SidebarItemList<DepEntry>
+            items={dependents}
             emptyLabel="Nothing depends on this PRD."
+            layout="rows"
+            renderIcon={() => <ArrowRightIcon className="size-3" />}
+            renderLabel={(entry) => (
+              <span className="inline-flex min-w-0 items-center gap-2">
+                {renderDepLabel(entry)}
+                {entry.status ? <StatusBadge status={entry.status} /> : null}
+              </span>
+            )}
+            getKey={(entry) => entry.prdId}
             pending={pending}
           />
         </div>
 
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const value = draft.trim();
-            if (value.length === 0) return;
-            addMutation.mutate(value);
-          }}
-        >
-          <label htmlFor="prd-deps-add" className="sr-only">
-            Depend on PRD id
-          </label>
-          <Input
-            id="prd-deps-add"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="PRD id to depend on"
-            aria-label="Depend on PRD id"
-            className="h-7 flex-1 text-xs font-mono"
-          />
-          <Button type="submit" size="sm" disabled={pending || draft.trim().length === 0}>
-            <PlusIcon className="size-3" />
-            Add
-          </Button>
-        </form>
+        <SidebarAddForm
+          placeholder="PRD id to depend on"
+          ariaLabel="Depend on PRD id"
+          inputClassName="font-mono"
+          onAdd={(value) => addMutation.mutate(value)}
+          pending={pending}
+        />
         {error ? (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
             {error}
@@ -401,61 +350,5 @@ export function PrdDependenciesWidget({
         ) : null}
       </div>
     </SidebarSection>
-  );
-}
-
-function DepList({
-  entries,
-  emptyLabel,
-  onRemove,
-  pending,
-}: {
-  entries: DepEntry[];
-  emptyLabel: string;
-  onRemove?: (prdId: string) => void;
-  pending?: boolean;
-}) {
-  if (entries.length === 0) {
-    return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
-  }
-  return (
-    <ul className="space-y-1.5">
-      {entries.map((entry) => (
-        <li
-          key={entry.prdId}
-          className="flex items-center justify-between gap-2 rounded-md border border-card-border bg-card px-2 py-1.5 text-xs"
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground" />
-            {entry.headRevisionId ? (
-              <Link
-                to="/prds/$id"
-                params={{ id: entry.headRevisionId }}
-                className="truncate font-medium text-foreground hover:underline"
-                title={entry.prdId}
-              >
-                {entry.title ?? entry.prdId}
-              </Link>
-            ) : (
-              <span className="truncate font-mono text-muted-foreground" title={entry.prdId}>
-                {entry.prdId}
-              </span>
-            )}
-            {entry.status ? <StatusBadge status={entry.status} /> : null}
-          </div>
-          {onRemove ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label={`Remove dependency on ${entry.prdId}`}
-              onClick={() => onRemove(entry.prdId)}
-              disabled={pending}
-            >
-              <XIcon className="size-3" />
-            </Button>
-          ) : null}
-        </li>
-      ))}
-    </ul>
   );
 }

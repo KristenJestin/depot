@@ -475,4 +475,136 @@ export const activityPayloadSchemas: Record<EventType, Schema.Schema<any, any, n
     verificationStdout: Schema.optional(Schema.String),
     verificationStderr: Schema.optional(Schema.String),
   }),
+  prototype_created: Schema.Struct({
+    prototypeId: Schema.String,
+    prdRevisionId: Schema.String,
+    slug: Schema.String,
+  }),
+  prototype_archived: Schema.Struct({
+    prototypeId: Schema.String,
+  }),
+  prototype_page_added: Schema.Struct({
+    prototypeId: Schema.String,
+    pageId: Schema.String,
+    slug: Schema.String,
+    title: Schema.String,
+  }),
+  prototype_page_removed: Schema.Struct({
+    prototypeId: Schema.String,
+    pageId: Schema.String,
+    slug: Schema.String,
+  }),
+  prototype_version_added: Schema.Struct({
+    pageId: Schema.String,
+    versionId: Schema.String,
+    label: Schema.String,
+  }),
+  prototype_version_archived: Schema.Struct({
+    pageId: Schema.String,
+    versionId: Schema.String,
+    label: Schema.String,
+  }),
+  prototype_version_restored: Schema.Struct({
+    pageId: Schema.String,
+    versionId: Schema.String,
+    label: Schema.String,
+  }),
+  prototype_variant_added: Schema.Struct({
+    pageVersionId: Schema.String,
+    variantId: Schema.String,
+    label: Schema.String,
+    isMain: Schema.Boolean,
+  }),
+  prototype_variant_removed: Schema.Struct({
+    pageVersionId: Schema.String,
+    variantId: Schema.String,
+    label: Schema.String,
+  }),
+  prototype_variant_main_changed: Schema.Struct({
+    pageVersionId: Schema.String,
+    previousMainVariantId: Schema.NullOr(Schema.String),
+    newMainVariantId: Schema.String,
+  }),
+  prototype_variant_elected: Schema.Struct({
+    pageId: Schema.String,
+    variantId: Schema.String,
+    rationale: Schema.String,
+    decidedBy: Schema.NullOr(Schema.String),
+  }),
+  prototype_variant_unelected: Schema.Struct({
+    pageId: Schema.String,
+  }),
+  // PRD 0029: round lifecycle on a prototype. Logging is emitted at the CLI
+  // layer (the domain stays log-free); the schemas live here so the event-type
+  // Record stays exhaustive and the payload contract is fixed up front.
+  prototype_round_created: Schema.Struct({
+    prototypeId: Schema.String,
+    roundId: Schema.String,
+    label: Schema.String,
+    fromRoundId: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  prototype_round_page_pinned: Schema.Struct({
+    roundId: Schema.String,
+    pageId: Schema.String,
+    pageVersionId: Schema.String,
+  }),
+  prototype_round_page_dropped: Schema.Struct({
+    roundId: Schema.String,
+    pageId: Schema.String,
+  }),
+  prd_design_distilled: Schema.Struct({
+    prdRevisionId: Schema.String,
+    length: Schema.Number,
+  }),
+  prototype_page_placement_distilled: Schema.Struct({
+    roundId: Schema.String,
+    pageId: Schema.String,
+    slug: Schema.String,
+    length: Schema.Number,
+  }),
+  prototype_feedback_added: Schema.Struct({
+    feedbackId: Schema.String,
+    variantId: Schema.String,
+    hasPin: Schema.Boolean,
+  }),
+  prototype_feedback_resolved: Schema.Struct({
+    feedbackId: Schema.String,
+    variantId: Schema.String,
+    viaVariantId: Schema.optional(Schema.NullOr(Schema.String)),
+    hasNote: Schema.Boolean,
+  }),
+  prototype_feedback_ignored: Schema.Struct({
+    feedbackId: Schema.String,
+    variantId: Schema.String,
+    reason: Schema.String,
+  }),
+  prototype_feedback_deleted: Schema.Struct({
+    feedbackId: Schema.String,
+    variantId: Schema.String,
+    hasPin: Schema.Boolean,
+  }),
+  // PRD 0027: idea capture lifecycle. Logging is emitted at the CLI layer (the
+  // domain stays log-free, on the prototype model); the schemas live here so
+  // the event-type Record stays exhaustive and the contract is fixed up front.
+  idea_created: Schema.Struct({
+    ideaId: Schema.String,
+    title: Schema.String,
+    tag: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  idea_updated: Schema.Struct({
+    ideaId: Schema.String,
+    title: Schema.String,
+    fields: Schema.Array(Schema.String),
+  }),
+  idea_promoted: Schema.Struct({
+    ideaId: Schema.String,
+    promotedPrdId: Schema.String,
+  }),
+  idea_dropped: Schema.Struct({
+    ideaId: Schema.String,
+    reason: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  idea_reopened: Schema.Struct({
+    ideaId: Schema.String,
+  }),
 };

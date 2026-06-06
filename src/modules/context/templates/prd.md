@@ -320,3 +320,43 @@ Only when you are confident that a dev orchestrator can hand the work to a coder
 Stop there.
 
 Do not activate the PRD. `in_progress` belongs to the dev agent.
+
+## Working with prototypes
+
+When the user wants a UI prototype, DO NOT generate HTMLs yourself. Spawn the
+prototype sub-agent with:
+
+```
+depot context prototype <revId>
+```
+
+You do NOT need to pre-create a prototype: when the PRD has none yet, this
+command emits the sub-agent context with instructions to create one as its
+first step. The sub-agent has the conventions (page slug protocol, is_main,
+self-contained HTML, resolve / ignore with `--reason`), persists everything in
+depot, and returns control when the design pass is over. While the sub-agent
+works, you stay in PRD scope (cadrage, scope, acceptance criteria).
+
+To check on prototypes already attached to this PRD:
+
+```
+depot prd prototype list <revId>
+```
+
+To see open feedbacks across all prototypes of this PRD:
+
+```
+depot prd prototype feedback list --status open <revId>
+```
+
+Mutating prototypes / pages / versions / variants (create, archive, set-main,
+resolve, ignore) happens via the CLI / the sub-agent only — the web UI is
+read-only for everything except creating a feedback.
+
+## Parking out-of-scope thoughts
+
+If an out-of-scope thought surfaces while framing, don't derail the spec — park
+it with `depot idea add "<thought>"` and move on. If the user gestures at a
+parked idea that motivates this PRD, link it as source material with
+`depot prd idea add <prd-id> <idea-id>`; the `## Source ideas` block above (when
+present) is the raw, uncommitted need — read it before grilling.

@@ -15,10 +15,34 @@ The command:
 ## Usage
 
 ```bash
-depot serve [--port <port>]
+depot serve [--port <port>] [--portless]
 ```
 
-The default port is `4242`.
+| Option       | Description                                                             |
+| ------------ | ----------------------------------------------------------------------- |
+| `--port`     | Port to listen on. Precedence: `--port` › `$PORT` › `4242`.             |
+| `--portless` | Also expose the server through `portless` at `https://depot.localhost`. |
+
+The default port is `4242`. When `--port` is omitted, the `PORT` environment
+variable is used if set (so the server works when launched through a supervisor
+that injects `PORT`, e.g. `portless run`).
+
+## Portless URL
+
+With `--portless`, depot registers a stable portless route so the server is
+always reachable at the same URL regardless of its port:
+
+```bash
+depot serve --portless
+# Depot serving at http://localhost:4242
+# Depot also reachable at https://depot.localhost
+```
+
+Internally depot runs `portless alias depot <port>` on start and
+`portless alias --remove depot` on shutdown (Ctrl+C). The portless proxy must be
+running (`portless proxy start`). If `portless` is not installed or the route
+cannot be registered, depot prints a warning and keeps serving on
+`http://localhost:<port>`.
 
 ## API Surface
 

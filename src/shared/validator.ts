@@ -105,6 +105,29 @@ export type DocKind = (typeof VALID_DOC_KINDS)[number];
 export const VALID_ADR_STATUSES = ["proposed", "accepted", "superseded"] as const;
 export type AdrStatus = (typeof VALID_ADR_STATUSES)[number];
 
+// ── Ideas (PRD 0027 / T1) ─────────────────────────────────────────────────────
+//
+// An idea's lifecycle is a triage machine, not a commitment machine: `open` is
+// the inbox, `promote` is the single bridge into the committed world (it spins
+// up a draft PRD), and `drop` lets ideas die cheaply. `dropped → open` makes an
+// over-eager drop reversible; `promoted` is terminal (the work now lives as a
+// PRD). The transition map is enforced at the domain layer.
+
+export const VALID_IDEA_STATUSES = ["open", "promoted", "dropped"] as const;
+export type IdeaStatus = (typeof VALID_IDEA_STATUSES)[number];
+
+export const VALID_IDEA_TRANSITIONS: Record<IdeaStatus, IdeaStatus[]> = {
+  open: ["promoted", "dropped"],
+  dropped: ["open"],
+  promoted: [],
+};
+
+/** Max length of an idea `title`, matching the conventional CLI/UI budget. */
+export const IDEA_TITLE_MAX_LENGTH = 200;
+
+/** Hard cap on an idea `body` (anti-abuse guard): 100 KB of UTF-8. */
+export const IDEA_BODY_MAX_BYTES = 100 * 1024;
+
 // ── Pending actions (web → chat bridge) ───────────────────────────────────────
 
 export const VALID_PENDING_ACTION_KINDS = [
@@ -153,6 +176,7 @@ export const VALID_DIRECTIVE_CATEGORIES = [
   "auditor",
   "doc",
   "ship",
+  "prototype",
 ] as const;
 export type DirectiveCategory = (typeof VALID_DIRECTIVE_CATEGORIES)[number];
 
@@ -174,6 +198,7 @@ export const VALID_CATEGORY_SCOPES: Record<DirectiveCategory, readonly Directive
   auditor: ["always", "pre-review"],
   doc: ["always", "pre-doc-sync"],
   ship: ["always", "pre-ship"],
+  prototype: ["always"],
 };
 
 export const isValidCategoryScope = (category: DirectiveCategory, scope: DirectiveScope): boolean =>
@@ -304,6 +329,44 @@ export const invalidAnnexDescriptionReason = (description: string): string | nul
   return null;
 };
 
+// ── Prototypes (PRD 0025 / T1) ────────────────────────────────────────────────
+//
+// `Prototype → Page → Version → Variant → Feedback`. Slugs and labels are
+// kebab-case identifiers shared between the CLI, the resolver
+// (`data-depot-page="<slug>"` links inside variant HTML) and the URL
+// (`/prds/$id/prototype/$slug`). The validator helpers below keep their shape
+// in one place so the CLI's error messages match the API's 422 reasons.
+
+/**
+ * Status of a single feedback row. Only two persisted states — `open` and
+ * `ignored`. The third bucket the UI surfaces, "addressed", is *derived*: a
+ * feedback that is `open` on a variant whose page now has a newer non-archived
+ * version is treated as already addressed (the agent moved on by minting the
+ * new version). Persisting it would couple feedback state to version churn.
+ */
+export const VALID_FEEDBACK_STATUSES = ["open", "ignored"] as const;
+export type FeedbackStatus = (typeof VALID_FEEDBACK_STATUSES)[number];
+
+/** Kebab-case pattern shared by prototype slug, page slug, version label, variant label. */
+const PROTOTYPE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+const PROTOTYPE_SLUG_MAX_LENGTH = 60;
+
+export const isValidPrototypeSlug = (value: string): boolean =>
+  value.length > 0 &&
+  value.length <= PROTOTYPE_SLUG_MAX_LENGTH &&
+  PROTOTYPE_SLUG_PATTERN.test(value);
+
+export const invalidPrototypeSlugReason = (value: string): string | null => {
+  if (value.length === 0) return "slug must not be empty";
+  if (value.length > PROTOTYPE_SLUG_MAX_LENGTH) {
+    return `slug must be at most ${PROTOTYPE_SLUG_MAX_LENGTH} characters (got ${value.length})`;
+  }
+  if (!PROTOTYPE_SLUG_PATTERN.test(value)) {
+    return `slug '${value}' must match kebab-case pattern ${PROTOTYPE_SLUG_PATTERN.source} (lowercase letters/digits/dashes, no leading dash)`;
+  }
+  return null;
+};
+
 // ── Event types ──────────────────────────────────────────────────────────────
 
 export const VALID_EVENT_TYPES = [
@@ -360,6 +423,32 @@ export const VALID_EVENT_TYPES = [
   "task_verified_human",
   "prd_annex_added",
   "prd_annex_removed",
+  "prototype_created",
+  "prototype_archived",
+  "prototype_page_added",
+  "prototype_page_removed",
+  "prototype_version_added",
+  "prototype_version_archived",
+  "prototype_version_restored",
+  "prototype_variant_added",
+  "prototype_variant_removed",
+  "prototype_variant_main_changed",
+  "prototype_variant_elected",
+  "prototype_variant_unelected",
+  "prototype_round_created",
+  "prototype_round_page_pinned",
+  "prototype_round_page_dropped",
+  "prd_design_distilled",
+  "prototype_page_placement_distilled",
+  "prototype_feedback_added",
+  "prototype_feedback_resolved",
+  "prototype_feedback_ignored",
+  "prototype_feedback_deleted",
+  "idea_created",
+  "idea_updated",
+  "idea_promoted",
+  "idea_dropped",
+  "idea_reopened",
 ] as const;
 
 export type EventType = (typeof VALID_EVENT_TYPES)[number];

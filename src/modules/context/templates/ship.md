@@ -77,6 +77,9 @@ depot prd pre-ship-check <id>
   `depot prd done <id> --user-confirmed "<verbatim user quote>"` after every
   repo cleanup and pre-ship directive has passed. `--user-confirmed` is
   mandatory; pass a verbatim quote of the user's approval, never invent one.
+  The quote must carry explicit **close** intent ("done le PRD", "on clôture",
+  "ship it") — depot rejects a generic "ok" / commit approval here. A casual
+  "ok" earlier in the conversation is not a close-confirmation; ask explicitly.
 - Depot no longer stores git SHAs or merge anchors. If the user needs the squash
   commit for release notes, report it in the recap as plain terminal output
   only; do not try to persist it in depot.

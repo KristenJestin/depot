@@ -14,10 +14,10 @@
  * tells a story.
  *
  * Usage:
- *   DB_PATH=.depot-dev/depot.db bun run scripts/seed-rich.ts
+ *   DEPOT_DB_PATH=.depot-dev/depot.db bun run scripts/seed-rich.ts
  *
- * Defaults to .depot-dev/depot.db when DB_PATH is not set, so it never
- * touches the real ~/.depot/depot.db unless you opt in explicitly.
+ * Defaults to .depot-dev/depot.db when DEPOT_DB_PATH/DB_PATH are not set, so
+ * it never touches the real ~/.depot/depot.db unless you opt in explicitly.
  */
 
 import { Database } from "bun:sqlite";
@@ -28,10 +28,21 @@ import path from "node:path";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { generateId } from "#/shared/utils";
 
-const dbPath = process.env["DB_PATH"] ?? ".depot-dev/depot.db";
+const dbPath = process.env["DEPOT_DB_PATH"] ?? process.env["DB_PATH"] ?? ".depot-dev/depot.db";
 const absDbPath = path.resolve(dbPath);
 const dbDir = path.dirname(absDbPath);
 mkdirSync(dbDir, { recursive: true });
+
+// Workspaces must exist on disk or depot flags them as orphans (and the web
+// project switcher hides them — see GET /api/workspaces). Materialize each seed
+// workspace under a real, writable directory next to the dev DB so the switcher
+// lists the projects and the "This project" section stays reachable.
+const WS_BASE = path.resolve(dbDir, "workspaces");
+const wsPath = (name: string) => {
+  const p = path.join(WS_BASE, name);
+  mkdirSync(p, { recursive: true });
+  return p;
+};
 
 console.log(`Seeding rich example into: ${absDbPath}`);
 
@@ -267,7 +278,7 @@ const insertActivity = (r: ActivitySeed) =>
 const PROJECT_ID = generateId();
 const WS_ID = generateId();
 const WS_FEATURE_ID = generateId();
-const WS_PATH = "/home/dev/workspaces/acme-banking";
+const WS_PATH = wsPath("acme-banking");
 
 insertProject({
   id: PROJECT_ID,
@@ -286,7 +297,7 @@ insertWorkspace({
 insertWorkspace({
   id: WS_FEATURE_ID,
   projectId: PROJECT_ID,
-  path: `${WS_PATH}-feature-checkout`,
+  path: wsPath("acme-banking-feature-checkout"),
   label: "feature/checkout",
   createdAt: T(20 * DAY),
 });
@@ -1249,7 +1260,7 @@ insertProject({
 insertWorkspace({
   id: WS_CRYPTO_ID,
   projectId: PROJECT_CRYPTO_ID,
-  path: "/home/dev/workspaces/acme-crypto",
+  path: wsPath("acme-crypto"),
   label: "main",
   createdAt: T(30 * DAY),
 });
@@ -1461,7 +1472,7 @@ insertProject({
 insertWorkspace({
   id: WS_TOOLS_ID,
   projectId: PROJECT_TOOLS_ID,
-  path: "/home/dev/workspaces/acme-internal",
+  path: wsPath("acme-internal"),
   label: "main",
   createdAt: T(40 * DAY),
 });
@@ -1591,6 +1602,214 @@ logRevision(PROJECT_TOOLS_ID, REV_TOOLS_B, WS_TOOLS_ID, [
   },
 ]);
 
+// ── Ideas (PRD 0027) ─────────────────────────────────────────────────────────
+//
+// The pre-commitment capture layer. Covers every use case: open ideas (with and
+// without body/tag), ideas LINKED as source material to a PRD without being
+// promoted (reference ≠ commitment — they stay `open` and surface in
+// `context prd`'s "Source ideas" block), a PROMOTED idea (provenance via
+// promoted_prd_id + a prd_ideas link), a DROPPED idea (with reason), and one
+// idea on a second project to exercise project scoping.
+
+type IdeaSeed = {
+  id: string;
+  projectId: string;
+  title: string;
+  body: string | null;
+  tag: string | null;
+  status: "open" | "promoted" | "dropped";
+  promotedPrdId: string | null;
+  droppedReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+const insertIdea = (r: IdeaSeed) =>
+  db
+    .prepare(
+      `INSERT INTO ideas
+        (id, project_id, title, body, tag, status, promoted_prd_id, dropped_reason,
+         created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    )
+    .run(
+      r.id,
+      r.projectId,
+      r.title,
+      r.body,
+      r.tag,
+      r.status,
+      r.promotedPrdId,
+      r.droppedReason,
+      r.createdAt,
+      r.updatedAt,
+    );
+
+const insertPrdIdea = (prdId: string, ideaId: string, createdAt: number) =>
+  db
+    .prepare("INSERT INTO prd_ideas (prd_id, idea_id, created_at) VALUES (?,?,?)")
+    .run(prdId, ideaId, createdAt);
+
+// Open capture — full shape (body + tag). The classic "don't forget this".
+const IDEA_INSIGHTS = generateId();
+insertIdea({
+  id: IDEA_INSIGHTS,
+  projectId: PROJECT_ID,
+  title: "Spending insights on the home screen",
+  body: "Monthly category breakdown + a 6-month trend sparkline right under the balance. Pull from the existing transactions feed; no new backend. Question: per-category budgets too, or just visualisation first?",
+  tag: "analytics",
+  status: "open",
+  promotedPrdId: null,
+  droppedReason: null,
+  createdAt: T(3 * HOUR),
+  updatedAt: T(3 * HOUR),
+});
+
+// Open capture — minimal shape (no body, no tag). Pure one-liner.
+const IDEA_EMPTY_STATES = generateId();
+insertIdea({
+  id: IDEA_EMPTY_STATES,
+  projectId: PROJECT_ID,
+  title: "Revisit empty-state copy across the app",
+  body: null,
+  tag: null,
+  status: "open",
+  promotedPrdId: null,
+  droppedReason: null,
+  createdAt: T(20 * MIN),
+  updatedAt: T(20 * MIN),
+});
+
+// Open + LINKED as source material to the checkout PRD (NOT promoted).
+// Referencing must NOT flip the status — it stays open and shows up in
+// `depot context prd <REV2>` under "Source ideas".
+const IDEA_ROUNDUP = generateId();
+insertIdea({
+  id: IDEA_ROUNDUP,
+  projectId: PROJECT_ID,
+  title: "Round-up savings on card purchases",
+  body: "Round each card purchase up to the nearest euro and sweep the difference into a savings pot. Naturally rides on the checkout/payment plumbing, so worth keeping in view while that PRD is in flight.",
+  tag: "savings",
+  status: "open",
+  promotedPrdId: null,
+  droppedReason: null,
+  createdAt: T(2 * DAY),
+  updatedAt: T(2 * DAY),
+});
+insertPrdIdea(PRD2, IDEA_ROUNDUP, T(1 * DAY));
+
+// A SECOND source idea on the same PRD, so `context prd` shows multiple.
+const IDEA_WALLET = generateId();
+insertIdea({
+  id: IDEA_WALLET,
+  projectId: PROJECT_ID,
+  title: "Provision the virtual card to Apple/Google Pay",
+  body: "Push the card to the platform wallet straight from the card-detail screen. Closely tied to how we tokenize cards in checkout.",
+  tag: "payments",
+  status: "open",
+  promotedPrdId: null,
+  droppedReason: null,
+  createdAt: T(4 * DAY),
+  updatedAt: T(4 * DAY),
+});
+insertPrdIdea(PRD2, IDEA_WALLET, T(1 * DAY));
+
+// Promoted — this idea became the statements-export PRD. Provenance via
+// promoted_prd_id (logical PRD) + an auto-created prd_ideas link.
+const IDEA_OFX = generateId();
+insertIdea({
+  id: IDEA_OFX,
+  projectId: PROJECT_ID,
+  title: "Statements: OFX/QFX export for accountants",
+  body: "Accountants keep asking for OFX/QFX alongside PDF/CSV. Became the account-statements PRD.",
+  tag: "exports",
+  status: "promoted",
+  promotedPrdId: PRD4,
+  droppedReason: null,
+  createdAt: T(11 * DAY),
+  updatedAt: T(10 * DAY),
+});
+insertPrdIdea(PRD4, IDEA_OFX, T(10 * DAY));
+
+// Open — no tag, older. Fills out the backlog / age display.
+const IDEA_FAMILY = generateId();
+insertIdea({
+  id: IDEA_FAMILY,
+  projectId: PROJECT_ID,
+  title: "Shared family accounts with per-member limits",
+  body: "Multiple cardholders under one primary account, each with their own spend limit and a shared activity feed.",
+  tag: null,
+  status: "open",
+  promotedPrdId: null,
+  droppedReason: null,
+  createdAt: T(6 * DAY),
+  updatedAt: T(6 * DAY),
+});
+
+// Dropped — with a reason (dropping is frictionless; the reason is optional but
+// good for the audit trail).
+const IDEA_CARDFLIP = generateId();
+insertIdea({
+  id: IDEA_CARDFLIP,
+  projectId: PROJECT_ID,
+  title: "Skeuomorphic 3D card-flip animation",
+  body: "Flip the card in 3D when revealing the full number.",
+  tag: "polish",
+  status: "dropped",
+  promotedPrdId: null,
+  droppedReason:
+    "Off the new brand direction, and the perf cost on low-end Android isn't worth it.",
+  createdAt: T(9 * DAY),
+  updatedAt: T(5 * DAY),
+});
+
+// One idea on a different project — proves ideas are project-scoped.
+const IDEA_STAKING = generateId();
+insertIdea({
+  id: IDEA_STAKING,
+  projectId: PROJECT_CRYPTO_ID,
+  title: "Staking rewards tab",
+  body: "Show estimated APY and accrued rewards per stakeable asset, with a one-tap stake/unstake.",
+  tag: "growth",
+  status: "open",
+  promotedPrdId: null,
+  droppedReason: null,
+  createdAt: T(1 * DAY),
+  updatedAt: T(1 * DAY),
+});
+
+// A little activity so the feed shows the idea lifecycle too.
+insertActivity({
+  projectId: PROJECT_ID,
+  workspaceId: null,
+  prdRevisionId: null,
+  taskId: null,
+  eventType: "idea_created",
+  payload: {
+    ideaId: IDEA_INSIGHTS,
+    title: "Spending insights on the home screen",
+    tag: "analytics",
+  },
+  createdAt: T(3 * HOUR),
+});
+insertActivity({
+  projectId: PROJECT_ID,
+  workspaceId: null,
+  prdRevisionId: REV4,
+  taskId: null,
+  eventType: "idea_promoted",
+  payload: { ideaId: IDEA_OFX, promotedPrdId: PRD4 },
+  createdAt: T(10 * DAY),
+});
+insertActivity({
+  projectId: PROJECT_ID,
+  workspaceId: null,
+  prdRevisionId: null,
+  taskId: null,
+  eventType: "idea_dropped",
+  payload: { ideaId: IDEA_CARDFLIP, reason: "off-brand + perf" },
+  createdAt: T(5 * DAY),
+});
+
 // ── Done ─────────────────────────────────────────────────────────────────────
 
 const summary = db
@@ -1602,6 +1821,8 @@ const summary = db
        (SELECT COUNT(*) FROM prd_revisions)       AS revisions,
        (SELECT COUNT(*) FROM tasks)               AS tasks,
        (SELECT COUNT(*) FROM reviews)             AS reviews,
+       (SELECT COUNT(*) FROM ideas)               AS ideas,
+       (SELECT COUNT(*) FROM prd_ideas)           AS idea_links,
        (SELECT COUNT(*) FROM activity_log)        AS events`,
   )
   .get();

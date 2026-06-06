@@ -3,16 +3,13 @@ import { useState } from "react";
 
 import { AgentBars } from "#/web/components/agent-bars";
 import { AnnexBodyMarkdown } from "#/web/components/prd-annexes-widget";
-import { PrdPriorityBadge, PrdPriorityDropdown } from "#/web/components/prd-priority-badge";
 import { Badge } from "#/web/components/ui/badge";
 import { Card } from "#/web/components/ui/card";
 import { CollapseToggleButton } from "#/web/components/ui/collapse-chevron";
 import { CollapsiblePanel, CollapsibleRoot } from "#/web/components/ui/collapsible";
-import { StatusBadge } from "#/web/components/ui/status-badge";
 import type { PrdDetailResponse } from "#/web/lib/api-types";
 import { resolvePrdDisplayStatus, type DetailSummary } from "#/web/lib/prd-view-model";
 import { formatMetaDate } from "#/web/lib/view-format";
-import { type PrdPriority } from "#/shared/validator";
 
 type DetailPrd = PrdDetailResponse["prd"];
 
@@ -27,6 +24,9 @@ export function PrdHeaderCard({
 }) {
   const isSuperseded = prd.supersededAt !== null;
   const displayStatus = resolvePrdDisplayStatus(prd, summary.activeReview);
+  // `displayStatus` still drives the footer banner below; the status pill
+  // itself was removed from the header in PRD 0026 / S2 because it was
+  // already duplicated in the sidebar's Info widget.
   const showReviewFooter = displayStatus === "review";
   const showActiveFooter = prd.status === "in_progress" && !showReviewFooter;
   const showDoneFooter = prd.status === "done";
@@ -68,13 +68,7 @@ export function PrdHeaderCard({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <PrdPriorityBadge priority={(prd.priority ?? "normal") as PrdPriority} />
-              <StatusBadge status={displayStatus} />
               {isSuperseded && <Badge variant="outline">superseded</Badge>}
-              <PrdPriorityDropdown
-                prdId={prd.id}
-                priority={(prd.priority ?? "normal") as PrdPriority}
-              />
               {hasSpec ? (
                 <CollapseToggleButton ariaLabel={specOpen ? "Collapse spec" : "Expand spec"} />
               ) : null}

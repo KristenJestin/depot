@@ -21,6 +21,10 @@ You may not:
 - directly edit source files
 - bypass the coder or auditor sub-agents
 - mark the PRD done without explicit user validation
+- leave a design/variant decision for an implementation phase — a PRD with
+  prototypes must have its variant elected and the placement distilled before
+  `prd ready` (PRD 0028); the `ready` gate refuses an unconverged design. The
+  arbitration is a pre-`ready` step, never a Phase-N task
 
 ## When the PRD is in review — read this first
 
@@ -39,6 +43,14 @@ You may not:
 > specific transition**. A positive remark about something else ("ok pour la
 > préprod", "super", "merci") is NOT an approval to transition — ask for a
 > confirmation that targets the action.
+>
+> **Closing the PRD (`prd done`) needs explicit _close_ intent.** A casual "ok",
+> "c'est bon pour moi", or a commit approval ("ok, commit tout") authorises that
+> step — not closing the PRD. depot now **rejects** a `prd done` confirmation
+> that carries no close intent: the quote must say it ("done le PRD", "on
+> clôture", "ship it"). If all you have is a generic ok, ask the user to confirm
+> the closure explicitly before running `prd done` — do not reinterpret an
+> unrelated "ok" as a close.
 
 When you hand control back to the user at `review`, you are at a fork. Two
 branches, two very different reflexes. Pick the right one.
@@ -148,8 +160,11 @@ humaine oubliée.
 
 ## Workspace Constraints
 
-- **Only ONE PRD can be `in_progress` per workspace at a time.** Before activating, run `depot prd list --status in_progress` (or `depot prd status <prd-id>`) to confirm no other PRD is active.
-- If another PRD is active, ask the user whether to: (a) finish the active one first, (b) cancel it (`depot prd cancel <id> --user-confirmed "<verbatim user quote>"`), or (c) hold off until the active PRD frees up. `--user-confirmed` is mandatory on `cancel` — never invent one.
+- **The "one active PRD" rule is PER WORKSPACE, not global.** A workspace holds at most one `in_progress` PRD. `depot prd activate` enforces this itself and refuses with `WorkspaceAlreadyHasActivePrdError` (naming the blocker) ONLY when _this_ workspace already has an active PRD.
+- **Each git worktree is its own workspace.** A PRD that is `in_progress` in another worktree — or any other workspace — does NOT block activation here. Do not treat it as a conflict, and never ask the user to "free the slot" for a PRD that is active in a _different_ workspace.
+- Therefore do not pre-scan globally (`depot prd list --status in_progress` lists every workspace) and stop to ask. Just activate from the current workspace (with the user-confirmation gate in "Start Execution" below) and let depot's guardrail be the gate — it fires only on a genuine same-workspace conflict.
+- ONLY if `depot prd activate` actually fails with `WorkspaceAlreadyHasActivePrdError` does the current workspace already hold an active PRD. Then ask the user whether to: (a) finish the active one first, (b) cancel it (`depot prd cancel <id> --user-confirmed "<verbatim user quote>"`), or (c) hold off. `--user-confirmed` is mandatory on `cancel` — never invent one.
+- To work on two PRDs in parallel, attach a separate folder (typically a git worktree) as its own workspace with `depot workspace add` and activate the second PRD from there.
 - When you only need a quick wrap-up of a `ready` PRD, `depot prd close <prd-id> --user-confirmed "<verbatim user quote>"` activates and marks it done in one step. `--user-confirmed` is mandatory; pass a verbatim quote of the user's approval, never invent one.
 
 ## How sub-agents are spawned
@@ -171,6 +186,18 @@ depot's role is to publish the contracts (contexts), not to run agents.
 - If it is already `in_progress`, continue.
 
 A PRD may carry **annexes** — named text artifacts (e.g. an HTML prototype) listed in the context with name + kind + description, not inlined. Read an annex **on demand** with `depot prd annex cat <annex-id>` when the body references `[annex: <name>]` or when its description signals relevance to the work you are delegating. Do not auto-read every annex; the description tells you when it is worth the tokens.
+
+#### Validated placement reaches the coder, scoped to the task
+
+When a task is linked to prototype pages, the coder's context renders the
+**validated placement** of those pages (the layout the user signed off on, for the
+current round), scoped to the task in hand via the dynamic marker:
+
+```
+{{task_placement taskId=<id>}}
+```
+
+Frame it for the coder the same way. Implement the distilled **placement** (regions, order, hierarchy, states) — the answer the user validated. The **aesthetics come from the project's design system**, not the prototype: the mockup HTML is a **layout reference, not pixels to copy**. The coder reproduces _where everything goes_ and pulls the _look_ from the project's design system; never ship prototype code.
 
 ### 2. Delegate Coding
 
@@ -408,6 +435,10 @@ When new requirements or issues appear after ready:
 - **Minor feedback** → create a review with `depot review start <prd-id>` and add findings
 - **Scope change** → the PRD must be forked: `depot prd fork <prd-id>` creates a new draft revision; modify and re-ready that
 - **New unrelated work** → create a separate PRD
+
+If an out-of-scope thought surfaces mid-flow, don't derail the active PRD — park
+it with `depot idea add "<thought>"` and move on; it stays visible for later
+triage without polluting the current execution.
 
 Never inject new PRD tasks into an active revision. The phases served their purpose at spec time.
 

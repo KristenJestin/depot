@@ -8,7 +8,12 @@ import { createTestDb, makeRun } from "../helpers/db";
 import { createProject } from "#/modules/projects/domain";
 import { addRepo } from "#/modules/projects/repos";
 import { listWorktrees, resolveWorktreeForBranch } from "#/lib/git";
-import { resolveRepoShipState, pickFeatureWorktree } from "#/modules/context/ship-state";
+import {
+  resolveRepoShipState,
+  pickFeatureWorktree,
+  evaluateShipReadiness,
+} from "#/modules/context/ship-state";
+import type { RepoShipState } from "#/modules/context/ship-state";
 import type { WorktreeEntry } from "#/lib/git";
 import type { Database } from "#/db/client";
 
@@ -203,5 +208,80 @@ describe("resolveRepoShipState", () => {
     const states = await runDb(resolveRepoShipState(projectId, repo, wtB));
     expect(path.resolve(states[0]!.worktreePath!)).toBe(path.resolve(wtB));
     expect(states[0]!.worktreeBranch).toBe("feat/b");
+  });
+});
+
+describe("evaluateShipReadiness", () => {
+  function state(over: Partial<RepoShipState>): RepoShipState {
+    return {
+      name: "(default)",
+      path: "/repo",
+      implicit: true,
+      baseBranch: "main",
+      worktreePath: null,
+      worktreeBranch: null,
+      dirty: false,
+      ...over,
+    };
+  }
+
+  it("does not block when no repo has a linked feature worktree", () => {
+    // A dirty *base* checkout (no worktree) is intentionally left alone — the
+    // explicit close confirmation is the guard for non-worktree flows.
+    const verdict = evaluateShipReadiness([state({}), state({ name: "api", dirty: true })]);
+    expect(verdict.blocked).toBe(false);
+    expect(verdict.reasons).toEqual([]);
+  });
+
+  it("blocks on a still-linked clean feature worktree (ship cleanup not run)", () => {
+    const verdict = evaluateShipReadiness([
+      state({ name: "front", worktreePath: "/wt/feat", worktreeBranch: "feat/x" }),
+    ]);
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.reasons[0]).toMatch(/front/);
+    expect(verdict.reasons[0]).toMatch(/feat\/x/);
+  });
+
+  it("flags uncommitted changes in the feature worktree distinctly", () => {
+    const verdict = evaluateShipReadiness([
+      state({ name: "front", worktreePath: "/wt/feat", worktreeBranch: "feat/x", dirty: true }),
+    ]);
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.reasons[0]).toMatch(/uncommitted/);
+  });
+
+  describe("integrated with resolveRepoShipState", () => {
+    let db: Database;
+    let runDb: ReturnType<typeof makeRun>;
+    let projectId: string;
+    const tempDirs: string[] = [];
+
+    beforeEach(async () => {
+      db = createTestDb().db;
+      runDb = makeRun(db);
+      projectId = (await runDb(createProject({ name: "ship-gate" }))).id;
+    });
+
+    afterEach(async () => {
+      for (const dir of tempDirs.splice(0)) {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("blocks when a live feature worktree is still linked", async () => {
+      const repo = await makeGitRepo();
+      tempDirs.push(repo);
+      const wt = await addWorktree(repo, "feat/ship");
+      tempDirs.push(path.dirname(wt));
+      const states = await runDb(resolveRepoShipState(projectId, repo, null));
+      expect(evaluateShipReadiness(states).blocked).toBe(true);
+    });
+
+    it("does not block a clean repo with no feature worktree", async () => {
+      const repo = await makeGitRepo();
+      tempDirs.push(repo);
+      const states = await runDb(resolveRepoShipState(projectId, repo, null));
+      expect(evaluateShipReadiness(states).blocked).toBe(false);
+    });
   });
 });

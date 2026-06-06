@@ -89,6 +89,43 @@ export const resolveRepoShipState = (
     return states;
   });
 
+/** Verdict of the `prd done` ship-readiness gate. */
+export type ShipReadiness = {
+  /** True when at least one repo is not shipped/cleaned yet. */
+  blocked: boolean;
+  /** One human-readable reason per offending repo. */
+  reasons: string[];
+};
+
+/**
+ * Decide whether `prd done` should pause for re-confirmation.
+ *
+ * The reliable, squash-safe signal that a PRD has NOT been shipped is a feature
+ * worktree that is still linked: a clean ship removes it (`ship.md` step 3). We
+ * deliberately do not test git merge ancestry — a squash merge never makes the
+ * feature branch an ancestor of base, so an ancestry check would flag every
+ * squash-merged PRD as "unmerged" (the same reason depot dropped SHA tracking).
+ *
+ * A repo with NO feature worktree (work happens on the base checkout directly)
+ * is left alone — the explicit close confirmation is the guard there. Pure
+ * function so the decision is unit-tested without spawning git.
+ */
+export function evaluateShipReadiness(states: RepoShipState[]): ShipReadiness {
+  const reasons: string[] = [];
+  for (const state of states) {
+    if (!state.worktreePath) continue;
+    const branch = state.worktreeBranch ?? "detached";
+    if (state.dirty) {
+      reasons.push(`${state.name}: feature worktree '${branch}' has uncommitted changes`);
+    } else {
+      reasons.push(
+        `${state.name}: feature worktree '${branch}' is still linked — ship cleanup not run (not merged/removed)`,
+      );
+    }
+  }
+  return { blocked: reasons.length > 0, reasons };
+}
+
 /** Render the per-repo ship state as a terminal-friendly block. */
 export function renderRepoShipState(states: RepoShipState[]): string {
   if (states.length === 0) {

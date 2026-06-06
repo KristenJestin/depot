@@ -13,6 +13,8 @@ import coderContent from "#/modules/context/templates/coder.md" with { type: "te
 import auditorContent from "#/modules/context/templates/auditor.md" with { type: "text" };
 import docContent from "#/modules/context/templates/doc.md" with { type: "text" };
 import shipContent from "#/modules/context/templates/ship.md" with { type: "text" };
+import prototypeContent from "#/modules/context/templates/prototype.md" with { type: "text" };
+import ideaContent from "#/modules/context/templates/idea.md" with { type: "text" };
 
 const CONTEXT_TEMPLATES: Record<string, string> = {
   prd: prdContent,
@@ -21,6 +23,8 @@ const CONTEXT_TEMPLATES: Record<string, string> = {
   auditor: auditorContent,
   doc: docContent,
   ship: shipContent,
+  prototype: prototypeContent,
+  idea: ideaContent,
 };
 
 export function getContextTemplate(mode: string): string {

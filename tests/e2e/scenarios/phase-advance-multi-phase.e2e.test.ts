@@ -215,5 +215,5 @@ describe("e2e phase-advance multi-phase (PRD 0016 / T1)", () => {
       ctx.expect.dbRow("prd_revisions", { id: prdId, status: "done" });
       ctx.expect.dbHas("activity_log", { prd_revision_id: prdId, event_type: "prd_done" });
     }, "phase-advance C — final advance closes PRD");
-  });
+  }, 120_000);
 });

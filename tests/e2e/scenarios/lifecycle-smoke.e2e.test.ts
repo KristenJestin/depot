@@ -87,7 +87,7 @@ describe("e2e lifecycle smoke + --user-confirmed transitions (PRD 0015 / T2)", (
         );
       }
 
-      await ctx.agent.run(`depot prd done ${prdId} --user-confirmed 'approve this'`, {
+      await ctx.agent.run(`depot prd done ${prdId} --user-confirmed 'done the prd'`, {
         cwd: repo,
         env: REQUIRE_FLAG,
       });

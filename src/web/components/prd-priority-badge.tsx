@@ -1,13 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Badge } from "#/web/components/ui/badge";
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from "#/web/components/ui/select";
+import { EditableBadge } from "#/web/components/ui/editable-badge";
 import { cn } from "#/web/lib/utils";
 import { VALID_PRD_PRIORITIES, type PrdPriority } from "#/shared/validator";
 
@@ -44,12 +38,24 @@ export function PrdPriorityBadge({
 }
 
 /**
- * Editable priority dropdown — shown on the PRD detail page header. Posts
- * to `PATCH /api/prds/:id/priority` and invalidates the detail query so the
- * page picks up the new value (and the matching activity_log entry) without
- * a full reload.
+ * PRD 0026 / S2 — Editable priority badge. The badge itself is the trigger of
+ * a base-ui `Select`; clicking it opens the four priority options. The actual
+ * mutation lives here so consumers stay one-line: `PATCH /api/prds/:id/priority`
+ * is invoked on selection, and both the list (`["prds"]`) and the detail
+ * (`["prds", prdId]`) queries are invalidated so the UI reflects the new
+ * value and its matching activity_log entry without a full reload.
+ *
+ * Replaces the older `PrdPriorityDropdown` (label + standalone `Select`)
+ * that lived next to a read-only `PrdPriorityBadge` — those two are now one
+ * piece, the badge is the dropdown.
  */
-export function PrdPriorityDropdown({ prdId, priority }: { prdId: string; priority: PrdPriority }) {
+export function PrdPriorityBadgeEditable({
+  prdId,
+  priority,
+}: {
+  prdId: string;
+  priority: PrdPriority;
+}) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: async (next: PrdPriority) => {
@@ -70,30 +76,13 @@ export function PrdPriorityDropdown({ prdId, priority }: { prdId: string; priori
   });
 
   return (
-    <label className="flex items-center gap-1 text-xs text-muted-foreground">
-      <span>Priority:</span>
-      <Select
-        value={priority}
-        disabled={mutation.isPending}
-        onValueChange={(value) => {
-          if (value) mutation.mutate(value as PrdPriority);
-        }}
-      >
-        <SelectTrigger
-          aria-label="PRD priority"
-          className="min-h-7 w-24 px-2 py-1 text-xs"
-          size="sm"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {VALID_PRD_PRIORITIES.map((p) => (
-            <SelectItem key={p} value={p}>
-              {p}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </label>
+    <EditableBadge<PrdPriority>
+      value={priority}
+      variant={priorityVariant(priority)}
+      options={VALID_PRD_PRIORITIES}
+      onChange={(next) => mutation.mutate(next)}
+      ariaLabel="PRD priority"
+      pending={mutation.isPending}
+    />
   );
 }

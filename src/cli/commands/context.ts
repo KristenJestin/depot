@@ -5,6 +5,8 @@ import { renderTemplate } from "#/modules/context/renderer";
 import { runEffect, resolveCurrentWorkspace } from "#/cli/runtime";
 import { getPrd } from "#/modules/prds/domain";
 import { listAnnexes } from "#/modules/prds/annexes";
+import { listIdeas, listPrdIdeas } from "#/modules/ideas/domain";
+import { listPrototypes } from "#/modules/prds/prototypes";
 import { resolveRepoShipState, renderRepoShipState } from "#/modules/context/ship-state";
 import { resolveDocState, renderDocState } from "#/modules/context/doc-state";
 import { listProfiles, listSyncRuns } from "#/modules/docs/sync";
@@ -108,6 +110,55 @@ async function renderAnnexesSection(prdTarget: string): Promise<string | null> {
 }
 
 /**
+ * Render the open-idea recall row (`Ideas   : N open`) embedded in the
+ * `context prd` header (PRD 0027). Surfaces the backlog count where product
+ * framing happens so "don't forget" actually works. Returns `null` when the
+ * workspace cannot be resolved OR when there are zero open ideas (the row is
+ * omitted at zero). `prd` mode only — never rendered for dev/coder/auditor.
+ */
+async function renderOpenIdeaCountRow(): Promise<string | null> {
+  try {
+    const { ws } = await resolveCurrentWorkspace({ autoCreate: false, throwOnMissing: true });
+    const open = await runEffect(listIdeas(ws.projectId, { status: "open" }));
+    if (open.length === 0) return null;
+    return `Ideas   : ${open.length} open`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Render the "Source ideas" section for the PRD embedded in the `context prd`
+ * header (PRD 0027). Lists each linked source idea's title + FULL body verbatim
+ * so the PRD agent reads the raw, uncommitted need before grilling. Ideas are
+ * short by construction, so the full body is inlined (unlike annexes, which are
+ * read on demand). Best-effort: any resolution failure — or a PRD with no
+ * linked ideas — yields `null` so nothing is rendered. `prd` mode only.
+ */
+async function renderSourceIdeasSection(prdTarget: string): Promise<string | null> {
+  if (!prdTarget) return null;
+  try {
+    const linked = await runEffect(listPrdIdeas(prdTarget));
+    if (linked.length === 0) return null;
+    const lines = ["## Source ideas", ""];
+    lines.push("The raw, uncommitted needs that motivated this PRD. Read them before framing.");
+    for (const idea of linked) {
+      lines.push("");
+      const tag = idea.tag ? ` [${idea.tag}]` : "";
+      lines.push(`### ${idea.title}${tag}`);
+      lines.push(`(idea ${idea.id})`);
+      if (idea.body) {
+        lines.push("");
+        lines.push(idea.body);
+      }
+    }
+    return lines.join("\n");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Pass the resolved static template body through `renderTemplate`, which
  * substitutes `{{directives …}}` / `{{hooks …}}` markers with the project's
  * current directives. The renderer is best-effort: any failure (workspace not
@@ -145,15 +196,15 @@ export const contextCommand = command({
   meta: { name: "context", description: "Emit static agent context for the current workspace" },
   args: {
     mode: {
-      schema: Schema.Literal("prd", "dev", "coder", "auditor", "doc", "ship"),
+      schema: Schema.Literal("prd", "dev", "coder", "auditor", "doc", "ship", "prototype", "idea"),
       positional: true,
-      description: "Context mode (prd/dev/coder/auditor/doc/ship)",
+      description: "Context mode (prd/dev/coder/auditor/doc/ship/prototype/idea)",
     },
     prdTarget: {
       schema: Schema.String,
       positional: true,
       default: "",
-      description: "PRD ID or title to embed in the header (dev/coder/auditor/ship mode)",
+      description: "PRD ID or title to embed in the header (dev/coder/auditor/ship/prototype mode)",
     },
     review: {
       schema: Schema.String,
@@ -163,6 +214,11 @@ export const contextCommand = command({
       schema: Schema.Literal("standards", "spec"),
       description:
         "Auditor axis (auditor mode only). Required: the dev orchestrator spawns one auditor per axis.",
+    },
+    prototype: {
+      schema: Schema.String,
+      description:
+        "Prototype slug (prototype mode only). Optional when the PRD has exactly one prototype.",
     },
   },
   run: async ({ args, output }) => {
@@ -205,6 +261,13 @@ export const contextCommand = command({
       lines.push(`Axis    : ${args.axis}`);
     }
 
+    // Recall row (PRD 0027): surface the open-idea backlog count where product
+    // framing happens. `prd` mode ONLY — dev/coder/auditor must not see it.
+    const openIdeaCountRow = mode === "prd" ? await renderOpenIdeaCountRow() : null;
+    if (openIdeaCountRow) {
+      lines.push(openIdeaCountRow);
+    }
+
     if (mode === "ship") {
       lines.push(await renderShipState(args.prdTarget ?? ""));
     }
@@ -218,20 +281,86 @@ export const contextCommand = command({
       lines.push(annexesSection);
     }
 
+    // Source ideas (PRD 0027): the raw needs that motivated this PRD, rendered
+    // full-body. `prd` mode ONLY — never leaked into dev/coder/auditor.
+    const sourceIdeasSection =
+      mode === "prd" ? await renderSourceIdeasSection(args.prdTarget ?? "") : null;
+    if (sourceIdeasSection) {
+      lines.push(sourceIdeasSection);
+    }
+
     if (
       currentRepoLine ||
       args.prdTarget ||
       args.review ||
       args.axis ||
+      openIdeaCountRow ||
       mode === "ship" ||
       mode === "doc" ||
-      annexesSection
+      annexesSection ||
+      sourceIdeasSection
     ) {
       lines.push("");
     }
 
     if (mode) {
-      const template = getContextTemplate(mode);
+      let template = getContextTemplate(mode);
+      // Prototype mode: resolve the prototype id from the PRD + slug and
+      // patch the `{{prototype_state prototypeId=<id>}}` marker before the
+      // generic renderer runs over the template. Fail loud rather than
+      // letting the marker pass through with a literal `<id>` placeholder.
+      if (mode === "prototype") {
+        const prdRef = args.prdTarget ?? "";
+        if (!prdRef) {
+          return output.error(
+            "missing_prd",
+            "depot context prototype requires a PRD revision id positional argument.",
+          );
+        }
+        try {
+          const prd = await runEffect(getPrd(prdRef));
+          if (!prd) {
+            return output.error("not_found", `PRD not found: ${prdRef}`);
+          }
+          const protos = await runEffect(listPrototypes(prd.id));
+          if (protos.length === 0) {
+            // No prototype yet — `context prototype` is the documented entry
+            // point, so emit the sub-agent context anyway and turn the state
+            // marker into a "create one first" instruction. The sub-agent's
+            // "Persisting your work" section documents `prd prototype create`.
+            template = template.replace(
+              /\{\{prototype_state prototypeId=<id>\}\}/g,
+              `No prototype exists yet for this PRD. Create one as your first step:\n\n\`\`\`\ndepot prd prototype create ${prdRef} <slug>\n\`\`\``,
+            );
+          } else {
+            const wanted = args.prototype;
+            let chosen = protos[0]!;
+            if (wanted) {
+              const found = protos.find((p) => p.slug === wanted);
+              if (!found) {
+                return output.error(
+                  "no_prototype",
+                  `PRD ${prdRef} has no prototype slug '${wanted}'. Available: ${protos.map((p) => p.slug).join(", ")}.`,
+                );
+              }
+              chosen = found;
+            } else if (protos.length > 1) {
+              return output.error(
+                "ambiguous_prototype",
+                `PRD ${prdRef} has ${protos.length} prototypes; pass --prototype <slug>. Available: ${protos.map((p) => p.slug).join(", ")}.`,
+              );
+            }
+            template = template.replace(
+              /\{\{prototype_state prototypeId=<id>\}\}/g,
+              `{{prototype_state prototypeId=${chosen.id}}}`,
+            );
+          }
+        } catch (e) {
+          log.error(
+            `Warning: could not resolve prototype context (${e instanceof Error ? e.message : String(e)})`,
+          );
+        }
+      }
       lines.push(await renderTemplateWithFallback(template));
     }
 

@@ -1,6 +1,14 @@
 import { Effect } from "effect";
 import { eq } from "drizzle-orm";
-import { prds, prdRevisions, prdRepos, prdAnnexes, tasks } from "#/db/schema";
+import {
+  prds,
+  prdRevisions,
+  prdRepos,
+  prdAnnexes,
+  prdDesignLock,
+  tasks,
+  taskPrototypePages,
+} from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
 import {
@@ -399,6 +407,44 @@ export const donePrd = (id: string) =>
     return rows[0]!;
   });
 
+/**
+ * Distill the chosen prototype design's placement into the PRD (PRD 0028).
+ * Stores the placement spec and stamps `designDistilledAt`, the marker the
+ * `prd ready` design-lock gate requires. Idempotent: re-distilling overwrites
+ * the spec and refreshes the marker.
+ */
+export const distillDesign = (prdRevisionId: string, input: { placementSpec: string }) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(prdRevisionId);
+    if (!rev) return yield* Effect.fail(new PrdNotFoundError({ id: prdRevisionId }));
+    if (input.placementSpec.trim().length === 0) {
+      return yield* Effect.fail(
+        new ValidationError({ reason: "placement spec must not be empty" }),
+      );
+    }
+    const trimmed = input.placementSpec.trim();
+    const distilledAt = new Date();
+    const rows = yield* dbQuery(() =>
+      db
+        .insert(prdDesignLock)
+        .values({ prdRevisionId, placementSpec: trimmed, distilledAt })
+        .onConflictDoUpdate({
+          target: prdDesignLock.prdRevisionId,
+          set: { placementSpec: trimmed, distilledAt },
+        })
+        .returning(),
+    );
+    yield* logActivity({
+      projectId: rev.projectId,
+      workspaceId: rev.workspaceId ?? undefined,
+      prdRevisionId,
+      eventType: "prd_design_distilled",
+      payload: { prdRevisionId, length: trimmed.length },
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    return rows[0]!;
+  });
+
 export const cancelPrd = (id: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
@@ -601,6 +647,35 @@ export const forkPrd = (id: string) =>
           dependsOn: JSON.stringify(remappedDeps),
         }),
       );
+    }
+
+    // PRD 0025: recopy every prototype + page + version + variant + feedback
+    // onto the new revision so the fork is self-contained, on the same model
+    // as the prd_repo scope above. Lazy import avoids a domain ↔ prototypes
+    // circular import at module init time. The returned map (old → new page id)
+    // lets the task ↔ page links below be rebuilt onto the fork's own pages.
+    const { forkPrototypes } = yield* Effect.promise(() => import("#/modules/prds/prototypes"));
+    const pageIdMap = yield* forkPrototypes(rev.id, newRevId);
+
+    // PRD 0030 / issue 04: carry the `task_prototype_pages` links onto the fork,
+    // remapping both ends — the task via the clone `idMap`, the page via the
+    // prototype fork's `pageIdMap` — so "this task realises these pages"
+    // survives the fork.
+    const sourceTaskIds = sourceTasks.map((t) => t.id);
+    if (sourceTaskIds.length > 0) {
+      const sourceLinks = yield* dbQuery(() =>
+        db.query.taskPrototypePages.findMany({
+          where: { taskId: { in: sourceTaskIds } },
+        }),
+      );
+      for (const link of sourceLinks) {
+        const newTaskId = idMap.get(link.taskId);
+        const newPageId = pageIdMap.get(link.pageId);
+        if (!newTaskId || !newPageId) continue;
+        yield* dbQuery(() =>
+          db.insert(taskPrototypePages).values({ taskId: newTaskId, pageId: newPageId }),
+        );
+      }
     }
 
     yield* logActivity({
@@ -1040,6 +1115,36 @@ export const phaseAdvance = (id: string) =>
       }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       return { prd: rows[0]!, advanced: false as const };
     }
+  });
+
+/**
+ * Whether `phaseAdvance` on this PRD would CLOSE it (mark it done) rather than
+ * move on to a further phase — i.e. the terminal branch of `phaseAdvance`,
+ * reached when the PRD is in `review` with a current phase and no tasks remain
+ * in the next phase. The CLI uses this to require an explicit close
+ * confirmation only on the advance that actually finishes the PRD; intermediate
+ * advances stay permissive. Returns `false` for any state where advancing is
+ * not (yet) a close — the domain `phaseAdvance` then surfaces its own error.
+ */
+export const phaseAdvanceClosesPrd = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rev = yield* getPrd(id);
+    if (
+      !rev ||
+      rev.status !== "review" ||
+      rev.currentPhase === null ||
+      rev.currentPhase === undefined
+    ) {
+      return false;
+    }
+    const currentPhase = rev.currentPhase;
+    const nextPhaseTasks = yield* dbQuery(() =>
+      db.query.tasks.findMany({
+        where: { prdRevisionId: id, phaseNumber: currentPhase + 1, reviewId: { isNull: true } },
+      }),
+    );
+    return nextPhaseTasks.length === 0;
   });
 
 export const updateSuggestedCommitMessage = (id: string, message: string | null) =>

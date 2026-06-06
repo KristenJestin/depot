@@ -26,4 +26,18 @@ describe("AppShell", () => {
     expect(content).toBeInTheDocument();
     expect(content.closest("main")).not.toBeNull();
   });
+
+  it("contains the page scroll: main is overflow-hidden so the card frame never gets pushed out", () => {
+    render(
+      <AppShell>
+        <div data-testid="route-content">route body</div>
+      </AppShell>,
+    );
+    const main = screen.getByTestId("route-content").closest("main");
+    expect(main).not.toBeNull();
+    // PRD 0026 / S1 — the global main must NOT absorb the vertical scroll of
+    // the routes. Each route declares its own scrollable region.
+    expect(main!.className).toContain("overflow-hidden");
+    expect(main!.className).not.toContain("overflow-auto");
+  });
 });

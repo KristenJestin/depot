@@ -14,6 +14,7 @@ import * as DomainTags from "#/modules/prds/tags";
 import * as DomainDependencies from "#/modules/prds/dependencies";
 import * as DomainMilestones from "#/modules/prds/milestones";
 import * as DomainAnnexes from "#/modules/prds/annexes";
+import * as DomainIdeas from "#/modules/ideas/domain";
 import { logActivity } from "#/modules/activity/domain";
 import {
   invalidTagReason,
@@ -425,6 +426,21 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
       (name) => !annexNames.has(name),
     );
 
+    // Source ideas (PRD 0027 / T7): the uncommitted ideas that motivated this
+    // PRD, attached to the *logical* PRD so they survive forks (like tags /
+    // dependencies). Surfaced on the detail payload the same way annexes are.
+    // Ideas are short by construction, so the full `body` ships inline.
+    const sourceIdeaRows = await getRuntime().runPromise(DomainIdeas.listPrdIdeas(prd.prdId));
+    const sourceIdeas = sourceIdeaRows.map((idea) => ({
+      id: idea.id,
+      title: idea.title,
+      body: idea.body,
+      tag: idea.tag,
+      status: idea.status,
+      promotedPrdId: idea.promotedPrdId,
+      createdAt: idea.createdAt,
+    }));
+
     return c.json(
       {
         prd: { ...prd, priority },
@@ -439,6 +455,7 @@ export const prdsRoutes = new Hono<{ Variables: Variables }>()
         dependents,
         annexes,
         brokenAnnexRefs,
+        sourceIdeas,
       },
       200,
     );

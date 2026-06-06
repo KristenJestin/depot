@@ -105,9 +105,16 @@ describe("e2e: depot serve + HTTP probes (PRD 0016 / T2, PRD 0017 / T3)", () => 
           `GET /: expected status 200 (API-only mode), got ${rootRes.status} — body: ${await rootRes.text()}`,
         );
       }
+      // `/` serves the SPA shell when the web bundle (dist/web) is present, or a
+      // plain "API-only mode" notice otherwise — both are valid HTTP 200
+      // responses. Assert the server answered `/` in either mode rather than
+      // pinning to one (the bundle's presence depends on whether `vp build` ran).
       const rootBody = await rootRes.text();
-      if (!rootBody.includes("API-only mode")) {
-        throw new Error(`GET /: expected body to contain 'API-only mode', got: ${rootBody}`);
+      const servesShell = /<!doctype html/i.test(rootBody);
+      if (!servesShell && !rootBody.includes("API-only mode")) {
+        throw new Error(
+          `GET /: expected the SPA shell or the API-only notice, got: ${rootBody.slice(0, 200)}`,
+        );
       }
 
       handle.kill();

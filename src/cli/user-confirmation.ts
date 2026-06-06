@@ -89,6 +89,52 @@ export function requireUserConfirmation(
 }
 
 /**
+ * Explicit close-intent markers (FR + EN, the team's franglais). A `prd done`
+ * confirmation quote must contain one of these.
+ *
+ * The presence check (`requireUserConfirmation`) only proves the agent quoted
+ * *something*; it accepts "ok" or "go". That is fine for opening a PRD or
+ * launching execution, but closing a PRD is terminal — and an agent will
+ * happily repurpose a casual "ok pour moi commit tout" as the close quote. So
+ * `prd done` additionally requires the quote to carry explicit close intent.
+ * The list is deliberately small and strong (rarely ambiguous in this context);
+ * false negatives are the safe direction — they make the agent ask the user to
+ * confirm the closure explicitly rather than guess.
+ */
+const CLOSE_INTENT_PATTERNS: readonly RegExp[] = [
+  /\bdone\b/, // "done le prd", "marque done", "passe en done"
+  /cl[oô]tur/, // clôture, clôturer, cloturer
+  /\bclose\b/, // "close the prd"
+  /\bship\b/, // "ship it", "on ship"
+  /finalis/, // finalise, finaliser
+];
+
+function normalizeConfirmation(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+/**
+ * Whether `quote` explicitly expresses intent to close/finish the PRD, as
+ * opposed to a generic acknowledgement ("ok", "c'est bon pour moi") or an
+ * approval scoped to a different step ("commit tout"). Gates `prd done`.
+ */
+export function hasExplicitCloseIntent(quote: string): boolean {
+  const normalized = normalizeConfirmation(quote);
+  if (normalized.length === 0) return false;
+  return CLOSE_INTENT_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/** Guidance shown when a `prd done` confirmation carries no close intent. */
+export function explicitCloseConfirmationMessage(commandPath: string): string {
+  return (
+    `${commandPath} needs an explicit confirmation that the PRD is to be CLOSED. ` +
+    `A generic approval — "ok", "c'est bon pour moi", "commit tout" — authorises that step, not closing the PRD. ` +
+    `Ask the user to confirm explicitly (e.g. "done le PRD", "on clôture", "ship it"), then pass that verbatim quote to --user-confirmed. ` +
+    `Tests/admin may set ${BYPASS_ENV_VAR}=1 to skip this gate.`
+  );
+}
+
+/**
  * Patch the most recent `activity_log` row for `(prdRevisionId, eventType)`
  * to add a `userConfirmation` field on the JSON payload. Used as a post-hook
  * after a domain transition function returns so the CLI can attach the user's

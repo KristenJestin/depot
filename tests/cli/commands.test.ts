@@ -3281,4 +3281,106 @@ describe("CLI commands", () => {
       expect(tasks[0]!.repoId).toBeNull();
     });
   });
+
+  describe("task page (PRD 0030 / 04)", () => {
+    const prov = <A>(effect: Effect.Effect<A, any, Db>): Promise<A> =>
+      Effect.runPromise(Effect.provideService(effect, Db, db));
+
+    async function setupTaskAndPage() {
+      const { createPrototype, addPage } = await import("#/modules/prds/prototypes");
+      const prd = await createPrd(db, { projectId, title: "Page PRD" });
+      const task = await createTask(db, {
+        prdRevisionId: prd.id,
+        title: "T",
+        description: "Intent:\nx",
+        doneCriteria: "ok",
+        effort: "s",
+      });
+      const proto = await prov(createPrototype({ prdRevisionId: prd.id, slug: "proto" }));
+      const page = await prov(addPage({ prototypeId: proto.id, slug: "home", title: "Home" }));
+      return { task, page };
+    }
+
+    it("`task page add` then `list` round-trips the link", async () => {
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const pageCmd = await getSubCommand(taskCommand, "page");
+      const add = await getSubCommand(pageCmd as { subCommands?: unknown }, "add");
+      const list = await getSubCommand(pageCmd as { subCommands?: unknown }, "list");
+
+      const { task, page } = await setupTaskAndPage();
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await add.run({ args: { taskId: task.id, pageId: page.id } });
+      stdout.mockRestore();
+
+      const link = await db.query.taskPrototypePages.findFirst({
+        where: { taskId: task.id, pageId: page.id },
+      });
+      expect(link).toBeTruthy();
+
+      const json = await captureStdout(async () => {
+        setJsonMode(true);
+        try {
+          await list.run({ args: { taskId: task.id } });
+        } finally {
+          setJsonMode(false);
+        }
+      });
+      const env = JSON.parse(json.trim()) as {
+        kind: string;
+        payload: { items: Array<{ id: string; slug: string }> };
+      };
+      expect(env.kind).toBe("success");
+      expect(env.payload.items.map((p) => p.id)).toEqual([page.id]);
+    });
+
+    it("`task page remove` drops the link", async () => {
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const pageCmd = await getSubCommand(taskCommand, "page");
+      const add = await getSubCommand(pageCmd as { subCommands?: unknown }, "add");
+      const remove = await getSubCommand(pageCmd as { subCommands?: unknown }, "remove");
+
+      const { task, page } = await setupTaskAndPage();
+
+      const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+      await add.run({ args: { taskId: task.id, pageId: page.id } });
+      await remove.run({ args: { taskId: task.id, pageId: page.id } });
+      stdout.mockRestore();
+
+      const link = await db.query.taskPrototypePages.findFirst({
+        where: { taskId: task.id, pageId: page.id },
+      });
+      expect(link).toBeUndefined();
+    });
+
+    it("`task page add` errors on a cross-PRD link", async () => {
+      const { createPrototype, addPage } = await import("#/modules/prds/prototypes");
+      const { taskCommand } = await import("#/cli/commands/tasks");
+      const pageCmd = await getSubCommand(taskCommand, "page");
+      const add = await getSubCommand(pageCmd as { subCommands?: unknown }, "add");
+
+      const prdA = await createPrd(db, { projectId, title: "A" });
+      const prdB = await createPrd(db, { projectId, title: "B" });
+      const taskA = await createTask(db, {
+        prdRevisionId: prdA.id,
+        title: "TA",
+        description: "Intent:\nx",
+        doneCriteria: "ok",
+        effort: "s",
+      });
+      const protoB = await prov(createPrototype({ prdRevisionId: prdB.id, slug: "proto" }));
+      const pageB = await prov(addPage({ prototypeId: protoB.id, slug: "home", title: "Home" }));
+
+      // The cross-PRD guard rejects (mapped to a CLI error + exit 1 by the
+      // top-level runMain wrapper in production); the link is never written.
+      await expect(add.run({ args: { taskId: taskA.id, pageId: pageB.id } })).rejects.toThrow(
+        /does not belong to PRD/,
+      );
+
+      const link = await db.query.taskPrototypePages.findFirst({
+        where: { taskId: taskA.id, pageId: pageB.id },
+      });
+      expect(link).toBeUndefined();
+    });
+  });
 });

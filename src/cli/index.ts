@@ -12,6 +12,7 @@ import { docCommand } from "./commands/docs";
 import { pendingCommand } from "./commands/pending";
 import { serveCommand } from "./commands/serve";
 import { adrCommand } from "./commands/adrs";
+import { ideaCommand } from "./commands/idea";
 import { command } from "#/cli/command";
 import { formatError } from "#/cli/error-format";
 import { setDebug, setJsonMode } from "#/shared/logger";
@@ -71,6 +72,7 @@ const main = command({
     pending: pendingCommand,
     serve: serveCommand,
     adr: adrCommand,
+    idea: ideaCommand,
   },
 });
 

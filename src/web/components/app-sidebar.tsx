@@ -13,6 +13,7 @@ import {
   FolderOpenIcon,
   FoldersIcon,
   LayoutDashboardIcon,
+  LightbulbIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   PlusIcon,
@@ -319,6 +320,60 @@ function SidebarLink({
   );
 }
 
+/**
+ * "Ideas" sub-nav entry for the active project (PRD 0027 / T7). Behaves like a
+ * `SidebarLink` but surfaces the project's open-idea count as a badge so the
+ * recall guardrail ("don't forget") is visible from the shell. The count comes
+ * from the same read-only list endpoint the Ideas page uses; a 0 count hides
+ * the badge.
+ */
+function IdeasSidebarLink({ projectId, collapsed }: { projectId: string; collapsed: boolean }) {
+  const { data } = useQuery({
+    queryKey: ["projects", projectId, "ideas", "open-count"],
+    queryFn: async (): Promise<number> => {
+      const res = await fetch(`/api/projects/${projectId}/ideas?status=open`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { openCount: number };
+      return body.openCount;
+    },
+    staleTime: 30_000,
+  });
+  const openCount = data ?? 0;
+
+  return (
+    <Link
+      to="/projects/$id/ideas"
+      params={{ id: projectId }}
+      title={collapsed ? `Ideas${openCount > 0 ? ` (${openCount} open)` : ""}` : undefined}
+      className="block no-underline"
+    >
+      {({ isActive }) => (
+        <div
+          className={cn(
+            "flex h-8 items-center gap-2 rounded-lg border border-transparent text-sm font-medium transition-colors",
+            collapsed ? "justify-center px-0" : "px-3",
+            isActive
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          )}
+        >
+          <LightbulbIcon className="size-4 shrink-0" />
+          {!collapsed && (
+            <>
+              <span className="min-w-0 flex-1 truncate">Ideas</span>
+              {openCount > 0 && (
+                <span className="shrink-0 text-xs tabular-nums text-sidebar-foreground/50">
+                  {openCount}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </Link>
+  );
+}
+
 function SidebarPrdLink({ prd, collapsed }: { prd: SidebarPrd; collapsed: boolean }) {
   return (
     <Link
@@ -453,6 +508,7 @@ export function AppSidebar() {
                 icon={BookOpenIcon}
                 collapsed={collapsed}
               />
+              <IdeasSidebarLink projectId={activeProjectId} collapsed={collapsed} />
               <SidebarLink
                 to="/projects/$id/settings"
                 params={{ id: activeProjectId }}

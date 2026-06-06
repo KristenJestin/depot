@@ -2,7 +2,14 @@ import { Effect } from "effect";
 import { eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { prdRevisions, tasks } from "#/db/schema";
+import {
+  prdRevisions,
+  tasks,
+  taskUserStories,
+  outOfScopeItems,
+  activityLog,
+  taskPrototypePages,
+} from "#/db/schema";
 import { generateId } from "#/shared/utils";
 import { normalizeTaskDescriptionForStorage } from "#/modules/tasks/spec";
 import {
@@ -19,6 +26,7 @@ import {
   DependencyNotDoneError,
   InvalidTransitionError,
   ValidationError,
+  DatabaseError,
 } from "#/shared/errors";
 import { dbQuery } from "#/shared/db";
 import { logActivity } from "#/modules/activity/domain";
@@ -464,7 +472,27 @@ export const deleteTask = (id: string) =>
       );
     }
     const prd = yield* getPrd(task.prdRevisionId);
-    yield* dbQuery(() => db.delete(tasks).where(eq(tasks.id, id)));
+    // Even a never-started task is referenced by NO ACTION foreign keys —
+    // always its `task_created` audit event, plus any story links or a review's
+    // out-of-scope back-reference. SQLite refuses the delete while those rows
+    // exist (`FOREIGN KEY constraint failed`), so clear them first, atomically.
+    // Audit rows are dropped (the task never shipped; the `task_deleted` event
+    // below records the removal); the out-of-scope link is nulled to preserve
+    // that decision's row.
+    yield* Effect.try({
+      try: () =>
+        db.transaction((tx) => {
+          tx.delete(taskUserStories).where(eq(taskUserStories.taskId, id)).run();
+          tx.delete(taskPrototypePages).where(eq(taskPrototypePages.taskId, id)).run();
+          tx.update(outOfScopeItems)
+            .set({ linkedReviewTaskId: null })
+            .where(eq(outOfScopeItems.linkedReviewTaskId, id))
+            .run();
+          tx.delete(activityLog).where(eq(activityLog.taskId, id)).run();
+          tx.delete(tasks).where(eq(tasks.id, id)).run();
+        }),
+      catch: (e) => new DatabaseError({ cause: e }),
+    });
     if (prd) {
       yield* logActivity({
         projectId: prd.projectId,

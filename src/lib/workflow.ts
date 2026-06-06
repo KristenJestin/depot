@@ -228,6 +228,10 @@ export function skipTask(db: Database, id: string, reason: string) {
   return runWithDb(db, DomainTasks.skipTask(id, reason));
 }
 
+export function deleteTask(db: Database, id: string) {
+  return runWithDb(db, DomainTasks.deleteTask(id));
+}
+
 export function triageTask(
   db: Database,
   id: string,

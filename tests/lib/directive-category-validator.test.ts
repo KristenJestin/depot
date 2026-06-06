@@ -10,8 +10,16 @@ import {
 } from "#/shared/validator";
 
 describe("directive (category, scope) validator (PRD 0013 / T1)", () => {
-  it("exposes the 6 canonical categories", () => {
-    expect(VALID_DIRECTIVE_CATEGORIES).toEqual(["prd", "dev", "coder", "auditor", "doc", "ship"]);
+  it("exposes the 7 canonical categories (prd + dev + coder + auditor + doc + ship + prototype)", () => {
+    expect(VALID_DIRECTIVE_CATEGORIES).toEqual([
+      "prd",
+      "dev",
+      "coder",
+      "auditor",
+      "doc",
+      "ship",
+      "prototype",
+    ]);
   });
 
   it("recognises the 4 new orchestrator-flow scopes alongside the legacy ones", () => {
@@ -44,8 +52,9 @@ describe("directive (category, scope) validator (PRD 0013 / T1)", () => {
       ["doc", "pre-doc-sync"],
       ["ship", "always"],
       ["ship", "pre-ship"],
+      ["prototype", "always"],
     ];
-    expect(expected).toHaveLength(15);
+    expect(expected).toHaveLength(16);
     for (const [category, scope] of expected) {
       expect(isValidCategoryScope(category, scope)).toBe(true);
     }
@@ -60,7 +69,7 @@ describe("directive (category, scope) validator (PRD 0013 / T1)", () => {
         if (fromTable) validCount += 1;
       }
     }
-    expect(validCount).toBe(15);
+    expect(validCount).toBe(16);
   });
 
   it("rejects representative invalid combinations", () => {
@@ -76,6 +85,8 @@ describe("directive (category, scope) validator (PRD 0013 / T1)", () => {
     expect(isValidCategoryScope("dev", "pre-commit")).toBe(false);
     expect(isValidCategoryScope("dev", "pre-ship")).toBe(false);
     expect(isValidCategoryScope("dev", "on-error")).toBe(false);
+    expect(isValidCategoryScope("prototype", "pre-review")).toBe(false);
+    expect(isValidCategoryScope("prototype", "pre-commit")).toBe(false);
   });
 
   it("validScopesForCategory returns the lookup table entry verbatim", () => {
@@ -92,5 +103,6 @@ describe("directive (category, scope) validator (PRD 0013 / T1)", () => {
     expect(validScopesForCategory("auditor")).toEqual(["always", "pre-review"]);
     expect(validScopesForCategory("doc")).toEqual(["always", "pre-doc-sync"]);
     expect(validScopesForCategory("ship")).toEqual(["always", "pre-ship"]);
+    expect(validScopesForCategory("prototype")).toEqual(["always"]);
   });
 });

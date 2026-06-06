@@ -16,6 +16,9 @@ import * as DomainPrdRepos from "#/modules/prds/repos";
 import * as DomainPrdTags from "#/modules/prds/tags";
 import * as DomainAnnexes from "#/modules/prds/annexes";
 import * as DomainDependencies from "#/modules/prds/dependencies";
+import { evaluateShipReadiness, resolveRepoShipState } from "#/modules/context/ship-state";
+import { evaluateDesignReadiness } from "#/modules/prds/prototypes";
+import * as DomainIdeas from "#/modules/ideas/domain";
 import { logActivity } from "#/modules/activity/domain";
 import { effortSchema } from "#/shared/schemas";
 import { formatDate, formatDateWithRelative } from "#/shared/utils";
@@ -30,9 +33,12 @@ import {
 } from "#/shared/validator";
 import {
   attachUserConfirmationToLatestActivity,
+  explicitCloseConfirmationMessage,
+  hasExplicitCloseIntent,
   requireUserConfirmation,
   userConfirmedArg,
 } from "#/cli/user-confirmation";
+import { prototypeCommand } from "#/cli/commands/prd-prototype";
 
 const createCommand = command({
   meta: { name: "create", description: "Create a new PRD in draft status" },
@@ -530,10 +536,30 @@ const readyCommand = command({
       positional: true,
       description: "PRD ID",
     },
+    skipDesignLock: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      description: "Skip the design-lock gate (unelected prototype variants / undistilled design)",
+    },
     userConfirmed: userConfirmedArg,
   },
   run: async ({ args, output }) => {
     const userConfirmation = requireUserConfirmation(args, "depot prd ready", output);
+    // Design-lock gate (PRD 0028): a PRD with prototypes must not enter the
+    // commitment lifecycle while the design is still open — every page elected,
+    // the chosen design distilled into the PRD. Soft + shuntable, like the
+    // `prd done` ship gate; skipped under the bypass env and `--skip-design-lock`.
+    if (userConfirmation !== null && args.skipDesignLock !== true) {
+      const readiness = await runEffect(evaluateDesignReadiness(args.prdId));
+      if (readiness.blocked) {
+        return output.error(
+          "prd_design_not_locked",
+          `depot prd ready: the prototype design is not locked yet:\n  - ${readiness.reasons.join("\n  - ")}\n` +
+            `Elect a variant per page (depot prd prototype variant elect), distill it ` +
+            `(depot prd prototype distill), re-confirm with the user, or pass --skip-design-lock.`,
+        );
+      }
+    }
     const updated = await runEffect(
       DomainPrds.markPrdReady(args.prdId).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
@@ -570,10 +596,43 @@ const doneCommand = command({
       schema: Schema.String.pipe(Schema.minLength(1)),
       description: "Approval comment / rationale (recorded in activity log)",
     },
+    skipShipCheck: {
+      schema: Schema.Boolean,
+      type: "boolean",
+      description:
+        "Skip the ship-readiness check (lingering feature worktree / uncommitted changes)",
+    },
     userConfirmed: userConfirmedArg,
   },
-  run: async ({ args, output }) => {
+  run: async ({ args, ws, output }) => {
     const userConfirmation = requireUserConfirmation(args, "depot prd done", output);
+    // Presence alone is not enough for a terminal close: a generic "ok" /
+    // commit approval must not be repurposed as a decision to close the PRD.
+    // `null` means the bypass env is active (tests/admin) — skip the check.
+    if (userConfirmation !== null && !hasExplicitCloseIntent(userConfirmation)) {
+      return output.error(
+        "user_confirmation_not_explicit",
+        explicitCloseConfirmationMessage("depot prd done"),
+      );
+    }
+    // Soft ship-readiness gate: a still-linked feature worktree means the ship
+    // cleanup never ran (the PRD is not actually merged/shipped). Skipped under
+    // the bypass env and when --skip-ship-check is passed.
+    if (userConfirmation !== null && args.skipShipCheck !== true) {
+      const prd = await runEffect(DomainPrds.getPrd(args.prdId));
+      if (prd) {
+        const states = await runEffect(resolveRepoShipState(prd.projectId, ws.path, null));
+        const readiness = evaluateShipReadiness(states);
+        if (readiness.blocked) {
+          return output.error(
+            "prd_not_shipped",
+            `depot prd done: this PRD does not look shipped yet:\n  - ${readiness.reasons.join("\n  - ")}\n` +
+              `Finish the ship (merge + remove the feature worktree), re-confirm with the user, ` +
+              `or pass --skip-ship-check to close it anyway.`,
+          );
+        }
+      }
+    }
     const updated = await runEffect(
       DomainPrds.donePrd(args.prdId).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
@@ -977,6 +1036,17 @@ const phaseAdvanceCommand = command({
   },
   run: async ({ args, output }) => {
     const userConfirmation = requireUserConfirmation(args, "depot prd phase-advance", output);
+    // The final advance closes the PRD — apply the same explicit close-intent
+    // rule as `prd done`. Intermediate advances stay permissive.
+    if (userConfirmation !== null && !hasExplicitCloseIntent(userConfirmation)) {
+      const closes = await runEffect(DomainPrds.phaseAdvanceClosesPrd(args.prdId));
+      if (closes) {
+        return output.error(
+          "user_confirmation_not_explicit",
+          explicitCloseConfirmationMessage("depot prd phase-advance"),
+        );
+      }
+    }
     const result = await runEffect(
       DomainPrds.phaseAdvance(args.prdId).pipe(
         Effect.catchTag("PrdNotFoundError", () => Effect.succeed(null)),
@@ -1506,6 +1576,14 @@ const closeCommand = command({
     // user confirmation. The same literal quote is attached to all three
     // activity_log events so the audit trail shows the wrapper as one unit.
     const userConfirmation = requireUserConfirmation(args, "depot prd close", output);
+    // `close` always lands on `done`, so it needs the same explicit close intent
+    // as `prd done` — a generic "ok" must not walk the PRD all the way to done.
+    if (userConfirmation !== null && !hasExplicitCloseIntent(userConfirmation)) {
+      return output.error(
+        "user_confirmation_not_explicit",
+        explicitCloseConfirmationMessage("depot prd close"),
+      );
+    }
     const prd = await runEffect(DomainPrds.getPrd(args.prdId));
     if (!prd) return output.error("not_found", `PRD not found: ${args.prdId}`);
 
@@ -2414,9 +2492,13 @@ const oosAddCommand = command({
   meta: { name: "add", description: "Record a deliberate out-of-scope decision" },
   workspace: true,
   args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      positional: true,
+      description: "PRD revision ID to scope this item to (omit for a project-wide item)",
+    },
     title: { schema: Schema.String.pipe(Schema.minLength(1)), required: true, alias: "t" },
     reason: { schema: Schema.String.pipe(Schema.minLength(1)), required: true, alias: "r" },
-    prdId: { schema: Schema.String.pipe(Schema.minLength(1)), alias: "p" },
     decidedBy: { schema: Schema.String, alias: "b" },
   },
   run: async ({ args, ws, output }) => {
@@ -2438,7 +2520,11 @@ const oosListCommand = command({
   meta: { name: "list", description: "List out-of-scope items" },
   workspace: true,
   args: {
-    prdId: { schema: Schema.String.pipe(Schema.minLength(1)), alias: "p" },
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      positional: true,
+      description: "PRD revision ID to filter by (omit to list project-wide + all PRD items)",
+    },
   },
   run: async ({ args, ws, output }) => {
     const items = await runEffect(
@@ -2481,7 +2567,14 @@ const oosRemoveCommand = command({
 
 const outOfScopeCommand = command({
   meta: { name: "out-of-scope", description: "Out-of-scope items" },
-  subCommands: { add: oosAddCommand, list: oosListCommand, remove: oosRemoveCommand },
+  // `rm` mirrors the destructive-subcommand convention used elsewhere (annex rm,
+  // variant rm); `remove` stays as an alias for backward compatibility.
+  subCommands: {
+    add: oosAddCommand,
+    list: oosListCommand,
+    remove: oosRemoveCommand,
+    rm: oosRemoveCommand,
+  },
 });
 
 // ── Priority subcommands (PRD 0019 / T5) ──────────────────────────────────────
@@ -3209,6 +3302,153 @@ const dependCommand = command({
   },
 });
 
+// ── PRD ↔ idea reference join (PRD 0027 / T4) ─────────────────────────────────
+//
+// Sub-tree `depot prd idea` mirrors `prd tag` / `prd depend`. A `prd_ideas` row
+// records that an idea was *source material* for the PRD; it is attached to the
+// logical PRD (the domain resolves a revision id → logical id) so it survives
+// forks. Linking is purely additive and never changes `idea.status` —
+// referencing ≠ committing.
+
+const prdIdeaAddCommand = command({
+  meta: { name: "add", description: "Link a source idea to a PRD (idempotent)" },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD id (logical id or revision id)",
+    },
+    ideaId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Idea id to link as source material",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainIdeas.linkIdeaToPrd(args.prdId, args.ideaId).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "IdeaNotFoundError") {
+        return output.error("not_found", `Idea not found: ${args.ideaId}`);
+      }
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      if (e._tag === "CrossEntityError") {
+        return output.error("cross_entity", e.message);
+      }
+      throw e;
+    }
+    if (output.isJson()) {
+      output.success({ item: result.item });
+    } else {
+      output.print(`Linked idea ${args.ideaId} → PRD ${args.prdId}`);
+    }
+  },
+});
+
+const prdIdeaRemoveCommand = command({
+  meta: { name: "remove", description: "Unlink a source idea from a PRD (idempotent)" },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD id (logical id or revision id)",
+    },
+    ideaId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Idea id to unlink",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainIdeas.unlinkIdeaFromPrd(args.prdId, args.ideaId).pipe(
+        Effect.match({
+          onSuccess: (item) => ({ kind: "ok" as const, item }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      throw e;
+    }
+    if (output.isJson()) {
+      output.success({ prdId: result.item.prdId, ideaId: result.item.ideaId });
+    } else {
+      output.print(`Unlinked idea ${args.ideaId} from PRD ${args.prdId}`);
+    }
+  },
+});
+
+const prdIdeaListCommand = command({
+  meta: { name: "list", description: "List source ideas linked to a PRD" },
+  workspace: true,
+  args: {
+    prdId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "PRD id (logical id or revision id)",
+    },
+  },
+  run: async ({ args, output }) => {
+    const result = await runEffect(
+      DomainIdeas.listPrdIdeas(args.prdId).pipe(
+        Effect.match({
+          onSuccess: (items) => ({ kind: "ok" as const, items }),
+          onFailure: (err) => ({ kind: "err" as const, err }),
+        }),
+      ),
+    );
+    if (result.kind === "err") {
+      const e = result.err;
+      if (e._tag === "PrdNotFoundError") {
+        return output.error("not_found", `PRD not found: ${args.prdId}`);
+      }
+      throw e;
+    }
+    if (output.isJson()) {
+      output.success({ items: result.items });
+      return;
+    }
+    if (result.items.length === 0) {
+      output.print("No source ideas linked to this PRD.");
+      return;
+    }
+    for (const idea of result.items) {
+      const tag = idea.tag ? ` [${idea.tag}]` : "";
+      output.print(`${idea.id}  ${idea.title}  [${idea.status}]${tag}`);
+    }
+  },
+});
+
+const prdIdeaCommand = command({
+  meta: { name: "idea", description: "Manage source ideas linked to a PRD (M:N reference join)" },
+  subCommands: {
+    add: prdIdeaAddCommand,
+    remove: prdIdeaRemoveCommand,
+    list: prdIdeaListCommand,
+  },
+});
+
 export const prdCommand = command({
   meta: { name: "prd", description: "PRD management" },
   subCommands: {
@@ -3248,5 +3488,7 @@ export const prdCommand = command({
     tag: tagCommand,
     annex: annexCommand,
     depend: dependCommand,
+    prototype: prototypeCommand,
+    idea: prdIdeaCommand,
   },
 });

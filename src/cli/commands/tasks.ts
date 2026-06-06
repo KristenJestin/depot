@@ -7,6 +7,7 @@ import * as DomainTasks from "#/modules/tasks/domain";
 import * as DomainPrds from "#/modules/prds/domain";
 import * as DomainReviews from "#/modules/reviews/domain";
 import * as DomainRepos from "#/modules/projects/repos";
+import * as DomainTaskPages from "#/modules/prds/task-pages";
 import { effortSchema, taskKindSchema, triageStateSchema } from "#/shared/schemas";
 import { VALID_TRIAGE_STATES } from "#/shared/validator";
 import { getTaskDescriptionSections } from "#/modules/tasks/spec";
@@ -1060,6 +1061,85 @@ const triageCommand = command({
   },
 });
 
+// ── Page links (PRD 0030 / issue 04) ──────────────────────────────────────────
+
+const pageAddCommand = command({
+  meta: { name: "add", description: "Link a prototype page to a task (idempotent)" },
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+    pageId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Prototype page ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const link = await runEffect(DomainTaskPages.linkTaskPage(args.taskId, args.pageId));
+    if (output.isJson()) output.success({ item: link });
+    else output.print(`Linked task ${args.taskId} ↔ page ${args.pageId}`);
+  },
+});
+
+const pageRemoveCommand = command({
+  meta: { name: "remove", description: "Unlink a prototype page from a task (idempotent)" },
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+    pageId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Prototype page ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    await runEffect(DomainTaskPages.unlinkTaskPage(args.taskId, args.pageId));
+    if (output.isJson()) output.success({ taskId: args.taskId, pageId: args.pageId });
+    else output.print(`Unlinked task ${args.taskId} ↔ page ${args.pageId}`);
+  },
+});
+
+const pageListCommand = command({
+  meta: { name: "list", description: "List the prototype pages a task realises" },
+  args: {
+    taskId: {
+      schema: Schema.String.pipe(Schema.minLength(1)),
+      required: true,
+      positional: true,
+      description: "Task ID",
+    },
+  },
+  run: async ({ args, output }) => {
+    const pages = await runEffect(DomainTaskPages.listTaskPages(args.taskId));
+    if (output.isJson()) {
+      output.success({ items: pages });
+      return;
+    }
+    if (pages.length === 0) {
+      output.print("No pages linked to this task.");
+      return;
+    }
+    for (const page of pages) {
+      output.print(`${page.id}  ${page.slug}  ${page.title}`);
+    }
+  },
+});
+
+const pageCommand = command({
+  meta: { name: "page", description: "Link prototype pages a task realises" },
+  subCommands: { add: pageAddCommand, remove: pageRemoveCommand, list: pageListCommand },
+});
+
 export const taskCommand = command({
   meta: { name: "task", description: "Task management" },
   subCommands: {
@@ -1076,6 +1156,7 @@ export const taskCommand = command({
     skip: skipCommand,
     delete: deleteCommand,
     reactivate: reactivateCommand,
+    page: pageCommand,
   },
 });
 

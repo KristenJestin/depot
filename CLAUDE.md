@@ -9,7 +9,7 @@
 - CLI entrypoint: `src/cli/index.ts`
 - Main product context lives in `docs/index.md` and `docs/concepts/index.md`
 - Current and planned work is tracked in `docs/roadmap.md`
-- Feature specs (PRDs) live in `.prds/` as numbered Markdown files
+- Feature specs (PRDs) live under `.scratch/<feature-slug>/PRD.md` (one feature per directory; implementation issues in `issues/`). See `docs/agents/issue-tracker.md`.
 - Distribution target: npm global install (`npm install -g @netsirk/depot`); Node.js ≥ 25 is required on the user's machine — no standalone binary, no self-contained bundle
 
 Use `docs/index.md` and `docs/concepts/index.md` for product intent and domain language. Use `docs/roadmap.md` to understand implementation direction, but treat the current codebase as the source of truth for behavior.

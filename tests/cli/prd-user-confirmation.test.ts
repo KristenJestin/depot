@@ -19,6 +19,10 @@
  * The `close` wrapper additionally verifies that a single `--user-confirmed`
  * quote is propagated to the three internal transitions (activate →
  * request-review → done).
+ *
+ * Closing transitions (`done`, `close`, and the FINAL `phase-advance`) are
+ * stricter than case (b) above: the quote must carry explicit close intent, so
+ * a generic "go" / "ok" is rejected there even though it is non-empty.
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -125,7 +129,7 @@ async function getProjectId(db: Database, prdRevisionId: string): Promise<string
   return row.projectId;
 }
 
-const VALID_QUOTE = "go ahead, mark it ready";
+const VALID_QUOTE = "go ahead, mark it done";
 
 describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
   let db: Database;
@@ -476,7 +480,7 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
+    it("(b) rejects empty / whitespace and accepts a short but explicit close quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const cmd = await getSubCommand(prdCommand, "done");
 
@@ -499,9 +503,10 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
         exit.mockRestore();
       }
 
+      // A short quote is fine as long as it carries explicit close intent.
       const out = vi.spyOn(console, "log").mockImplementation(() => {});
       await withoutBypass(async () => {
-        await cmd.run({ args: { prdId: id, userConfirmed: "go" } });
+        await cmd.run({ args: { prdId: id, userConfirmed: "done" } });
       });
       out.mockRestore();
 
@@ -509,7 +514,27 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       expect(shortAfter!.status).toBe("done");
 
       const payload = await findLatestPayload(db, id, "prd_done");
-      expect(payload!["userConfirmation"]).toBe("go");
+      expect(payload!["userConfirmation"]).toBe("done");
+    });
+
+    it("(e) rejects a non-empty approval that carries no close intent", async () => {
+      const id = await setupReview();
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const cmd = await getSubCommand(prdCommand, "done");
+
+      const exit = expectProcessExit();
+      const stderr = await captureConsoleError(async () => {
+        await withoutBypass(async () => {
+          await expect(
+            cmd.run({ args: { prdId: id, userConfirmed: "ok pour moi, commit tout" } }),
+          ).rejects.toThrow("process.exit:1");
+        });
+      });
+      // The generic approval is refused; the PRD stays in review.
+      expect(stderr).toMatch(/explicit|close|CLOSED/);
+      const after = await db.query.prdRevisions.findFirst({ where: { id } });
+      expect(after!.status).toBe("review");
+      exit.mockRestore();
     });
 
     it("(c) succeeds with a valid quote and persists it in the activity log payload", async () => {
@@ -662,6 +687,53 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       const payload = await findLatestPayload(db, id, "phase_advanced");
       expect(payload!["userConfirmation"]).toBeNull();
     });
+
+    it("(e) the final (closing) advance requires explicit close intent", async () => {
+      // Single phase → advancing closes the PRD, so the close-intent rule fires.
+      const prd = await createPrd(db, { projectId, title: "Final phase PRD" });
+      const only = await createTask(db, {
+        prdRevisionId: prd.id,
+        title: "Only task",
+        description: "x",
+        doneCriteria: "x",
+        effort: "s",
+        phaseNumber: 1,
+      });
+      await db
+        .update(prdRevisions)
+        .set({ status: "ready", currentPhase: 1 })
+        .where(eq(prdRevisions.id, prd.id));
+      await activatePrd(db, prd.id, workspaceId);
+      await startTask(db, only.id);
+      await completeTask(db, only.id);
+      await requestReviewPrd(db, prd.id);
+
+      const { prdCommand } = await import("#/cli/commands/prds");
+      const cmd = await getSubCommand(prdCommand, "phase-advance");
+
+      const exit = expectProcessExit();
+      const stderr = await captureConsoleError(async () => {
+        await withoutBypass(async () => {
+          await expect(cmd.run({ args: { prdId: prd.id, userConfirmed: "go" } })).rejects.toThrow(
+            "process.exit:1",
+          );
+        });
+      });
+      expect(stderr).toMatch(/explicit|close|CLOSED/);
+      expect((await db.query.prdRevisions.findFirst({ where: { id: prd.id } }))!.status).toBe(
+        "review",
+      );
+      exit.mockRestore();
+
+      const out = vi.spyOn(console, "log").mockImplementation(() => {});
+      await withoutBypass(async () => {
+        await cmd.run({ args: { prdId: prd.id, userConfirmed: "done le prd" } });
+      });
+      out.mockRestore();
+      expect((await db.query.prdRevisions.findFirst({ where: { id: prd.id } }))!.status).toBe(
+        "done",
+      );
+    });
   });
 
   // ── prd cancel ─────────────────────────────────────────────────────────────
@@ -780,7 +852,7 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       exit.mockRestore();
     });
 
-    it("(b) rejects empty / whitespace --user-confirmed but accepts a short non-empty quote", async () => {
+    it("(b) rejects empty / generic approvals, accepts a short but explicit close quote", async () => {
       const { prdCommand } = await import("#/cli/commands/prds");
       const cmd = await getSubCommand(prdCommand, "close");
 
@@ -803,9 +875,26 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
         exit.mockRestore();
       }
 
+      // `close` walks all the way to done, so a generic approval is refused too.
+      {
+        const exit = expectProcessExit();
+        const stderr = await captureConsoleError(async () => {
+          await withoutBypass(async () => {
+            await expect(
+              cmd.run({ args: { prdId: id, userConfirmed: "ok pour moi" } }),
+            ).rejects.toThrow("process.exit:1");
+          });
+        });
+        expect(stderr).toMatch(/explicit|close|CLOSED/);
+        const after = await db.query.prdRevisions.findFirst({ where: { id } });
+        expect(after!.status).toBe("ready");
+        exit.mockRestore();
+      }
+
+      // A short but explicit close quote takes the PRD all the way to done.
       const out = vi.spyOn(console, "log").mockImplementation(() => {});
       await withoutBypass(async () => {
-        await cmd.run({ args: { prdId: id, userConfirmed: "go" } });
+        await cmd.run({ args: { prdId: id, userConfirmed: "done" } });
       });
       out.mockRestore();
 
@@ -813,7 +902,7 @@ describe("PRD lifecycle --user-confirmed gate (PRD 0012 / T1)", () => {
       expect(shortAfter!.status).toBe("done");
 
       const done = await findLatestPayload(db, id, "prd_done");
-      expect(done!["userConfirmation"]).toBe("go");
+      expect(done!["userConfirmation"]).toBe("done");
     });
 
     it("(c) propagates a single quote across the three internal transitions", async () => {

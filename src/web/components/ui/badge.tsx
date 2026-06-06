@@ -12,6 +12,7 @@ const badgeVariants = cva(
     variants: {
       variant: {
         neutral: "border-border bg-secondary text-secondary-foreground",
+        success: "border-success/30 bg-success-soft text-success-foreground",
         subtle: "border-transparent bg-muted text-muted-foreground",
         outline: "border-border bg-transparent text-muted-foreground",
         current: "border-transparent bg-secondary text-foreground",
