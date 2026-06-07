@@ -212,11 +212,16 @@ function buildCodexSkillContent(mode: InstallMode): string {
 }
 
 function buildCodexSkillMetadata(mode: InstallMode): string {
-  const label = mode === "prd" ? "Depot PRD" : "Depot Dev";
+  const labelByMode: Record<InstallMode, string> = {
+    prd: "Depot PRD",
+    dev: "Depot Dev",
+    doc: "Depot Doc",
+    ship: "Depot Ship",
+  };
 
   return [
     "interface:",
-    `  display_name: "${label}"`,
+    `  display_name: "${labelByMode[mode]}"`,
     `  short_description: "Load live depot ${mode} context on demand"`,
     "policy:",
     "  allow_implicit_invocation: false",

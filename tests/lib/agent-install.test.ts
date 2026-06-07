@@ -171,5 +171,32 @@ describe("agent install helpers", () => {
         "  allow_implicit_invocation: false",
       ].join("\n"),
     );
+    expect(writes.map((write) => write.content)).toContain(
+      [
+        "interface:",
+        '  display_name: "Depot Dev"',
+        '  short_description: "Load live depot dev context on demand"',
+        "policy:",
+        "  allow_implicit_invocation: false",
+      ].join("\n"),
+    );
+    expect(writes.map((write) => write.content)).toContain(
+      [
+        "interface:",
+        '  display_name: "Depot Doc"',
+        '  short_description: "Load live depot doc context on demand"',
+        "policy:",
+        "  allow_implicit_invocation: false",
+      ].join("\n"),
+    );
+    expect(writes.map((write) => write.content)).toContain(
+      [
+        "interface:",
+        '  display_name: "Depot Ship"',
+        '  short_description: "Load live depot ship context on demand"',
+        "policy:",
+        "  allow_implicit_invocation: false",
+      ].join("\n"),
+    );
   });
 });
