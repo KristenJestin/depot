@@ -9,3 +9,4 @@ test-results/
 dev-server*.log
 playwright-report/
 
+.scratch/

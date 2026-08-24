@@ -184,8 +184,7 @@ const profileSetCommand = command({
     audience: { schema: Schema.String },
     addSource: {
       schema: Schema.String,
-      description:
-        "Add a source in 'name=path' form (e.g. 'api=./nyx-api'). Repeat with comma.",
+      description: "Add a source in 'name=path' form (e.g. 'api=./nyx-api'). Repeat with comma.",
     },
     sourcesJson: {
       schema: Schema.String,
